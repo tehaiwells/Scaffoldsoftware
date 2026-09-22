@@ -13,6 +13,29 @@ export const materialsMethods={
   assertTruckTrip(truck,siteId){const open=this.repo.all('request').filter(r=>r.truck===truck.id&&['ALLOCATED','PARTIALLY ALLOCATED'].includes(r.status));requireRule(!open.some(r=>r.site!==siteId),'One destination per truck trip.');const tripTasks=this.tasks().filter(t=>t.type==='MOVE'&&t.state!=='CANCELLED'&&open.some(r=>r.id===t.request));requireRule(!this.containers().some(c=>c.location===truck.id&&!tripTasks.some(t=>t.container===c.id)),'Unload the truck before planning a new trip.');},
   receiveStock(input,event){const c=this.repo.get(input.container,'container');this.assertFree(c);const p=this.effective(input.product);requireRule(this.db.prepare('SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(this.user.company_id,p.system)?.enabled,'Enable this system before adding new stock.');const quantity=integer(input.quantity,'Quantity',1,1000000),reason=label(input.reason,'Reason');requireRule(c.location&&this.repo.get(c.location).kind!=='truck','Stock must be received into storage, not onto a truck.');this.repo.balance(c.id,p.id,quantity);if(c.capacity!==null&&p.unitWeight!==null)requireRule(this.weight(c)<=c.capacity,'Container exceeds its configured loaded capacity.');this.repo.event(this.user.id,event,{container:c.id,product:p.id,quantity,destination:c.location,reason:input.supplier?`${reason} · ${label(input.supplier,'Supplier')}`:reason,key:this.key});return c;},
   purchase(input){return this.receiveStock(input,'PURCHASE');},
+  stockIntake(input){
+    const yard=this.repo.get(input.location,'yard');const p=this.effective(input.product);requireRule(this.db.prepare('SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(this.user.company_id,p.system)?.enabled,'Enable this system before adding new stock.');requireRule(!p.retired,'This product has been removed from the catalogue.');
+    const event=input.kind==='ORIGINAL'?'OPENING_BALANCE':'PURCHASE';const reason=label(input.reason??(event==='PURCHASE'?'Purchased stock':'Original stock on hand'),'Reason');
+    let left=integer(input.quantity,'Quantity',1,1000000);const pack=p.packQuantity??null;
+    const room=c=>{const held=this.repo.quantity(c.id,p.id);let r=Infinity;if(pack!==null)r=Math.min(r,pack-held);if(c.capacity!==null&&p.unitWeight!==null){let w=null;try{w=this.weight(c);}catch{return 0;}r=Math.min(r,Math.floor((c.capacity-w)/p.unitWeight));}return Math.max(0,r);};
+    const usable=c=>{if(c.type!=='STILLAGE'||c.condition!=='SERVICEABLE')return false;const lines=this.repo.lines(c.id);if(lines.length&&(lines.length>1||lines[0].product_id!==p.id))return false;try{this.assertFree(c);}catch{return false;}return room(c)>0;};
+    const put=(c,quantity)=>{this.repo.balance(c.id,p.id,quantity);this.repo.event(this.user.id,event,{container:c.id,product:p.id,quantity,destination:yard.id,reason,key:this.key});};
+    const filled=[];
+    for(const c of this.containers().filter(c=>c.location===yard.id).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))){if(!left)break;if(!usable(c))continue;const quantity=Math.min(left,room(c));if(!quantity)continue;put(c,quantity);filled.push({container:c.id,name:c.name,quantity,created:false,stackedOn:null});left-=quantity;}
+    let created=0;
+    while(left>0){requireRule(created<50,'Too many stillages needed for one intake. Add the material in smaller batches.');const c=this.stackStillage(yard);const quantity=Math.min(left,room(c));requireRule(quantity>0,'A new stillage cannot hold this product. Check its pack size and weight.');put(c,quantity);filled.push({container:c.id,name:c.name,quantity,created:true,stackedOn:c.support?this.repo.get(c.support,'container').name:null});left-=quantity;created++;}
+    const parts=filled.map(f=>f.name+' ('+f.quantity+(f.created?(f.stackedOn?', new · stacked on '+f.stackedOn:', new'):'')+')');
+    return {product:p.id,filled,message:input.quantity+' × '+p.name+' → '+parts.join(', ')};
+  },
+  stackStillage(yard){
+    const stored=this.containers().filter(c=>c.location===yard.id),name=(()=>{const names=new Set(this.repo.all('container').map(c=>c.name));let n=1;while(names.has('S-'+String(n).padStart(3,'0')))n++;return 'S-'+String(n).padStart(3,'0');})();
+    const draft={type:'STILLAGE',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000};
+    const tops=stored.filter(c=>c.type==='STILLAGE'&&!stored.some(o=>o.support===c.id)).map(top=>{let level=1,h=top.height,cur=top;while(cur.support){cur=stored.find(o=>o.id===cur.support);if(!cur)break;level++;h+=cur.height;}return {top,level,h};}).filter(s=>s.level<7&&s.h+draft.height<=(yard.height??10000)).sort((a,b)=>a.level-b.level||a.top.name.localeCompare(b.top.name,undefined,{numeric:true}));
+    for(const s of tops){const position={x:s.top.x,y:s.top.y,rotation:s.top.rotation,support:s.top.id};try{this.validatePlacement({...draft,rotation:position.rotation,support:position.support},yard.id,position);return this.container({name,location:yard.id,...draft,x:position.x,y:position.y,rotation:position.rotation,support:position.support});}catch(error){if(/payload|unknown|stocktake/.test(error.message))throw error;}}
+    let position=null;try{position=this.positionFor({...draft,rotation:0,support:null},yard.id);}catch(error){if(/payload|unknown|stocktake/.test(error.message))throw error;}
+    requireRule(position,'No clear space in the yard for another stillage. Enlarge the yard or move stock first.');
+    return this.container({name,location:yard.id,...draft,x:position.x,y:position.y,rotation:position.rotation});
+  },
   removeStock(input){
     const c=this.repo.get(input.container,'container');this.assertSite(c.location);const location=this.repo.get(c.location);
     requireRule(['yard','site'].includes(location.kind),'Stock can only be removed from a yard or site, not from a truck or handling equipment.');

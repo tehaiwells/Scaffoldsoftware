@@ -18,7 +18,7 @@ export class Simulation {
   execute(action,input,key){
     requireRule(typeof key==='string'&&key.length>=8&&key.length<=150,'A valid idempotency key is required.');
     if(operational.includes(action))this.auth.require(this.user,'operations.manage');
-    else if(['opening','purchase','removeStock','purgeDemo','approveCount'].includes(action))this.auth.require(this.user,'stock.adjust');
+    else if(['opening','purchase','stockIntake','removeStock','purgeDemo','approveCount'].includes(action))this.auth.require(this.user,'stock.adjust');
     else if(['request','returnStock','cancelRequest','createLoadList','cancelLoadList'].includes(action))this.auth.require(this.user,'requests.create');
     else throw new AppError(404,'Unknown command.');
     const fingerprint=createHash('sha256').update(JSON.stringify({actor:this.user.id,action,input})).digest('hex');this.key=key;
