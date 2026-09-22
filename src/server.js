@@ -8,7 +8,7 @@ import { Simulation, startScheduler } from './simulation.js';
 
 export function createApp(db) {
   const service=new Service(db), attempts=new Map();
-  const assets={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/style.css':['style.css','text/css']};
+  const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/style.css':['style.css','text/css']};
   return createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -40,7 +40,8 @@ export function createApp(db) {
       if(req.method==='GET'&&path==='/api/me') send(200,service.snapshot(user));
       else if(req.method==='GET'&&path==='/api/state') send(200,simulation.snapshot(Number(new URL(req.url,'http://localhost').searchParams.get('page')??0)));
       else if(req.method==='GET'&&path==='/api/history') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.history(Number(query.get('limit')??100),Number(query.get('after')??0)));}
-      else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${kind==='stock'?'stock':'history'}.csv"`});res.end(output);}
+      else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${['stock','register','additions','removals','yardlist'].includes(kind)?kind:'history'}.csv"`});res.end(output);}
+      else if(req.method==='POST'&&path==='/api/placement-preview') send(200,simulation.placementPreview(body));
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}

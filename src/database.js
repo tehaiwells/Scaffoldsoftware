@@ -30,6 +30,7 @@ export function openDatabase(path) {
   for (const [id,name] of [['quickstage','Quickstage'],['at-pac','AT-PAC'],['tube-clip','Tube & Clip']]) db.prepare('INSERT OR IGNORE INTO scaffold_systems VALUES(?,?)').run(id,name);
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=2').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/002_simulation.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=3').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/003_memberships.sql',import.meta.url),'utf8')));
+  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=4').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/004_manager_stock_adjust.sql',import.meta.url),'utf8')));
   return db;
 }
 

@@ -53,3 +53,11 @@ Snapshot JSON size: **48,920 bytes**. This measures backend processing, not netw
 ## Source handling
 
 No manufacturer PDF was present in the project or used. The excluded internal AT-PAC document was not read. Seed facts are explicitly synthetic, stored separately in catalogues/synthetic.json. All real manufacturer and operating values remain subject to review. No paid messages, public deployment or external document uploads occurred.
+
+
+## Visual refresh
+Shared design layer in public/design.css; code-native SVG artwork in public/art.js; improved truck deck drawing in public/visual.js. Browser reviewed Home, Yard, Stock, Trucks and Settings, checked Sites and Requests navigation, and checked Home at 390px width. Fixed the narrow-screen header and hero spacing. Browser error log empty during final review. Syntax checks: 26 JavaScript files; regression suite: 38 passed. Storage records and movement rules preserved.
+
+
+## Mounted forklift driving and handling
+Added mounted right-click driving and explicit pickup / place controls. Browser walkthrough mounted Worker 1, collected S-001, drove with cargo, and placed it at a new ground position; no browser errors. Regression checks cover exact stock conservation, unique pickup and placement events, overload, out-of-bounds routes, competing claims, blocked placement retaining cargo, pause, and restored persisted state.
