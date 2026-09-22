@@ -11,7 +11,7 @@ import { logisticsMethods } from './domain/logistics.js';
 import { movementMethods } from './domain/movement.js';
 import { materialsMethods } from './domain/materials.js';
 import { fleetMethods } from './domain/fleet.js';
-const operational=['retire','quickAdjust','allocateLoadList','workerCommand','parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount'];
+const operational=['siteBoundary','retire','quickAdjust','allocateLoadList','workerCommand','parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount'];
 export class Simulation {
   constructor(db,user){this.db=db;this.user=user;this.auth=new Service(db);this.repo=new Repository(db,user.company_id);}
   assertSite(id){if(this.auth.permissions(this.user).includes('operations.manage'))return;const object=this.repo.get(id);let site=object;if(object.kind==='container')site=this.repo.get(object.location);if(object.kind==='truck')site=this.repo.get(object.at);requireRule(site.kind==='site'&&site.supervisor===this.user.id,'You can only access your assigned sites.');}
