@@ -10,7 +10,8 @@ import { inventoryMethods,active } from './domain/inventory.js';
 import { logisticsMethods } from './domain/logistics.js';
 import { movementMethods } from './domain/movement.js';
 import { materialsMethods } from './domain/materials.js';
-const operational=['allocateLoadList','workerCommand','parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount'];
+import { fleetMethods } from './domain/fleet.js';
+const operational=['quickAdjust','allocateLoadList','workerCommand','parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount'];
 export class Simulation {
   constructor(db,user){this.db=db;this.user=user;this.auth=new Service(db);this.repo=new Repository(db,user.company_id);}
   assertSite(id){if(this.auth.permissions(this.user).includes('operations.manage'))return;const object=this.repo.get(id);let site=object;if(object.kind==='container')site=this.repo.get(object.location);if(object.kind==='truck')site=this.repo.get(object.at);requireRule(site.kind==='site'&&site.supervisor===this.user.id,'You can only access your assigned sites.');}
@@ -28,7 +29,7 @@ export class Simulation {
   snapshot(page=0){
     integer(page,'Container page',0,1000000);
     const operations=this.auth.permissions(this.user).includes('operations.manage');const sites=this.repo.all('site').filter(s=>operations||s.supervisor===this.user.id);const siteIds=new Set(sites.map(s=>s.id));
-    const trucks=this.repo.all('truck').filter(t=>operations||siteIds.has(t.at)||siteIds.has(t.destination));const truckIds=new Set(trucks.map(t=>t.id));
+    const trucks=this.repo.all('truck').filter(t=>!t.retired&&(operations||siteIds.has(t.at)||siteIds.has(t.destination)));const truckIds=new Set(trucks.map(t=>t.id));
     const tasks=this.tasks().filter(t=>operations||siteIds.has(t.handling));const machineIds=new Set(tasks.filter(t=>t.picked&&active(t)).map(t=>t.machine));
     const allContainers=this.containers().filter(c=>operations||siteIds.has(c.location)||truckIds.has(c.location)||machineIds.has(c.location));
     const reservations=this.repo.all('reservation').filter(r=>r.active);
@@ -42,7 +43,7 @@ export class Simulation {
   scopedHistory(limit,after){if(this.auth.permissions(this.user).includes('operations.manage'))return this.repo.history(limit,after);return this.db.prepare(`SELECT l.* FROM ledger l WHERE l.company_id=? AND l.sequence>? AND EXISTS(SELECT 1 FROM objects s WHERE s.company_id=l.company_id AND s.kind='site' AND json_extract(s.data,'$.supervisor')=? AND (s.id=l.source OR s.id=l.destination OR EXISTS(SELECT 1 FROM objects t WHERE t.company_id=l.company_id AND t.id=l.task_id AND json_extract(t.data,'$.handling')=s.id))) ORDER BY l.sequence LIMIT ?`).all(this.user.company_id,after,this.user.id,limit);}
   export(kind){const snapshot=this.snapshot();const name=id=>snapshot.products.find(p=>p.id===id)?.name??id;if(kind==='register'){return csv([['Product','System','Category','In yard','At sites','On trucks','Total','Reserved','Available','Containers'],...snapshot.register.map(r=>[r.name,r.system,r.category,r.yard,r.site,r.truck,r.quantity,r.reserved,r.available,r.containers])]);}if(kind==='additions'||kind==='removals'){return csv([['Sequence','Event','Product','Container','Quantity','Location','Reason','Time'],...this.stockLog(kind,1000).map(l=>[l.sequence,l.event,name(l.product_id),l.container_id,l.quantity,l.destination??l.source,l.reason,l.created_at])]);}if(kind==='yardlist'){return csv([['Yard list','Status','Site','Truck','Product','Requested','Reserved','Loaded','Delivered','Line status'],...snapshot.loadLists.flatMap(l=>l.lines.map(x=>[l.name,l.status,l.site,l.truckName,x.name,x.quantity,x.reserved,x.loaded,x.delivered,x.status]))]);}if(kind==='stock'){for(let page=1;page*100<snapshot.containerCount;page++){const next=this.snapshot(page);snapshot.balances.push(...next.balances);snapshot.containers.push(...next.containers);}const rows=[['Product','Container','Location','Condition','Physical quantity','Reserved quantity'],...snapshot.balances.map(l=>[snapshot.products.find(p=>p.id===l.product_id)?.name,snapshot.containers.find(c=>c.id===l.container)?.name,l.location,l.condition,l.quantity,l.reserved])];return csv(rows);}return csv([['Sequence','Event','Product','Container','Quantity','From','To','Reason','Time'],...this.scopedHistory(10000,0).map(l=>[l.sequence,l.event,l.product_id,l.container_id,l.quantity,l.source,l.destination,l.reason,l.created_at])]);}
 }
-Object.assign(Simulation.prototype,catalogueMethods,inventoryMethods,logisticsMethods,movementMethods,workerMethods,forkliftMethods,materialsMethods);
+Object.assign(Simulation.prototype,catalogueMethods,inventoryMethods,logisticsMethods,movementMethods,workerMethods,forkliftMethods,materialsMethods,fleetMethods);
 function csv(rows){return rows.map(row=>row.map(value=>'"'+String(value??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(',')).join('\r\n');}
 
 export function startScheduler(db){

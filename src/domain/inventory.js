@@ -19,7 +19,7 @@ export const inventoryMethods={
     const value={name:label(input.name),segments:input.segments,closed:true,...geometry,height:input.height??10000,gate,loading,mode:'DEMO ONLY'};
     return old?this.repo.save({...old,...value}):this.repo.add('yard',value);
   },
-  containers(){return this.repo.all('container');},tasks(){return this.repo.all('task');},
+  containers(){return this.repo.all('container').filter(c=>!c.retired);},tasks(){return this.repo.all('task');},
   container(input){
     const location=this.repo.get(input.location);requireRule(['yard','site'].includes(location.kind),'Register containers at a yard or site.');this.assertSite(location.id);
     requireRule(['STILLAGE','RACK','CAGE','BUNDLE'].includes(input.type),'Choose a container type.');
