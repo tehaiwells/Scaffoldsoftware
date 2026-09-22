@@ -11,13 +11,35 @@ export const inventoryMethods={
   },
   containerSettings(input){const c=this.repo.get(input.id,'container');this.assertFree(c);c.tare=nullable(input.tare,'Tare (g)');c.capacity=input.capacity===undefined?c.capacity:nullable(input.capacity,'Loaded capacity (g)');c.envelopeLength=integer(input.envelopeLength,'Loaded length',c.length);c.envelopeWidth=integer(input.envelopeWidth,'Loaded width',c.width);this.validatePlacement(c,c.location,c);this.repo.save(c);this.repo.event(this.user.id,'CONTAINER_SETTINGS',{container:c.id,reason:label(input.reason,'Reason'),key:this.key});return c;},
   yard(input){
-    const geometry=polygon(input.segments,input.closed);integer(input.height??10000,'Yard height',1,100000);
-    const old=input.id?this.repo.get(input.id,'yard'):null;
-    const gate=input.gate??old?.gate??{x:1000,y:1000},loading=input.loading??old?.loading??{x:1000,y:1000};
-    for(const p of [gate,loading]){integer(p.x,'Position x',-1000000);integer(p.y,'Position y',-1000000);requireRule(fitsPolygon({x:p.x,y:p.y,w:2000,h:1500},geometry.points),'Gate and loading position need a clear 2 m × 1.5 m footprint inside the yard.');}
-    if(old){requireRule(!this.repo.all('resource').some(r=>r.location===old.id&&(r.mountedOn||r.drive||r.cargo||r.walk)),'Stop workers and unload and dismount forklifts before editing the yard.');requireRule(!this.tasks().some(t=>active(t)&&(t.from===old.id||t.to===old.id)),'Finish the yard movements before editing its boundary.');for(const c of this.containers().filter(c=>c.location===old.id)){requireRule(fitsPolygon(rect(c),geometry.points),'The new boundary would exclude stored material.');requireRule(!overlap(rect(c),{...loading,w:2000,h:1500}),'The loading zone would overlap stored material. Move the stillages first.');}}
-    const value={name:label(input.name),segments:input.segments,closed:true,...geometry,height:input.height??10000,gate,loading,mode:'DEMO ONLY'};
-    return old?this.repo.save({...old,...value}):this.repo.add('yard',value);
+    const geometry=polygon(input.segments,input.closed);const height=integer(input.height??10000,'Yard height',1,100000);
+    const old=input.id?this.repo.get(input.id,'yard'):null;const notes=[];
+    const xs=geometry.points.map(q=>q.x),ys=geometry.points.map(q=>q.y),x0=Math.ceil(Math.min(...xs)),y0=Math.ceil(Math.min(...ys)),x1=Math.max(...xs),y1=Math.max(...ys);
+    const fitPoint=(p,what,avoid)=>{integer(p.x,'Position x',-1000000);integer(p.y,'Position y',-1000000);const box=q=>({x:q.x,y:q.y,w:2000,h:1500});if(fitsPolygon(box(p),geometry.points)&&!avoid.some(o=>overlap(box(p),o)))return p;for(let y=y0+500;y<y1;y+=500)for(let x=x0+500;x<x1;x+=500){const q={x,y};if(fitsPolygon(box(q),geometry.points)&&!avoid.some(o=>overlap(box(q),o))){notes.push(what+' moved to '+(x/1000).toFixed(1)+' m, '+(y/1000).toFixed(1)+' m to stay inside the boundary');return q;}}requireRule(false,what+' needs a 2 m × 1.5 m footprint inside the yard.');};
+    const loading=fitPoint(input.loading??old?.loading??{x:1000,y:1000},'Loading zone',[]),gate=fitPoint(input.gate??old?.gate??{x:1000,y:1000},'Gate',[{...loading,w:2000,h:1500}]);
+    if(old){requireRule(!this.repo.all('resource').some(r=>r.location===old.id&&(r.mountedOn||r.mountTarget||r.drive||r.cargo||r.driver||r.claimedBy)),'Dismount forklifts and place their loads before editing the yard.');requireRule(!this.tasks().some(t=>active(t)&&(t.from===old.id||t.to===old.id)),'Finish the yard movements before editing its boundary.');}
+    const value={name:label(input.name),segments:input.segments,closed:true,...geometry,height,gate,loading,mode:'DEMO ONLY'};
+    if(!old)return this.repo.add('yard',value);
+    const yard=this.repo.save({...old,...value});
+    const stored=this.containers().filter(c=>c.location===yard.id),zone={...loading,w:2000,h:1500};
+    requireRule(stored.every(c=>c.height<=height),'Yard height is lower than a stored stillage. Raise the height or move stock first.');
+    const stackHeight=c=>{let h=c.height,cur=c;while(cur?.support){cur=stored.find(o=>o.id===cur.support);h+=cur?.height??0;}return h;};
+    const affected=new Set(stored.filter(c=>!fitsPolygon(rect(c),geometry.points)||overlap(rect(c),zone)||(c.support&&stackHeight(c)>height)).map(c=>c.id));
+    let grew=true;while(grew){grew=false;for(const c of stored)if(c.support&&affected.has(c.support)&&!affected.has(c.id)){affected.add(c.id);grew=true;}}
+    const level=c=>{let n=0,cur=c;while(cur?.support){n++;cur=stored.find(o=>o.id===cur.support);}return n;};const moved=[];
+    const queue=stored.filter(c=>affected.has(c.id)).sort((a,b)=>level(b)-level(a));
+    const crew=this.repo.all('resource').filter(r=>r.enabled&&r.location===yard.id&&Number.isFinite(r.x)&&Number.isFinite(r.y)).map(r=>r.type==='FORKLIFT'?{x:r.x,y:r.y,...this.forkliftShape(r)}:{x:r.x,y:r.y,w:500,h:500});
+    this.relocating=new Set(affected);
+    try{
+      for(const c of queue){this.assertFree(c);const was={x:c.x,y:c.y,rotation:c.rotation,support:c.support};const clear=p=>!crew.some(o=>overlap(rect(c,p),o));let position=null;try{const p=this.positionFor(c,yard.id);if(clear(p))position=p;}catch(error){if(/payload|unknown|stocktake/.test(error.message))throw error;}
+        if(!position){scan:for(const rotation of [0,90])for(let y=y0;y<y1;y+=500)for(let x=x0;x<x1;x+=500){const candidate={x,y,rotation,support:null};if(!clear(candidate))continue;try{this.validatePlacement(c,yard.id,candidate);position=candidate;break scan;}catch(error){if(/payload|unknown|stocktake/.test(error.message))throw error;}}}
+        requireRule(position,'The new boundary is too small for the stored stillages ('+c.name+' has no clear space). Enlarge the yard or move stock first.');
+        c.x=position.x;c.y=position.y;c.rotation=position.rotation;c.support=null;c.placedAt=new Date().toISOString();this.repo.save(c);this.relocating.delete(c.id);
+        this.repo.event(this.user.id,'RELOCATED',{container:c.id,source:yard.id,destination:yard.id,reason:'Yard boundary changed: moved from '+was.x+','+was.y+' r'+was.rotation+(was.support?' (unstacked)':'')+' to '+position.x+','+position.y+' r'+position.rotation,key:this.key});moved.push(c.name);}
+    }finally{this.relocating=null;}
+    const blocked=this.containers().filter(c=>c.location===yard.id).map(c=>rect(c));
+    for(const r of this.repo.all('resource').filter(r=>r.enabled&&r.location===yard.id)){if(r.walk){r.walk=null;r.workerMode='HOLD';r.workerReason='Yard boundary changed; give a new move order.';}const footprint=r.type==='FORKLIFT'?{x:r.x,y:r.y,...this.forkliftShape(r)}:{x:r.x,y:r.y,w:500,h:500};if(Number.isFinite(r.x)&&(!fitsPolygon(footprint,geometry.points)||blocked.some(o=>overlap(footprint,o)))){r.x=null;r.y=null;}this.repo.save(r);}
+    if(moved.length)notes.unshift('Moved '+moved.length+' stillage(s) inside the new boundary: '+moved.join(', '));
+    return {...yard,relocated:moved,message:notes.length?'Saved. '+notes.join('. ')+'.':'Saved.'};
   },
   containers(){return this.repo.all('container').filter(c=>!c.retired);},tasks(){return this.repo.all('task');},
   container(input){
@@ -28,7 +50,7 @@ export const inventoryMethods={
     this.validatePlacement(data,location.id,data);return this.repo.add('container',data);
   },
   weight(c,extra=[]){let total=c.tare;requireRule(total!==null,'Container tare weight is unknown. Configure it before moving.');for(const line of [...(c.id?this.repo.lines(c.id):[]),...extra]){const p=this.effective(line.product_id);requireRule(p.unitWeight!==null,`${p.name}: unit weight is unknown. Configure it before moving.`);total+=line.quantity*p.unitWeight;requireRule(Number.isSafeInteger(total),'Weight exceeds the supported exact range.');}return total;},
-  occupied(location,exclude){const current=this.containers().filter(c=>c.location===location&&c.id!==exclude);const ids=new Set(current.map(c=>c.id));for(const t of this.tasks().filter(t=>active(t)&&t.to===location&&t.container!==exclude)){if(!ids.has(t.container)){current.push({...this.repo.get(t.container,'container'),...t.position,id:t.container});ids.add(t.container);}}return current;},
+  occupied(location,exclude){const current=this.containers().filter(c=>c.location===location&&c.id!==exclude&&!this.relocating?.has(c.id));const ids=new Set(current.map(c=>c.id));for(const t of this.tasks().filter(t=>active(t)&&t.to===location&&t.container!==exclude)){if(!ids.has(t.container)){current.push({...this.repo.get(t.container,'container'),...t.position,id:t.container});ids.add(t.container);}}return current;},
   validatePlacement(c,destination,position,extra=[]){
     const loc=this.repo.get(destination);requireRule(['yard','site','truck'].includes(loc.kind),'Choose a storage destination.');this.assertSite(destination);
     requireRule(!this.repo.all('count').some(n=>n.state==='OPEN'&&(n.scope===destination||n.scope===c.id)),'An active stocktake locks this destination.');

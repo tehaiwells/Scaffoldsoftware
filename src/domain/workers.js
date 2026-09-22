@@ -3,7 +3,7 @@ const size=500;
 export const workerMethods={
   forkliftPosition(machine){
     if(Number.isFinite(machine.x)&&Number.isFinite(machine.y))return {x:machine.x,y:machine.y};
-    const loc=this.repo.get(machine.location),obstacles=this.occupied(loc.id).map(c=>rect(c));
+    const loc=this.repo.get(machine.location),obstacles=[...this.occupied(loc.id).map(c=>rect(c)),{...loc.loading,w:2000,h:1500},...this.repo.all('resource').filter(r=>r.enabled&&r.location===loc.id&&r.id!==machine.id&&Number.isFinite(r.x)&&Number.isFinite(r.y)).map(r=>r.type==='FORKLIFT'?{x:r.x,y:r.y,...this.forkliftShape(r)}:{x:r.x,y:r.y,w:500,h:500})];
     const index=this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&r.location===loc.id).findIndex(r=>r.id===machine.id);let slot=0;
     for(let y=Math.max(...loc.points.map(p=>p.y))-3000;y>=Math.min(...loc.points.map(p=>p.y));y-=2500)for(let x=Math.min(...loc.points.map(p=>p.x))+1000;x<Math.max(...loc.points.map(p=>p.x));x+=3000){const footprint={x,y,w:2400,h:2000};if(fitsPolygon(footprint,loc.points)&&!obstacles.some(o=>overlap(footprint,o))&&slot++===index)return {x,y};}
     return null;
@@ -12,7 +12,7 @@ export const workerMethods={
   releaseMount(worker){if(worker.mountTarget){const machine=this.repo.get(worker.mountTarget,'resource');if(machine.claimedBy===worker.id){machine.claimedBy=null;this.repo.save(machine);}worker.mountTarget=null;}},
   workerPosition(worker){
     if(Number.isFinite(worker.x)&&Number.isFinite(worker.y))return {x:worker.x,y:worker.y};
-    const loc=this.repo.get(worker.location),obstacles=this.occupied(loc.id).map(c=>rect(c));
+    const loc=this.repo.get(worker.location),obstacles=[...this.occupied(loc.id).map(c=>rect(c)),...(loc.loading?[{...loc.loading,w:2000,h:1500}]:[]),...this.repo.all('resource').filter(r=>r.enabled&&r.location===loc.id&&r.id!==worker.id&&Number.isFinite(r.x)&&Number.isFinite(r.y)).map(r=>r.type==='FORKLIFT'?{x:r.x,y:r.y,...this.forkliftShape(r)}:{x:r.x,y:r.y,w:500,h:500})];
     const peers=this.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===loc.id),index=Math.max(0,peers.findIndex(r=>r.id===worker.id));let slot=0;
     for(let y=Math.min(...loc.points.map(p=>p.y))+750;y<Math.max(...loc.points.map(p=>p.y));y+=1300)for(let x=Math.min(...loc.points.map(p=>p.x))+750;x<Math.max(...loc.points.map(p=>p.x));x+=1300){const footprint={x,y,w:size,h:size};if(fitsPolygon(footprint,loc.points)&&!obstacles.some(o=>overlap(footprint,o))){if(slot++===index)return {x,y};}}
     return null;
