@@ -55,6 +55,6 @@ export function createApp(db) {
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const db=openDatabase(process.env.DATABASE_PATH??'./data/scaffold.sqlite');
   const stop=startScheduler(db);
-  const server=createApp(db);server.listen(Number(process.env.PORT??3000),'127.0.0.1',()=>console.log(`Scaffold Yard: http://127.0.0.1:${server.address().port}`));
+  const server=createApp(db);server.listen(Number(process.env.PORT??3000),process.env.HOST??'127.0.0.1',()=>{const {address,port}=server.address();console.log(`Scaffold Yard: http://127.0.0.1:${port}`+(address!=='127.0.0.1'?` (listening on ${address} — reachable from other devices on this network at http://<this PC's IP>:${port})`:''));});
   for(const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>server.close(()=>{stop();db.close();process.exit(0);}));
 }
