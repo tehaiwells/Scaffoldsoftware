@@ -1,0 +1,56 @@
+import { integer,requireRule,polygon,rect,overlap,contains,fitsPolygon } from './geometry.js';
+import { label,nullable } from './catalogue.js';
+export const active=t=>!['COMPLETE','CANCELLED','FAILED'].includes(t.state);
+export const inventoryMethods={
+  parking(input){
+    const yard=this.repo.get(input.id,'yard');
+    requireRule(['LEFT','RIGHT'].includes(input.side),'Choose the left or right side of the yard.');
+    const vehicleLength=integer(input.vehicleLength,'Overall truck length',1000,30000),vehicleWidth=integer(input.vehicleWidth,'Overall truck width',1000,5000),clearance=integer(input.clearance,'Clearance on each side',0,10000);
+    yard.parking={side:input.side,vehicleLength,vehicleWidth,clearance,length:vehicleLength+2*clearance,width:vehicleWidth+2*clearance};
+    return this.repo.save(yard);
+  },
+  containerSettings(input){const c=this.repo.get(input.id,'container');this.assertFree(c);c.tare=nullable(input.tare,'Tare (g)');c.capacity=input.capacity===undefined?c.capacity:nullable(input.capacity,'Loaded capacity (g)');c.envelopeLength=integer(input.envelopeLength,'Loaded length',c.length);c.envelopeWidth=integer(input.envelopeWidth,'Loaded width',c.width);this.validatePlacement(c,c.location,c);this.repo.save(c);this.repo.event(this.user.id,'CONTAINER_SETTINGS',{container:c.id,reason:label(input.reason,'Reason'),key:this.key});return c;},
+  yard(input){
+    const geometry=polygon(input.segments,input.closed);integer(input.height??10000,'Yard height',1,100000);
+    const old=input.id?this.repo.get(input.id,'yard'):null;
+    const gate=input.gate??{x:1000,y:1000},loading=input.loading??{x:1000,y:1000};
+    for(const p of [gate,loading]){integer(p.x,'Position x',-1000000);integer(p.y,'Position y',-1000000);requireRule(fitsPolygon({x:p.x,y:p.y,w:2000,h:1500},geometry.points),'Gate and loading position need a clear 2 m × 1.5 m footprint inside the yard.');}
+    if(old){requireRule(!this.tasks().some(t=>active(t)&&(t.from===old.id||t.to===old.id)),'Finish the yard movements before editing its boundary.');for(const c of this.containers().filter(c=>c.location===old.id))requireRule(fitsPolygon(rect(c),geometry.points),'The new boundary would exclude stored material.');}
+    const value={name:label(input.name),segments:input.segments,closed:true,...geometry,height:input.height??10000,gate,loading,mode:'DEMO ONLY'};
+    return old?this.repo.save({...old,...value}):this.repo.add('yard',value);
+  },
+  containers(){return this.repo.all('container');},tasks(){return this.repo.all('task');},
+  container(input){
+    const location=this.repo.get(input.location);requireRule(['yard','site'].includes(location.kind),'Register containers at a yard or site.');this.assertSite(location.id);
+    requireRule(['STILLAGE','RACK','CAGE','BUNDLE'].includes(input.type),'Choose a container type.');
+    const data={name:label(input.name),type:input.type,model:input.model??'Company configured DEMO frame',length:integer(input.length,'Frame length',1),width:integer(input.width,'Frame width',1),height:integer(input.height,'Height',1),envelopeLength:integer(input.envelopeLength??input.length,'Loaded length',1),envelopeWidth:integer(input.envelopeWidth??input.width,'Loaded width',1),tare:nullable(input.tare,'Tare (g)'),capacity:nullable(input.capacity,'Capacity (g)'),location:location.id,x:integer(input.x,'X',-1000000),y:integer(input.y,'Y',-1000000),rotation:input.rotation??0,support:input.support??null,condition:'SERVICEABLE',mode:'DEMO ONLY'};
+    requireRule(data.envelopeLength>=data.length&&data.envelopeWidth>=data.width,'Loaded envelope cannot be smaller than its frame.');
+    this.validatePlacement(data,location.id,data);return this.repo.add('container',data);
+  },
+  weight(c,extra=[]){let total=c.tare;requireRule(total!==null,'Container tare weight is unknown. Configure it before moving.');for(const line of [...(c.id?this.repo.lines(c.id):[]),...extra]){const p=this.effective(line.product_id);requireRule(p.unitWeight!==null,`${p.name}: unit weight is unknown. Configure it before moving.`);total+=line.quantity*p.unitWeight;requireRule(Number.isSafeInteger(total),'Weight exceeds the supported exact range.');}return total;},
+  occupied(location,exclude){const current=this.containers().filter(c=>c.location===location&&c.id!==exclude);const ids=new Set(current.map(c=>c.id));for(const t of this.tasks().filter(t=>active(t)&&t.to===location&&t.container!==exclude)){if(!ids.has(t.container)){current.push({...this.repo.get(t.container,'container'),...t.position,id:t.container});ids.add(t.container);}}return current;},
+  validatePlacement(c,destination,position,extra=[]){
+    const loc=this.repo.get(destination);requireRule(['yard','site','truck'].includes(loc.kind),'Choose a storage destination.');this.assertSite(destination);
+    requireRule(!this.repo.all('count').some(n=>n.state==='OPEN'&&(n.scope===destination||n.scope===c.id)),'An active stocktake locks this destination.');
+    integer(position.x,'Position x',-1000000);integer(position.y,'Position y',-1000000);const r=rect(c,position),others=this.occupied(destination,c.id);const support=position.support?others.find(o=>o.id===position.support):null;
+    requireRule(!position.support||support,'The supporting container is not at this destination.');
+    let level=1,height=c.height,ancestor=support;const seen=new Set([c.id]);while(ancestor){requireRule(!seen.has(ancestor.id),'Invalid support cycle.');seen.add(ancestor.id);level++;height+=ancestor.height;ancestor=ancestor.support?others.find(o=>o.id===ancestor.support):null;}
+    if(support){requireRule(support.type===c.type,'Use compatible container supports.');requireRule(contains(rect(support),r),'An upper container must be fully supported.');requireRule(!this.tasks().some(t=>active(t)&&t.container===support.id),'Wait until the supporting container has been placed.');}
+    const max=loc.kind==='truck'?loc.stackLimit:7;requireRule(level<=max,`Maximum ${max} containers high at this destination.`);requireRule(height<=(loc.height??10000),'The stack exceeds the configured height.');
+    for(const other of others){const sameBase=(other.support??null)===(position.support??null);requireRule(!sameBase||!overlap(r,rect(other)),'The destination footprint overlaps another container or reservation.');}
+    if(loc.kind==='truck'){
+      requireRule(['AT_YARD','AT_SITE'].includes(loc.status),'Truck has departed or is not available for loading.');requireRule(contains({x:0,y:0,w:loc.length,h:loc.width},r),'The full loaded envelope does not fit on the truck deck.');
+      const total=others.reduce((sum,o)=>sum+this.projectedWeight(o),0)+this.weight(c,extra);requireRule(total<=loc.payload,'Truck would exceed its configured payload.');
+    }else{requireRule(loc.status!=='ARCHIVED','This site is archived.');requireRule(fitsPolygon(r,loc.points),'The entire footprint must fit inside the storage polygon.');requireRule(!overlap(r,{...loc.loading,w:2000,h:1500}),'Keep the loading position clear.');}
+    return {level,height};
+  },
+  projectedWeight(c){const repack=this.tasks().find(t=>active(t)&&t.type==='REPACK'&&t.container===c.id&&!t.picked);return this.weight(c,repack?[{product_id:repack.product,quantity:repack.quantity}]:[]);},
+  assertFree(container){requireRule(!this.containers().some(c=>c.support===container.id)&&!this.tasks().some(t=>active(t)&&t.position?.support===container.id),'Move the top stillage first.');requireRule(!this.tasks().some(t=>active(t)&&(t.container===container.id||t.sourceContainer===container.id)),'This container already has an active movement.');this.assertCountFree(container);},
+  assertCountFree(c){requireRule(!this.repo.all('count').some(n=>n.state==='OPEN'&&(n.scope===c.id||n.scope===c.location)),'An active stocktake locks this stock. Complete or cancel the count first.');},
+  opening(input){const c=this.repo.get(input.container,'container');this.assertFree(c);const p=this.effective(input.product);requireRule(this.db.prepare('SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(this.user.company_id,p.system)?.enabled,'Enable this system before adding new stock.');const quantity=integer(input.quantity,'Quantity',1,1000000),reason=label(input.reason,'Adjustment reason');requireRule(c.location&&this.repo.get(c.location).kind!=='truck','Opening stock must be recorded in storage.');this.repo.balance(c.id,p.id,quantity);if(c.capacity!==null&&p.unitWeight!==null)requireRule(this.weight(c)<=c.capacity,'Container exceeds its configured loaded capacity.');this.repo.event(this.user.id,'OPENING_BALANCE',{container:c.id,product:p.id,quantity,destination:c.location,reason,key:this.key});return c;},
+  count(input){const scope=this.repo.get(input.scope);requireRule(['container','yard','site'].includes(scope.kind),'Count a container, yard or site.');this.assertSite(scope.id);const containers=this.containers().filter(c=>scope.kind==='container'?c.id===scope.id:c.location===scope.id);requireRule(containers.length,'There are no containers in this count scope.');for(const c of containers)this.assertFree(c);requireRule(!this.tasks().some(t=>active(t)&&t.to===scope.id),'An incoming task must finish before counting.');const lines=containers.flatMap(c=>this.repo.lines(c.id).map(l=>({...l,container:c.id,expected:l.quantity,observed:null})));return this.repo.add('count',{scope:scope.id,name:scope.name,state:'OPEN',lines,counter:this.user.id,createdAt:new Date().toISOString()});},
+  observe(input){const count=this.repo.get(input.id,'count');requireRule(count.state==='OPEN','This count is closed.');this.assertSite(count.scope);requireRule(Array.isArray(input.observed)&&input.observed.length===count.lines.length,'Enter a count for every line.');count.lines=count.lines.map((l,i)=>({...l,observed:integer(input.observed[i],'Observed quantity',0,1000000)}));count.reason=label(input.reason,'Variance reason');count.counter=this.user.id;return this.repo.save(count);},
+  approveCount(input){this.auth.require(this.user,'stock.adjust');const count=this.repo.get(input.id,'count');requireRule(count.state==='OPEN'&&count.lines.every(l=>l.observed!==null)&&count.reason,'Enter all counts and a reason first.');for(const l of count.lines){requireRule(this.repo.quantity(l.container,l.product_id)===l.expected,'Expected stock changed; cancel and restart the count.');const variance=l.observed-l.expected;this.repo.balance(l.container,l.product_id,variance);this.repo.event(this.user.id,'STOCKTAKE_ADJUSTMENT',{product:l.product_id,container:l.container,quantity:variance,source:count.scope,destination:count.scope,reason:count.reason,key:this.key});}count.state='APPROVED';count.approver=this.user.id;count.approvedAt=new Date().toISOString();return this.repo.save(count);},
+  cancelCount(input){const count=this.repo.get(input.id,'count');requireRule(count.state==='OPEN','This count is closed.');this.assertSite(count.scope);count.state='CANCELLED';return this.repo.save(count);},
+  condition(input){const c=this.repo.get(input.id,'container');this.assertFree(c);requireRule(['SERVICEABLE','DAMAGED','QUARANTINED'].includes(input.condition),'Choose a condition.');c.condition=input.condition;this.repo.save(c);this.repo.event(this.user.id,'CONDITION',{container:c.id,reason:label(input.reason,'Reason'),key:this.key});return c;}
+};

@@ -1,0 +1,5 @@
+[
+ {"name":"DEMO ledger — 2 m","reference":"DEMO-L2000","unitWeight":5000,"length":2000,"verification":"DEMO ONLY","packQuantity":100},
+ {"name":"DEMO standard — 1 m","reference":"DEMO-S1000","unitWeight":3000,"length":1000,"verification":"DEMO ONLY","packQuantity":50},
+ {"name":"DEMO fitting — unknown weight","reference":"DEMO-UNKNOWN","unitWeight":null,"verification":"DEMO ONLY","packQuantity":null}
+]

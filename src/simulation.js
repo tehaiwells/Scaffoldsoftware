@@ -1,0 +1,51 @@
+import { randomUUID,createHash } from 'node:crypto';
+import { Repository } from './repository.js';
+import { Service,AppError } from './service.js';
+import { atomic } from './database.js';
+import { requireRule,integer } from './domain/geometry.js';
+import { catalogueMethods } from './domain/catalogue.js';
+import { inventoryMethods,active } from './domain/inventory.js';
+import { logisticsMethods } from './domain/logistics.js';
+import { movementMethods } from './domain/movement.js';
+const operational=['parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount'];
+export class Simulation {
+  constructor(db,user){this.db=db;this.user=user;this.auth=new Service(db);this.repo=new Repository(db,user.company_id);}
+  assertSite(id){if(this.auth.permissions(this.user).includes('operations.manage'))return;const object=this.repo.get(id);let site=object;if(object.kind==='container')site=this.repo.get(object.location);if(object.kind==='truck')site=this.repo.get(object.at);requireRule(site.kind==='site'&&site.supervisor===this.user.id,'You can only access your assigned sites.');}
+  execute(action,input,key){
+    requireRule(typeof key==='string'&&key.length>=8&&key.length<=150,'A valid idempotency key is required.');
+    if(operational.includes(action))this.auth.require(this.user,'operations.manage');
+    else if(['opening','approveCount'].includes(action))this.auth.require(this.user,'stock.adjust');
+    else if(['request','returnStock','cancelRequest'].includes(action))this.auth.require(this.user,'requests.create');
+    else throw new AppError(404,'Unknown command.');
+    const fingerprint=createHash('sha256').update(JSON.stringify({actor:this.user.id,action,input})).digest('hex');this.key=key;
+    return atomic(this.db,()=>{const previous=this.db.prepare('SELECT * FROM commands WHERE company_id=? AND key=?').get(this.user.company_id,key);if(previous){requireRule(previous.fingerprint===fingerprint,'This idempotency key was used for a different action.');return JSON.parse(previous.result);}const result=this[action](input);this.repo.event(this.user.id,'COMMAND',{reason:action,key});this.db.prepare('INSERT INTO commands VALUES(?,?,?,?)').run(this.user.company_id,key,fingerprint,JSON.stringify(result??{ok:true}));return result;});
+  }
+  pause(input){let config=this.repo.all('config')[0];requireRule(config,'Configure yard resources first.');requireRule(typeof input.paused==='boolean','Choose pause or resume.');config.paused=input.paused;return this.repo.save(config);}
+  notify(title,body,site){return this.repo.add('notification',{title,body,site,createdAt:new Date().toISOString(),provider:'IN_APP_ONLY'});}
+  snapshot(page=0){
+    integer(page,'Container page',0,1000000);
+    const operations=this.auth.permissions(this.user).includes('operations.manage');const sites=this.repo.all('site').filter(s=>operations||s.supervisor===this.user.id);const siteIds=new Set(sites.map(s=>s.id));
+    const trucks=this.repo.all('truck').filter(t=>operations||siteIds.has(t.at)||siteIds.has(t.destination));const truckIds=new Set(trucks.map(t=>t.id));
+    const tasks=this.tasks().filter(t=>operations||siteIds.has(t.handling));const machineIds=new Set(tasks.filter(t=>t.picked&&active(t)).map(t=>t.machine));
+    const allContainers=this.containers().filter(c=>operations||siteIds.has(c.location)||truckIds.has(c.location)||machineIds.has(c.location));
+    const reservations=this.repo.all('reservation').filter(r=>r.active);
+    const allBalances=allContainers.flatMap(c=>this.repo.lines(c.id).map(l=>({...l,container:c.id,location:c.location,condition:c.condition,reserved:reservations.filter(r=>r.container===c.id&&r.product===l.product_id).reduce((s,r)=>s+r.quantity,0)})));
+    const containers=allContainers.slice(page*100,(page+1)*100),ids=new Set(containers.map(c=>c.id)),balances=allBalances.filter(l=>ids.has(l.container));
+    const result={mode:'SIMULATION / DEMONSTRATION',yards:operations?this.repo.all('yard'):[],sites,trucks,containers,balances,products:this.repo.all('product').map(p=>this.effective(p.id)),tasks:tasks.filter(t=>active(t)).slice(0,100),recentTasks:tasks.filter(t=>!active(t)).slice(-20),requests:this.repo.all('request').filter(r=>operations||siteIds.has(r.site)),resources:this.repo.all('resource').filter(r=>r.enabled&&(operations||siteIds.has(r.location))),counts:operations?this.repo.all('count').slice(-30):[],config:this.repo.all('config')[0]??null,notifications:this.repo.all('notification').filter(n=>operations||siteIds.has(n.site)).slice(-10),sources:this.repo.all('source'),packaging:this.repo.all('packaging'),deliveries:this.repo.all('delivery').filter(d=>operations||siteIds.has(d.to)||siteIds.has(d.from)).slice(-30)};
+    result.availability={stillages:allContainers.filter(c=>c.type!=='CAGE').length,cages:allContainers.filter(c=>c.type==='CAGE').length,serviceablePieces:allBalances.filter(l=>l.condition==='SERVICEABLE').reduce((s,l)=>s+l.quantity-l.reserved,0)};result.containerCount=allContainers.length;result.page=page;result.pageSize=100;result.stockTotal=allBalances.reduce((s,l)=>s+l.quantity,0);result.reservedTotal=allBalances.reduce((s,l)=>s+l.reserved,0);
+    result.trucks=result.trucks.map(t=>{const loaded=allContainers.filter(c=>c.location===t.id),reserved=this.occupied(t.id).filter(c=>!loaded.some(l=>l.id===c.id));const mass=list=>{try{return list.reduce((sum,c)=>sum+this.projectedWeight(c),0);}catch{return null;}};return {...t,loadedWeight:mass(loaded),reservedWeight:mass(reserved),deckArea:loaded.filter(c=>!c.support).reduce((s,c)=>s+c.envelopeLength*c.envelopeWidth,0)};});return result;
+  }
+  history(limit=100,after=0){integer(limit,'Page size',1,200);integer(after,'History cursor',0,Number.MAX_SAFE_INTEGER);return this.scopedHistory(limit,after);}
+  scopedHistory(limit,after){if(this.auth.permissions(this.user).includes('operations.manage'))return this.repo.history(limit,after);return this.db.prepare(`SELECT l.* FROM ledger l WHERE l.company_id=? AND l.sequence>? AND EXISTS(SELECT 1 FROM objects s WHERE s.company_id=l.company_id AND s.kind='site' AND json_extract(s.data,'$.supervisor')=? AND (s.id=l.source OR s.id=l.destination OR EXISTS(SELECT 1 FROM objects t WHERE t.company_id=l.company_id AND t.id=l.task_id AND json_extract(t.data,'$.handling')=s.id))) ORDER BY l.sequence LIMIT ?`).all(this.user.company_id,after,this.user.id,limit);}
+  export(kind){const snapshot=this.snapshot();if(kind==='stock'){for(let page=1;page*100<snapshot.containerCount;page++){const next=this.snapshot(page);snapshot.balances.push(...next.balances);snapshot.containers.push(...next.containers);}const rows=[['Product','Container','Location','Condition','Physical quantity','Reserved quantity'],...snapshot.balances.map(l=>[snapshot.products.find(p=>p.id===l.product_id)?.name,snapshot.containers.find(c=>c.id===l.container)?.name,l.location,l.condition,l.quantity,l.reserved])];return csv(rows);}return csv([['Sequence','Event','Product','Container','Quantity','From','To','Reason','Time'],...this.scopedHistory(10000,0).map(l=>[l.sequence,l.event,l.product_id,l.container_id,l.quantity,l.source,l.destination,l.reason,l.created_at])]);}
+}
+Object.assign(Simulation.prototype,catalogueMethods,inventoryMethods,logisticsMethods,movementMethods);
+function csv(rows){return rows.map(row=>row.map(value=>'"'+String(value??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(',')).join('\r\n');}
+
+export function startScheduler(db){
+  const owner=randomUUID(),now=Date.now();
+  atomic(db,()=>{const lease=db.prepare('SELECT * FROM engine_lease WHERE id=1').get();requireRule(!lease||lease.expires_at<now,'Another movement engine is running for this database.');db.prepare('INSERT INTO engine_lease VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at').run(owner,now+5000);});
+  // Timers advance only their fixed quantum. No elapsed downtime is replayed.
+  const timer=setInterval(()=>{try{atomic(db,()=>{const lease=db.prepare('SELECT owner FROM engine_lease WHERE id=1').get();requireRule(lease?.owner===owner,'Movement engine lease lost.');db.prepare('UPDATE engine_lease SET expires_at=? WHERE owner=?').run(Date.now()+5000,owner);for(const row of db.prepare('SELECT ur.company_id,ur.user_id id FROM user_roles ur WHERE ur.role=? GROUP BY ur.company_id').all('OWNER'))new Simulation(db,row).tick(250);});}catch(error){console.error(JSON.stringify({event:'scheduler_error',message:error.message}));}},250);timer.unref();
+  return ()=>{clearInterval(timer);db.prepare('DELETE FROM engine_lease WHERE owner=?').run(owner);};
+}

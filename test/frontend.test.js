@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { esc,kg,outline,yardSVG,deckSVG } from '../public/visual.js';
+test('renderer escapes labels and preserves unknown weights',()=>{assert.equal(kg(null),'Unknown');assert.equal(kg(0),'0 kg');assert.equal(esc('<script>'), '&lt;script&gt;');assert.ok(!yardSVG({name:'<script>',points:[{x:0,y:0},{x:10,y:0},{x:0,y:10}]}).includes('aria-label="<script>'));});
+test('frontend diagonal preview uses actual segment length',()=>{const p=outline([{direction:'NE',length:5000}]).points[1];assert.ok(Math.abs(Math.hypot(p.x,p.y)-5000)<0.001);});
+test('truck visual uses physical custody, not destination or allocation',()=>{const markup=deckSVG({id:'truck',name:'Truck',length:6000,width:2050},[{id:'a',name:'At yard',location:'yard'},{id:'b',name:'Loaded',location:'truck',x:0,y:0,envelopeLength:2000,envelopeWidth:1000}]);assert.ok(markup.includes('Loaded'));assert.ok(!markup.includes('At yard'));});
+
+test('yard renders dimensioned side parking and distinct cage and stillage symbols',()=>{const yard={id:'yard',kind:'yard',name:'Yard',points:[{x:0,y:0},{x:20000,y:0},{x:20000,y:16000},{x:0,y:16000}]};const packs=['STILLAGE','CAGE'].map((type,i)=>({id:String(i),name:type,type,location:'yard',x:4000+i*3000,y:4000,envelopeLength:2000,envelopeWidth:1000,condition:'SERVICEABLE'}));const markup=yardSVG(yard,packs);assert.match(markup,/10 x 3.1 m/);assert.match(markup,/Select CAGE mesh cage/);assert.match(markup,/Select STILLAGE stillage/);assert.match(markup,/TRUCK PARKING/);assert.ok(!yardSVG({...yard,kind:'site'},packs).includes('TRUCK PARKING'));});

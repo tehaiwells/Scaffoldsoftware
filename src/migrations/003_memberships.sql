@@ -1,0 +1,12 @@
+CREATE TABLE user_roles_new(company_id TEXT NOT NULL,user_id TEXT NOT NULL,role TEXT NOT NULL REFERENCES roles(code),PRIMARY KEY(company_id,user_id,role),FOREIGN KEY(company_id,user_id) REFERENCES memberships(company_id,user_id));
+INSERT INTO user_roles_new SELECT company_id,user_id,role FROM user_roles;
+DROP TABLE user_roles;
+ALTER TABLE user_roles_new RENAME TO user_roles;
+ALTER TABLE sessions ADD COLUMN company_id TEXT REFERENCES companies(id);
+UPDATE sessions SET company_id=(SELECT company_id FROM users WHERE users.id=sessions.user_id);
+CREATE TABLE audit_events_new(id TEXT PRIMARY KEY,company_id TEXT NOT NULL REFERENCES companies(id),actor_id TEXT NOT NULL,action TEXT NOT NULL,details TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(company_id,actor_id) REFERENCES memberships(company_id,user_id));
+INSERT INTO audit_events_new SELECT * FROM audit_events;
+DROP TABLE audit_events;
+ALTER TABLE audit_events_new RENAME TO audit_events;
+CREATE INDEX audit_company_time ON audit_events(company_id,created_at);
+INSERT INTO schema_migrations VALUES(3);

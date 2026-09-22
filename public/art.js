@@ -1,0 +1,12 @@
+export function icon(type){
+ const paths={HOME:'M3 10 12 3 21 10M5 9v12h14V9M9 21v-8h6v8',YARD:'M3 4h18v16H3zM3 9h18M8 9v11M16 9v11',STOCK:'m3 7 9-4 9 4-9 4zM3 7v10l9 4 9-4V7M12 11v10',TRUCKS:'M2 6h12v12H2zM14 10h5l3 4v4h-8M5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4M18 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4',SITES:'M4 21V3h12l-2 4 2 4H4M2 21h8',REQUESTS:'M6 3h12v18H6zM9 8h6M9 12h6M9 16h4',SETTINGS:'M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6'};
+ return `<svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[type]??paths.STOCK}"/></svg>`;
+}
+function packShape(type){
+ const cage=type==='CAGE',color=cage?'#e3b542':'#b4d746',dark=cage?'#9d7521':'#64872e';
+ let mesh='';for(let i=0;i<7;i++)mesh+=`<path d="M ${40+i*20} ${77+i*4} v54"/>`;
+ const tubes=Array.from({length:6},(_,i)=>`<path d="m ${40+i*3} ${84+i*7} 122 25 66-31" fill="none" stroke="${color}" stroke-width="7"/><path d="m ${40+i*3} ${82+i*7} 122 25" stroke="#e1f497" stroke-width="2"/>`).join('');
+ return `<ellipse cx="141" cy="165" rx="113" ry="13" fill="#183c2515"/><path d="m34 80 132 29 76-37v65l-76 34-132-30z" fill="${dark}" opacity=".2"/><path d="m34 80 132 29 76-37-128-25z" fill="${color}" opacity=".35"/>${cage?`<g stroke="${dark}" stroke-width="1.5" fill="none">${mesh}<path d="m34 94 132 28 76-36M34 110l132 28 76-36M34 126l132 28 76-36M185 102v52M205 92v52M225 82v52"/></g>`:tubes}<g fill="none" stroke="${color}" stroke-width="6" stroke-linejoin="round"><path d="m34 66 132 29 76-37-128-25zM34 66v82M166 95v80M242 58v86M114 33v34M34 134l132 29 76-36"/></g><g stroke="${dark}" stroke-width="5"><path d="M27 149h15M159 176h15M235 145h15"/></g>`;
+}
+export const packArt=(type='STILLAGE')=>`<svg class="pack-art" viewBox="0 0 280 190" aria-hidden="true">${packShape(type)}</svg>`;
+export const yardIllustration=()=>`<svg class="yard-illustration" viewBox="0 0 600 300" aria-hidden="true"><path d="m35 175 282-122 252 104-284 120z" fill="#c7d4b8"/><path d="m35 175 250 102 284-120v12L285 289 35 187" fill="#7d9675"/><g fill="none" stroke="#77937a" stroke-width="3"><path d="M35 175v-60L317-7M35 135 317 13M80 155V95M130 134V74M180 112V52M230 91V31"/></g><path d="m245 180 88-38 88 37-88 40z" fill="#eff2cf" opacity=".5"/><g transform="translate(65 75) scale(.8)">${packShape('STILLAGE')}</g><g transform="translate(225 10) scale(.72)">${packShape('CAGE')}</g><g transform="translate(355 93) scale(.7)">${packShape('STILLAGE')}</g></svg>`;

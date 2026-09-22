@@ -1,0 +1,9 @@
+import { performance } from 'node:perf_hooks';
+import { cpus,platform,release } from 'node:os';
+import { openDatabase,atomic } from '../src/database.js';
+import { Service } from '../src/service.js';
+import { Simulation } from '../src/simulation.js';
+const db=openDatabase(':memory:'),auth=new Service(db),user=auth.authenticate(auth.register({name:'Benchmark',email:'benchmark@example.test',companyName:'Synthetic benchmark',password:'benchmark-password',systems:['quickstage']})),sim=new Simulation(db,user);
+atomic(db,()=>{for(let i=0;i<5;i++)sim.repo.add('resource',{type:'WORKER',name:`Worker ${i}`,location:'benchmark-yard',enabled:true,task:null});const product=sim.repo.add('product',{name:'Benchmark only',system:'quickstage',unitWeight:5000});sim.repo.add('packaging',{product:product.id,operatingQuantity:100});for(let i=0;i<500;i++){const c=sim.repo.add('container',{name:`Benchmark ${i}`,type:'STILLAGE',location:'benchmark-yard',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000,x:i*3000,y:4000,condition:'SERVICEABLE'});sim.repo.balance(c.id,product.id,100);}for(let i=0;i<10000;i++)sim.repo.event(user.id,'BENCHMARK',{quantity:1,reason:'Synthetic performance fixture'});});
+const sample=fn=>{const values=[];for(let i=0;i<20;i++){const start=performance.now();fn();values.push(performance.now()-start);}values.sort((a,b)=>a-b);return {medianMs:Number(values[10].toFixed(2)),p95Ms:Number(values[19].toFixed(2))};};
+console.log(JSON.stringify({machine:{os:platform()+' '+release(),cpu:cpus()[0]?.model,node:process.version},scenario:{containers:500,ledgerRecords:10000,workers:5},snapshot:sample(()=>sim.snapshot()),historyPage100:sample(()=>sim.history()),snapshotBytes:Buffer.byteLength(JSON.stringify(sim.snapshot())),browserFPS:'NOT MEASURED'},null,2));db.close();

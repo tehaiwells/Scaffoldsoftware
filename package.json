@@ -1,0 +1,21 @@
+{
+  "name": "scaffold-yard-v1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "backup": "node scripts/backup.js",
+    "seed:demo": "node scripts/seed-demo.js",
+    "benchmark": "node scripts/benchmark.js",
+    "check": "node scripts/check.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
