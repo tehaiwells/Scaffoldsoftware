@@ -27,7 +27,7 @@ export const workerMethods={
     }
     if(worker.mountedOn)return this.forkliftCommand(worker,input);
     requireRule(!['PICKUP','PLACE'].includes(input.order),'Mount a forklift first.');this.releaseMount(worker);
-    const pos=this.workerPosition(worker);requireRule(pos,'There is no clear space for this worker.');Object.assign(worker,pos);if(!worker.walk?.job||input.order!=='AUTO')worker.walk=null;worker.workerReason=null;
+    this.reseatIfStuck(worker);const pos=this.workerPosition(worker);requireRule(pos,'There is no clear space for this worker.');Object.assign(worker,pos);if(!worker.walk?.job||input.order!=='AUTO')worker.walk=null;worker.workerReason=null;
     if(input.order==='MOUNT'){
       const machine=this.repo.get(input.forklift,'resource');requireRule(machine.enabled&&machine.type==='FORKLIFT'&&machine.location===worker.location,'Choose a forklift in this yard.');requireRule(!machine.task&&!machine.driver&&!machine.claimedBy,'This forklift is busy or reserved by another worker.');
       const parking=this.forkliftPosition(machine);requireRule(parking,'There is no clear space for this forklift.');Object.assign(machine,parking);
