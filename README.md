@@ -12,6 +12,10 @@ Requires Node.js 24+. From PowerShell:
 
 Open http://127.0.0.1:3000. Runtime needs no third-party packages; npm ci installs locked browser-test tooling. SQLite is at data/scaffold.sqlite. The app binds to loopback. Stop with Ctrl+C. After abrupt termination, allow five seconds for the engine lease to expire before restarting. No downtime is fast-forwarded.
 
+## Desktop app setup
+
+`scripts/start-server-hidden.vbs` starts the server with no window (copy it into `shell:startup` to start at logon; it shares on the local network with HOST=0.0.0.0 and logs to `%TEMP%scaffold-yard.log`). `scripts/launch.cmd` starts the server if it is not already running and opens the app in its own Edge app window; point a desktop shortcut at it (run minimised) for a one-click app icon.
+
 ## Fast demonstration
 
     npm.cmd run seed:demo
