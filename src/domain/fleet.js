@@ -1,5 +1,6 @@
 import { requireRule } from './geometry.js';
 import { active } from './inventory.js';
+import { label } from './catalogue.js';
 const nextName=(names,prefix,pad=0)=>{let n=1;while(names.has(`${prefix}${String(n).padStart(pad,'0')}`))n++;return `${prefix}${String(n).padStart(pad,'0')}`;};
 export const idleWorker=r=>!r.task&&(!r.walk||!!r.walk.job)&&!r.mountedOn&&!r.mountTarget&&r.workerMode!=='MOVING';
 export const idleForklift=r=>!r.task&&!r.driver&&!r.claimedBy&&!r.cargo&&!r.drive;
@@ -9,6 +10,20 @@ export const fleetMethods={
   retireResource(r){requireRule(r.enabled&&['WORKER','FORKLIFT'].includes(r.type),'Choose a worker or forklift to remove.');requireRule(r.type==='WORKER'?idleWorker(r):idleForklift(r),r.type==='WORKER'?'This worker is busy. Stop them or wait for the task to finish first.':'This forklift is in use. Dismount and finish its job first.');if(r.type==='WORKER'&&r.job)this.releaseJob(r,'Worker removed');r.enabled=false;r.retiredAt=new Date().toISOString();return this.repo.save(r);},
   retireTruck(t){requireRule(!t.retired,'This truck is already removed.');requireRule(t.status!=='IN_TRANSIT','The truck is travelling. Wait for it to arrive first.');requireRule(this.idleTruck(t),'Unload the truck and finish or cancel its trip first.');t.retired=true;t.status='RETIRED';t.retiredAt=new Date().toISOString();return this.repo.save(t);},
   retireContainer(c){requireRule(!c.retired,'This stillage is already removed.');requireRule(['yard','site'].includes(this.repo.get(c.location).kind),'Unload it from the truck or forklift first.');requireRule(this.emptyContainer(c),'This stillage holds stock or is in use. Empty it first.');c.retired=true;c.retiredAt=new Date().toISOString();this.repo.save(c);this.repo.event(this.user.id,'CONTAINER_RETIRED',{container:c.id,source:c.location,reason:'Removed from storage',key:this.key});return c;},
+  // Physically removing a stillage that still holds stock: writes off every line it holds (its own STOCK_REMOVED rows,
+  // same as a normal removal) then retires the container. Needs stock.adjust as well, since it is a stock decision too.
+  scrapContainer(input){
+    const c=this.repo.get(input.id,'container');requireRule(!c.retired,'This stillage is already removed.');
+    requireRule(['yard','site'].includes(this.repo.get(c.location).kind),'Unload it from the truck or forklift first.');
+    this.assertFree(c);
+    const lines=this.repo.lines(c.id),reason=label(input.reason,'Reason for removing this stillage');
+    if(lines.length)this.auth.require(this.user,'stock.adjust');
+    let pieces=0;
+    for(const l of lines){this.repo.balance(c.id,l.product_id,-l.quantity);pieces+=l.quantity;this.repo.event(this.user.id,'STOCK_REMOVED',{container:c.id,product:l.product_id,quantity:l.quantity,source:c.location,reason,key:this.key});}
+    c.retired=true;c.retiredAt=new Date().toISOString();this.repo.save(c);
+    this.repo.event(this.user.id,'CONTAINER_RETIRED',{container:c.id,source:c.location,reason,key:this.key});
+    return {container:c,pieces,products:lines.length,message:'Removed '+c.name+(lines.length?' and wrote off '+pieces+' piece'+(pieces===1?'':'s')+' across '+lines.length+' product'+(lines.length===1?'':'s')+'.':' from the yard.')};
+  },
   retire(input){const item=this.repo.get(input.id);if(item.kind==='resource')return this.retireResource(item);if(item.kind==='truck')return this.retireTruck(item);if(item.kind==='container')return this.retireContainer(item);requireRule(false,'Choose a worker, forklift, truck or stillage to remove.');},
   ensureConfig(){return this.repo.all('config')[0]??this.repo.add('config',{stepMs:700,speed:4000,craneWorkers:1,paused:false,mode:'SIMULATION / DEMONSTRATION',jobs:true,routineJobs:true,countCycleMs:900000,checkCycleMs:1800000,jobRefreshMs:1000,jobEffects:{},jobsFault:null});},
   quickAdjust(input){

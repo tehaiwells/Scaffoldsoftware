@@ -111,3 +111,31 @@ test('a removal corrects a wrongly listed material and the ledger records why',t
   const row=f.sim.repo.history(200).find(l=>l.event==='STOCK_REMOVED'&&l.reason==='Materials list correction');
   assert.ok(row);assert.equal(row.quantity,80);assert.equal(row.container_id,f.a.id);
   assert.throws(()=>f.cmd('removeStock',{container:f.b.id,product:f.products[0].id,quantity:1,reason:''}),/Removal reason/);});
+
+test('scrapping a loaded stillage writes off its stock, retires the container and cannot be undone by mistake',t=>{const f=fixture(t);const before=f.total();
+  assert.throws(()=>f.cmd('scrapContainer',{id:f.a.id,reason:''}),/Reason for removing this stillage/);
+  const r=f.cmd('scrapContainer',{id:f.a.id,reason:'Stillage crushed on site, contents unrecoverable'});
+  assert.equal(r.pieces,100);assert.equal(r.products,1);assert.match(r.message,/wrote off 100 pieces across 1 product/);
+  assert.equal(f.sim.repo.get(f.a.id).retired,true);
+  assert.equal(f.sim.repo.quantity(f.a.id,f.products[0].id),0);
+  assert.equal(f.total(),before-100);
+  const removed=f.sim.repo.history(200).filter(l=>l.event==='STOCK_REMOVED'&&l.container_id===f.a.id);
+  assert.equal(removed.length,1);assert.equal(removed[0].quantity,100);assert.equal(removed[0].reason,'Stillage crushed on site, contents unrecoverable');
+  const retiredRow=f.sim.repo.history(200).find(l=>l.event==='CONTAINER_RETIRED'&&l.container_id===f.a.id);
+  assert.ok(retiredRow);assert.equal(retiredRow.reason,'Stillage crushed on site, contents unrecoverable');
+  assert.ok(!f.sim.containers().some(c=>c.id===f.a.id),'the container no longer shows as active');
+  assert.throws(()=>f.cmd('scrapContainer',{id:f.a.id,reason:'Again'}),/already removed/);});
+
+test('scrapping an empty stillage works like a normal removal',t=>{const f=fixture(t);
+  const r=f.cmd('scrapContainer',{id:f.empty.id,reason:'Damaged beyond repair'});
+  assert.equal(r.pieces,0);assert.equal(r.products,0);assert.match(r.message,/Removed Empty from the yard\./);
+  assert.equal(f.sim.repo.get(f.empty.id).retired,true);});
+
+test('scrapping refuses a busy stillage, a truck-held stillage, and a supervisor without operations.manage',t=>{const f=fixture(t);
+  const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});
+  assert.throws(()=>f.cmd('scrapContainer',{id:f.a.id,reason:'Test'}),/active movement/);
+  f.cmd('cancel',{id:task.id});
+  const r=f.cmd('scrapContainer',{id:f.a.id,reason:'Now clear'});assert.equal(r.pieces,100);
+  f.auth.addUser(f.user,{name:'Supervisor',email:'supervisor@example.com',password:'demonstration-password',roles:['SUPERVISOR']});
+  const sup=f.auth.authenticate(f.auth.login({email:'supervisor@example.com',password:'demonstration-password'}));
+  assert.throws(()=>new Simulation(f.db,sup).execute('scrapContainer',{id:f.b.id,reason:'Test'},randomUUID()),{status:403});});
