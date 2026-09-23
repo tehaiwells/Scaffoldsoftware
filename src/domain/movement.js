@@ -5,7 +5,7 @@ export const movementMethods={
   advance(task){
     if(!active(task)||task.state==='BLOCKED')return task;
     const c=this.repo.get(task.container,'container'),config=this.repo.all('config')[0]??{stepMs:700,speed:4000,craneWorkers:1};
-    if(task.dependency){const dependency=this.repo.get(task.dependency,'task');requireRule(dependency.state!=='CANCELLED','The partial-pick task was cancelled.');if(dependency.state!=='COMPLETE')return task;}
+    if(task.dependency){const dependency=this.repo.get(task.dependency,'task');requireRule(dependency.state!=='CANCELLED','The step this movement depends on was cancelled.');if(dependency.state!=='COMPLETE')return task;}
     this.assertCountFree(c);
     if(task.state==='RESERVED'){
       // One machine route per handling area avoids intersecting moving loads in V1.

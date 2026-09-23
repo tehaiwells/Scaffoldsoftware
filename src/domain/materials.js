@@ -45,6 +45,18 @@ export const materialsMethods={
     requireRule(held>0,'This container does not hold that product.');requireRule(quantity<=held-reserved,`Only ${held-reserved} unreserved pieces are available to remove.`);
     this.repo.balance(c.id,p.id,-quantity);this.repo.event(this.user.id,'STOCK_REMOVED',{container:c.id,product:p.id,quantity,source:c.location,reason,key:this.key});return c;
   },
+  // Stockpile-style removal from the yard: takes from the highest, most recently added stillages that can be reached; reserved, counted, buried and in-transit stock stays.
+  stockRemoval(input){
+    const yard=this.repo.get(input.location,'yard');const p=this.repo.get(input.product,'product');let left=integer(input.quantity,'Quantity',1,1000000);const reason=label(input.reason??'Removed from the yard','Removal reason');
+    const stored=this.containers().filter(c=>c.location===yard.id),reservations=this.repo.all('reservation').filter(r=>r.active);
+    const level=c=>{let n=0,cur=c;while(cur?.support&&n<9){n++;cur=stored.find(o=>o.id===cur.support);}return n;};
+    const holders=stored.filter(c=>this.repo.quantity(c.id,p.id)>0).map(c=>{let free=true;try{this.assertFree(c);}catch{free=false;}const held=this.repo.quantity(c.id,p.id),reserved=reservations.filter(r=>r.container===c.id&&r.product===p.id).reduce((s,r)=>s+r.quantity,0);return {c,held,available:free?Math.max(0,held-reserved):0};});
+    const held=holders.reduce((s,x)=>s+x.held,0),total=holders.reduce((s,x)=>s+x.available,0);
+    requireRule(held>0,'There is no '+p.name+' in the yard.');
+    requireRule(total>=left,total?'Only '+total+' × '+p.name+' can be taken out right now; the other '+(held-total)+' are reserved, under a stocktake, on a forklift or buried in a pile.':'None of the '+held+' × '+p.name+' in the yard can be taken out right now: they are reserved, under a stocktake, on a forklift or buried in a pile.');
+    const taken=[];for(const x of holders.filter(x=>x.available>0).sort((a,b)=>level(b.c)-level(a.c)||b.c.name.localeCompare(a.c.name,undefined,{numeric:true}))){if(!left)break;const quantity=Math.min(left,x.available);this.repo.balance(x.c.id,p.id,-quantity);this.repo.event(this.user.id,'STOCK_REMOVED',{container:x.c.id,product:p.id,quantity,source:yard.id,reason,key:this.key});taken.push({container:x.c.id,name:x.c.name,quantity,emptied:!this.repo.lines(x.c.id).length});left-=quantity;}
+    return {product:p.id,taken,message:input.quantity+' × '+p.name+' taken out of '+taken.map(t=>t.name+' ('+t.quantity+(t.emptied?', now empty':'')+')').join(', ')};
+  },
   register(balances,products){
     const rows=new Map(),kinds=new Map();
     const kindOf=id=>{if(kinds.has(id))return kinds.get(id);let kind='other';try{const o=this.repo.get(id);kind=o.kind==='resource'?kindOf(o.location):o.kind;}catch{}kinds.set(id,kind);return kind;};

@@ -29,6 +29,8 @@ This creates an isolated SYNTHETIC DEMO company with a measured yard, five worke
 5. In SITES select each container, choose **Move to → T-01 → Confirm move request**. After return loading, dispatch back to the yard and unload. All 200 pieces return to yard custody through the same movement engine.
 6. In STOCK start a scoped stocktake, enter observations and a reason, then approve as owner. That scope is locked until completion/cancellation. Corrections append history instead of replacing it.
 
+Day-to-day work happens on HOME: the live yard plan with the crew controls, the fleet column (+1/−1 forklift, worker, empty stillage, 2 t and 12.5 t trucks) and the stockpile grids — every catalogue component as an icon; pick a step (−100 … +100) and click an icon to add that many to the yard (into the first available stillage, stacking new stillages on the shortest pile) or take that many out. On YARD (layout plan), **Plan a new layout** lets you drag stillages (drop one onto another to stack it), **Check plan** shows the ordered forklift instructions and **Commit this plan** sends them to the crew. The yard editor also places truck entry/exit lanes, a toilet and the yard office.
+
 For blank setup, create a simulation company in the UI; choose systems; draw a yard (RIGHT 20 m, DOWN 16 m, LEFT 20 m, explicitly close); configure resources; add the synthetic catalogue under SETTINGS; register physical containers; record opening stock under STOCK. New yards never receive automatic stock.
 
 ## Tests

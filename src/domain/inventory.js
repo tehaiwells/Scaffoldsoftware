@@ -1,5 +1,6 @@
 import { integer,requireRule,polygon,rect,overlap,contains,fitsPolygon } from './geometry.js';
 import { label,nullable } from './catalogue.js';
+import { fixtureList,solidFixture } from './fixtures.js';
 export const active=t=>!['COMPLETE','CANCELLED','FAILED'].includes(t.state);
 export const inventoryMethods={
   parking(input){
@@ -15,20 +16,21 @@ export const inventoryMethods={
     if(old)return this.reshape(old,input);
     const geometry=polygon(input.segments,input.closed);const height=integer(input.height??10000,'Yard height',1,100000);
     const fit=p=>{integer(p.x,'Position x',-1000000);integer(p.y,'Position y',-1000000);requireRule(fitsPolygon({x:p.x,y:p.y,w:2000,h:1500},geometry.points),'Gate and loading position need a clear 2 m × 1.5 m footprint inside the yard.');return p;};
-    return this.repo.add('yard',{name:label(input.name),segments:input.segments,closed:true,...geometry,height,gate:fit(input.gate??{x:1000,y:1000}),loading:fit(input.loading??{x:1000,y:1000}),mode:'DEMO ONLY'});
+    const fixtures=fixtureList(input.fixtures??[],geometry.points),loading=fit(input.loading??{x:1000,y:1000});for(const f of fixtures)if(solidFixture(f))requireRule(!overlap(f,{...loading,w:2000,h:1500}),f.name+' overlaps the loading zone.');
+    return this.repo.add('yard',{name:label(input.name),segments:input.segments,closed:true,...geometry,height,gate:fit(input.gate??{x:1000,y:1000}),loading,fixtures,mode:'DEMO ONLY'});
   },
   siteBoundary(input){const site=this.repo.get(input.id,'site');this.assertSite(site.id);requireRule(site.status==='ACTIVE','Choose an active site.');return this.reshape(site,input);},
   reshape(old,input){
     const geometry=polygon(input.segments,input.closed);const height=integer(input.height??old.height??10000,'Storage height',1,100000);const notes=[];
     const xs=geometry.points.map(q=>q.x),ys=geometry.points.map(q=>q.y),x0=Math.ceil(Math.min(...xs)),y0=Math.ceil(Math.min(...ys)),x1=Math.max(...xs),y1=Math.max(...ys);
     const fitPoint=(p,what,avoid)=>{integer(p.x,'Position x',-1000000);integer(p.y,'Position y',-1000000);const box=q=>({x:q.x,y:q.y,w:2000,h:1500});if(fitsPolygon(box(p),geometry.points)&&!avoid.some(o=>overlap(box(p),o)))return p;for(let y=y0+500;y<y1;y+=500)for(let x=x0+500;x<x1;x+=500){const q={x,y};if(fitsPolygon(box(q),geometry.points)&&!avoid.some(o=>overlap(box(q),o))){notes.push(what+' moved to '+(x/1000).toFixed(1)+' m, '+(y/1000).toFixed(1)+' m to stay inside the boundary');return q;}}requireRule(false,what+' needs a 2 m × 1.5 m footprint inside the boundary.');};
-    const loading=fitPoint(input.loading??old.loading??{x:1000,y:1000},'Loading zone',[]),gate=fitPoint(input.gate??old.gate??{x:1000,y:1000},'Gate',[{...loading,w:2000,h:1500}]);
-    const value={name:label(input.name??old.name),segments:input.segments,closed:true,...geometry,height,gate,loading};
+    const fixtures=fixtureList(input.fixtures??old.fixtures??[],geometry.points),solids=fixtures.filter(solidFixture);const loading=fitPoint(input.loading??old.loading??{x:1000,y:1000},'Loading zone',solids),gate=fitPoint(input.gate??old.gate??{x:1000,y:1000},'Gate',[{...loading,w:2000,h:1500},...solids]);for(const f of solids)requireRule(!overlap(f,{...loading,w:2000,h:1500}),f.name+' overlaps the loading zone. Move it first.');
+    const value={name:label(input.name??old.name),segments:input.segments,closed:true,...geometry,height,gate,loading,fixtures};
     const loc=this.repo.save({...old,...value});
     const stored=this.containers().filter(c=>c.location===loc.id),zone={...loading,w:2000,h:1500};
     requireRule(stored.every(c=>c.height<=height),'Storage height is lower than a stored stillage. Raise the height or move stock first.');
     const stackHeight=c=>{let h=c.height,cur=c;while(cur?.support){cur=stored.find(o=>o.id===cur.support);h+=cur?.height??0;}return h;};
-    const affected=new Set(stored.filter(c=>!fitsPolygon(rect(c),geometry.points)||overlap(rect(c),zone)||(c.support&&stackHeight(c)>height)).map(c=>c.id));
+    const affected=new Set(stored.filter(c=>!fitsPolygon(rect(c),geometry.points)||overlap(rect(c),zone)||fixtures.some(f=>overlap(rect(c),f))||(c.support&&stackHeight(c)>height)).map(c=>c.id));
     let grew=true;while(grew){grew=false;for(const c of stored)if(c.support&&affected.has(c.support)&&!affected.has(c.id)){affected.add(c.id);grew=true;}}
     const level=c=>{let n=0,cur=c;while(cur?.support){n++;cur=stored.find(o=>o.id===cur.support);}return n;};const moved=[];
     const queue=stored.filter(c=>affected.has(c.id)).sort((a,b)=>level(b)-level(a));
@@ -51,7 +53,7 @@ export const inventoryMethods={
       if(!t.picked&&['ASSIGNED','TRAVELLING_TO_PICKUP'].includes(t.state)){for(const r of this.repo.all('resource').filter(r=>r.task===t.id)){r.task=null;this.repo.save(r);}t.state='RESERVED';t.resources=[];t.machine=null;t.path=null;t.due=0;changed=true;}
       if(changed){this.repo.save(t);replanned++;}}
     // Re-seat crew left outside or under relocated stock; a forklift's driver follows it
-    const blocked=this.containers().filter(c=>c.location===loc.id).map(c=>rect(c));
+    const blocked=[...this.containers().filter(c=>c.location===loc.id).map(c=>rect(c)),...solids];
     for(const r of this.repo.all('resource').filter(r=>r.enabled&&r.location===loc.id&&['WORKER','FORKLIFT'].includes(r.type))){const footprint=r.type==='FORKLIFT'?{x:r.x,y:r.y,...this.forkliftShape(r)}:{x:r.x,y:r.y,w:500,h:500};
       if(Number.isFinite(r.x)&&(!fitsPolygon(footprint,geometry.points)||blocked.some(o=>overlap(footprint,o)))){r.x=null;r.y=null;if(r.type==='FORKLIFT'){const p=this.forkliftPosition(r);if(p){Object.assign(r,p);if(r.driver){const d=this.repo.get(r.driver,'resource');d.x=r.x+600;d.y=r.y+350;this.repo.save(d);}}}this.repo.save(r);}}
     if(moved.length)notes.unshift('Moved '+moved.length+' stillage(s) inside the new boundary: '+moved.join(', '));if(stopped)notes.push(stopped+' manual worker/forklift order(s) stopped');if(replanned)notes.push(replanned+' movement(s) re-planned');
@@ -79,7 +81,7 @@ export const inventoryMethods={
     if(loc.kind==='truck'){
       requireRule(['AT_YARD','AT_SITE'].includes(loc.status),'Truck has departed or is not available for loading.');requireRule(contains({x:0,y:0,w:loc.length,h:loc.width},r),'The full loaded envelope does not fit on the truck deck.');
       const total=others.reduce((sum,o)=>sum+this.projectedWeight(o),0)+this.weight(c,extra);requireRule(total<=loc.payload,'Truck would exceed its configured payload.');
-    }else{requireRule(loc.status!=='ARCHIVED','This site is archived.');requireRule(fitsPolygon(r,loc.points),'The entire footprint must fit inside the storage polygon.');requireRule(!overlap(r,{...loc.loading,w:2000,h:1500}),'Keep the loading position clear.');}
+    }else{requireRule(loc.status!=='ARCHIVED','This site is archived.');requireRule(fitsPolygon(r,loc.points),'The entire footprint must fit inside the storage polygon.');requireRule(!overlap(r,{...loc.loading,w:2000,h:1500}),'Keep the loading position clear.');for(const f of loc.fixtures??[])requireRule(!overlap(r,f),'Keep the '+f.name.toLowerCase()+' clear.');}
     return {level,height};
   },
   projectedWeight(c){const repack=this.tasks().find(t=>active(t)&&t.type==='REPACK'&&t.container===c.id&&!t.picked);return this.weight(c,repack?[{product_id:repack.product,quantity:repack.quantity}]:[]);},

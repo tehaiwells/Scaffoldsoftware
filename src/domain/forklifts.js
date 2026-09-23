@@ -14,7 +14,7 @@ export const forkliftMethods={
   },
   placementPreview(input){this.auth.require(this.user,'operations.manage');const worker=this.repo.get(input.id,'resource');requireRule(worker.enabled&&worker.mountedOn&&!worker.task,'Select a mounted worker.');const machine=this.repo.get(worker.mountedOn,'resource');requireRule(machine.enabled&&machine.driver===worker.id&&!machine.task,'Forklift is unavailable.');return this.placementPlan(machine,input);},
   forkliftShape(machine,load=null){const c=load??(machine.cargo?this.repo.get(machine.cargo,'container'):null),r=c?rect(c):null;return {w:2200+(r?.w??0),h:Math.max(1200,r?.h??0)};},
-  forkliftObstacles(machine,exclude=null){return [...this.occupied(machine.location).filter(c=>c.id!==exclude).map(c=>rect(c)),...this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&r.location===machine.location&&r.id!==machine.id&&!r.task).flatMap(r=>{const p=this.forkliftPosition(r);return p?[{...p,...this.forkliftShape(r)}]:[];})];},
+  forkliftObstacles(machine,exclude=null){return [...this.occupied(machine.location).filter(c=>c.id!==exclude).map(c=>rect(c)),...this.fixtureObstacles(machine.location),...this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&r.location===machine.location&&r.id!==machine.id&&!r.task).flatMap(r=>{const p=this.forkliftPosition(r);return p?[{...p,...this.forkliftShape(r)}]:[];})];},
   checkManualLoad(machine,c){
     requireRule(c.location===machine.location,'Select a stillage on the ground in this yard.');this.assertFree(c,machine.id);
     requireRule(c.condition==='SERVICEABLE','Only serviceable stillages can be picked up.');requireRule(!c.support,'Manual pickup currently supports ground-level stillages.');
