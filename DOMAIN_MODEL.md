@@ -20,7 +20,7 @@ BLOCKED preserves reason and previous state; Retry resumes it. Pre-pickup cancel
 
 Requests specify one exact product/site/quantity. Allocation selects configured full packs first, then other eligible packs, ordered by name/ID. The final partial quantity requires an existing empty container and worker/equipment repacking task. Shortages reject atomically; no excess material is sent. A combined multi-line request editor remains unfinished.
 
-Dispatch rejects open loading work and revalidates cargo. Each trip has one destination. Arrival changes truck status only. Delivery completes when every manifest container is placed at the destination. Returns reuse movement/loading/dispatch services. Archiving requires no assets, unresolved requests/counts or active movements and preserves history.
+Dispatch rejects open loading work and revalidates cargo. Each trip has one destination. Arrival changes truck status only. A container counts as delivered once it has been placed off the truck on that delivery; the delivery completes when every manifest container has been placed, or when the truck departs again (DELIVERED if anything was placed, otherwise RETURNED). Returns reuse movement/loading/dispatch services. Archiving requires no assets, unresolved requests/counts or active movements and preserves history.
 
 ## Geometry
 
