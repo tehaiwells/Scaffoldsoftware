@@ -83,3 +83,31 @@ test('allocate all idle leaves a worker who is walking on a move order alone; th
   f.tick(1);const s=f.sim.snapshot();assert.ok(s.jobs.length>0);assert.ok(s.jobs.every(j=>j.version===undefined&&j.cooldownMs===undefined&&j.remainingMs===undefined));assert.ok(s0.resources.length>0);});
 
 test('sorting a mixed stillage still works for a product with no pack size or weight, and conserves stock',t=>{const f=fixture(t);const m=f.container('MIX',13000,4000);f.cmd('opening',{container:m.id,product:f.products[0].id,quantity:10,reason:'DEMO ONLY'});f.cmd('opening',{container:m.id,product:f.products[2].id,quantity:5,reason:'DEMO ONLY'});jobsOn(f);f.tick(1);const sort=f.sim.repo.all('job').find(j=>j.effect==='SORT');assert.ok(sort,'a mixed stillage derives a sort job');assert.notEqual(sort.state,'BLOCKED',sort.blocked??'');assert.ok(until(f,()=>f.sim.repo.get(sort.id).state==='DONE',120),'the sort completes');assert.equal(f.sim.repo.lines(m.id).length,1,'the mixed stillage now holds one product');assert.equal(f.total(),215);assert.ok(f.sim.repo.history(500).some(l=>l.event==='SORTED'));});
+
+test('the container detail panel offers a per-line stock correction that respects reservations, permission and location; the layout planner is available from Home',async t=>{const f=fixture(t);const {__test}=await import('../public/operations.js');f.sim.repo.add('reservation',{container:f.a.id,product:f.products[0].id,quantity:30,task:null,active:true});const snapshot=f.sim.snapshot();const account={permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}};
+  __test.setState(snapshot,account);__test.setSelected(f.a.id);
+  const html=__test.detail();
+  assert.ok(html.includes('id="remove-line-'+f.a.id+'-'+f.products[0].id+'"'),'a correction control exists for the held line');
+  assert.ok(html.includes('max="70"'),'its maximum is the unreserved amount (100 held, 30 reserved)');
+  __test.setState(snapshot,{...account,permissions:['requests.create']});
+  assert.ok(!__test.detail().includes('remove-line-'),'a user without stock.adjust gets no correction control');
+  __test.setState(snapshot,account);__test.setSelected(f.empty.id);
+  assert.ok(!__test.detail().includes('remove-line-'),'nothing to correct on an empty stillage');
+  __test.setSelected(f.a.id);
+  __test.setLayoutDraft(null);__test.setView('HOME');
+  const home=__test.homeView();assert.ok(home.includes('id="planner-start"'),'Home offers the layout planner');assert.ok(!home.includes('LAYOUT PLANNER'),'the planner panel is not open yet');
+  __test.setLayoutDraft({moves:{}});
+  const homePlanning=__test.homeView();assert.ok(homePlanning.includes('LAYOUT PLANNER'),'Home renders the planner panel once a plan is started');assert.ok(!homePlanning.includes('id="planner-start"'),'the start button is gone while a plan is open');
+  __test.setLayoutDraft(null);});
+
+test('a removal corrects a wrongly listed material and the ledger records why',t=>{const f=fixture(t);const before=f.total();
+  assert.throws(()=>f.cmd('removeStock',{container:f.a.id,product:f.products[0].id,quantity:101,reason:'Materials list correction'}),/Only 100 unreserved/);
+  f.sim.repo.add('reservation',{container:f.a.id,product:f.products[0].id,quantity:20,task:null,active:true});
+  assert.throws(()=>f.cmd('removeStock',{container:f.a.id,product:f.products[0].id,quantity:81,reason:'Materials list correction'}),/Only 80 unreserved/);
+  const c=f.cmd('removeStock',{container:f.a.id,product:f.products[0].id,quantity:80,reason:'Materials list correction'});
+  assert.equal(c.id,f.a.id);
+  assert.equal(f.sim.repo.quantity(f.a.id,f.products[0].id),20,'the still-reserved 20 stay behind');
+  assert.equal(f.total(),before-80);
+  const row=f.sim.repo.history(200).find(l=>l.event==='STOCK_REMOVED'&&l.reason==='Materials list correction');
+  assert.ok(row);assert.equal(row.quantity,80);assert.equal(row.container_id,f.a.id);
+  assert.throws(()=>f.cmd('removeStock',{container:f.b.id,product:f.products[0].id,quantity:1,reason:''}),/Removal reason/);});
