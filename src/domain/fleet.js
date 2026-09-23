@@ -10,12 +10,13 @@ export const fleetMethods={
   retireTruck(t){requireRule(!t.retired,'This truck is already removed.');requireRule(t.status!=='IN_TRANSIT','The truck is travelling. Wait for it to arrive first.');requireRule(this.idleTruck(t),'Unload the truck and finish or cancel its trip first.');t.retired=true;t.status='RETIRED';t.retiredAt=new Date().toISOString();return this.repo.save(t);},
   retireContainer(c){requireRule(!c.retired,'This stillage is already removed.');requireRule(['yard','site'].includes(this.repo.get(c.location).kind),'Unload it from the truck or forklift first.');requireRule(this.emptyContainer(c),'This stillage holds stock or is in use. Empty it first.');c.retired=true;c.retiredAt=new Date().toISOString();this.repo.save(c);this.repo.event(this.user.id,'CONTAINER_RETIRED',{container:c.id,source:c.location,reason:'Removed from storage',key:this.key});return c;},
   retire(input){const item=this.repo.get(input.id);if(item.kind==='resource')return this.retireResource(item);if(item.kind==='truck')return this.retireTruck(item);if(item.kind==='container')return this.retireContainer(item);requireRule(false,'Choose a worker, forklift, truck or stillage to remove.');},
+  ensureConfig(){return this.repo.all('config')[0]??this.repo.add('config',{stepMs:700,speed:4000,craneWorkers:1,paused:false,mode:'SIMULATION / DEMONSTRATION'});},
   quickAdjust(input){
     const yard=this.repo.get(input.location,'yard');requireRule([1,-1].includes(input.delta),'Choose +1 or -1.');
     const kind=input.kind;requireRule(['WORKER','FORKLIFT','TRUCK','STILLAGE'].includes(kind),'Choose workers, forklifts, trucks or stillages.');
     if(kind==='WORKER'||kind==='FORKLIFT'){
       const live=this.repo.all('resource').filter(r=>r.type===kind&&r.location===yard.id&&r.enabled);
-      if(input.delta===1){const name=nextName(new Set(live.map(r=>r.name)),kind==='WORKER'?'Worker ':'Forklift ');const template=live.find(r=>r.type==='FORKLIFT');return this.repo.add('resource',kind==='WORKER'?{name,type:'WORKER',location:yard.id,enabled:true,task:null}:{name,type:'FORKLIFT',location:yard.id,enabled:true,task:null,capacity:template?.capacity??1500000,reach:template?.reach??10000});}
+      if(input.delta===1){this.ensureConfig();const name=nextName(new Set(live.map(r=>r.name)),kind==='WORKER'?'Worker ':'Forklift ');const template=live.find(r=>r.type==='FORKLIFT');return this.repo.add('resource',kind==='WORKER'?{name,type:'WORKER',location:yard.id,enabled:true,task:null}:{name,type:'FORKLIFT',location:yard.id,enabled:true,task:null,capacity:template?.capacity??1500000,reach:template?.reach??10000});}
       requireRule(live.length,`There are no ${kind==='WORKER'?'workers':'forklifts'} in this yard.`);const idle=live.filter(kind==='WORKER'?idleWorker:idleForklift);requireRule(idle.length,`Every ${kind==='WORKER'?'worker':'forklift'} is busy; wait for one to finish or stop it first.`);
       return this.retireResource(idle.at(-1));
     }

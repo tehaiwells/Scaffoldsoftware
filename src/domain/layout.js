@@ -11,7 +11,7 @@ export const layoutMethods={
   // A layout plan lists new positions for stillages already in the yard. Everything not listed stays where it is.
   layoutMoves(yard,input){
     requireRule(Array.isArray(input.moves)&&input.moves.length>0&&input.moves.length<=100,'Plan between 1 and 100 stillage moves.');
-    const arriving=this.tasks().filter(t=>active(t)&&t.to===yard.id&&t.position).map(t=>({...this.repo.get(t.container,'container'),...t.position,id:t.container,arriving:true})).filter(c=>c.location!==yard.id);
+    const arriving=this.tasks().filter(t=>active(t)&&t.to===yard.id&&t.position).map(t=>{const c=this.repo.get(t.container,'container');return c.location===yard.id?{...c,...t.position,id:'planned:'+t.id,of:c.id,name:c.name+' (planned move)',arriving:true}:{...c,...t.position,id:t.container,arriving:true};});
     const stored=[...this.containers().filter(c=>c.location===yard.id),...arriving],byId=new Map(stored.map(c=>[c.id,c]));
     const resources=this.repo.all('resource');const seen=new Set();const moves=[];
     for(const m of input.moves){
@@ -42,11 +42,11 @@ export const layoutMethods={
       if(m.to.support){const s=byId.get(m.to.support);requireRule(s.type===c.type,c.name+' can only stack on another '+c.type.toLowerCase()+'.');requireRule(contains(foot(s.id,final.get(s.id)),r),c.name+' must sit fully on '+s.name+'.');}
       requireRule(level(final,c.id)<=7,c.name+' would be more than 7 high.');requireRule(height(final,c.id)<=(yard.height??10000),c.name+' would exceed the yard storage height.');}
     for(const c of stored)if(c.support&&level(final,c.id)>7)requireRule(false,c.name+' would end up more than 7 high.');
-    for(let i=0;i<stored.length;i++)for(let j=i+1;j<stored.length;j++){const a=stored[i],b=stored[j],pa=final.get(a.id),pb=final.get(b.id);if((pa.support??null)!==(pb.support??null))continue;requireRule(!overlap(foot(a.id,pa),foot(b.id,pb)),a.name+' and '+b.name+' would overlap.');}
+    for(let i=0;i<stored.length;i++)for(let j=i+1;j<stored.length;j++){const a=stored[i],b=stored[j],pa=final.get(a.id),pb=final.get(b.id);if(a.of===b.id||b.of===a.id)continue;if((pa.support??null)!==(pb.support??null))continue;requireRule(!overlap(foot(a.id,pa),foot(b.id,pb)),a.name+' and '+b.name+' would overlap.');}
     const work=new Map(stored.map(c=>[c.id,at(c)]));const pending=[...moves];const steps=[];
     const buried=id=>[...work].some(([,p])=>p.support===id);
     const blockers=(id,to)=>{const r=foot(id,to);return [...work].filter(([o,p])=>o!==id&&(p.support??null)===(to.support??null)&&overlap(foot(o,p),r)).map(([o])=>o);};
-    const path=(id,from,to)=>{const c=byId.get(id),shape=rect(c,{x:0,y:0,rotation:from.rotation});shape.w=Math.max(1500,shape.w);shape.h=Math.max(1000,shape.h);const obstacles=[...[...work].filter(([o])=>o!==id&&o!==from.support&&o!==to.support).map(([o,p])=>foot(o,p)),...solids];return route({x:from.x,y:from.y},{x:to.x,y:to.y},shape,yard.points,obstacles);};
+    const path=(id,from,to)=>{const c=byId.get(id),shape=rect(c,{x:0,y:0,rotation:from.rotation});shape.w=Math.max(1500,shape.w);shape.h=Math.max(1000,shape.h);const chain=s=>{const out=[];let cur=s,n=0;while(cur&&n++<9){out.push(cur);cur=work.get(cur)?.support;}return out;};const skip=new Set([id,...chain(from.support),...chain(to.support)]);const obstacles=[...[...work].filter(([o])=>!skip.has(o)).map(([o,p])=>foot(o,p)),...solids];return route({x:from.x,y:from.y},{x:to.x,y:to.y},shape,yard.points,obstacles);};
     let parks=0;
     while(pending.length){
       let progress=false;
