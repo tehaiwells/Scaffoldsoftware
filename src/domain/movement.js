@@ -1,5 +1,6 @@
 import { requireRule } from './geometry.js';
 import { active } from './inventory.js';
+import { skillOn } from './jobs.js';
 const states=['QUEUED','RESERVED','ASSIGNED','TRAVELLING_TO_PICKUP','PICKING','CARRYING','PLACING','COMPLETE'];
 export const movementMethods={
   advance(task){
@@ -10,7 +11,7 @@ export const movementMethods={
     if(task.state==='RESERVED'){
       // One machine route per handling area avoids intersecting moving loads in V1.
       if(this.tasks().some(other=>other.id!==task.id&&active(other)&&other.handling===task.handling&&other.resources.length))return task;
-      const location=this.repo.get(task.handling),type=location.kind==='site'?'CRANE':'FORKLIFT';const resources=this.repo.all('resource').filter(r=>r.enabled&&!r.task&&!r.driver&&!r.claimedBy&&!r.mountedOn&&!r.walk&&(!r.workerMode||r.workerMode==='AUTO')&&r.location===location.id);const machine=resources.find(r=>r.type===type);requireRule(machine,`No ${type.toLowerCase()} is available.`);const workers=resources.filter(r=>r.type==='WORKER').slice(0,type==='CRANE'?config.craneWorkers:1);requireRule(workers.length===(type==='CRANE'?config.craneWorkers:1),'No operator / required workers are available.');
+      const location=this.repo.get(task.handling),type=location.kind==='site'?'CRANE':'FORKLIFT';const info=this.taskInfo(task),needed=type==='CRANE'?config.craneWorkers:1;const pool=this.repo.all('resource').filter(r=>r.enabled&&!r.task&&!r.driver&&!r.claimedBy&&!r.mountedOn&&r.location===location.id);const machine=pool.find(r=>r.type===type&&!r.walk);requireRule(machine,`No ${type.toLowerCase()} is available.`);const cand=pool.filter(r=>r.type==='WORKER'&&!r.mountTarget&&(!r.workerMode||r.workerMode==='AUTO')&&(!r.walk||r.walk.job)&&skillOn(r,info.skill));const jobOf=r=>{if(!r.job)return null;try{return this.repo.get(r.job,'job');}catch{return null;}};const rank=j=>!j||j.origin==='ROUTINE'?9:j.priority;const free=cand.filter(r=>!r.job&&!r.walk),onJobs=cand.filter(r=>r.job||r.walk).map(r=>({r,j:jobOf(r)})).filter(x=>rank(x.j)>=info.priority).sort((a,b)=>rank(b.j)-rank(a.j)).map(x=>x.r);const workers=[...free,...onJobs].slice(0,needed);if(workers.length<needed){if(cand.length>=needed){task.reason='Waiting for a worker – the '+info.skill.toLowerCase()+'-skilled workers are on higher-priority jobs';this.repo.save(task);return task;}const freeAuto=this.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===location.id&&!r.task&&!r.mountedOn&&!r.mountTarget&&(!r.walk||r.walk.job)&&(!r.workerMode||r.workerMode==='AUTO'));requireRule(false,freeAuto.length&&!freeAuto.some(r=>skillOn(r,info.skill))?'No worker with the '+({TRUCK:'truck operations',YARD:'yard organisation',HANDLING:'material handling'}[info.skill])+' skill is available.':'No operator / required workers are available.');}for(const r of workers)if(r.job||r.walk)this.releaseJob(r,'Needed for '+info.title);
       const weight=this.projectedWeight(c);requireRule(weight<=machine.capacity,'Load exceeds the machine capacity.');requireRule(c.height<=machine.reach,'Load exceeds configured machine reach.');task.path=this.plannedPath(task,c);task.resources=[machine.id,...workers.map(r=>r.id)];task.machine=machine.id;for(const r of [machine,...workers]){r.task=task.id;this.repo.save(r);}
     }
     if(task.state==='PICKING'){
@@ -43,11 +44,12 @@ export const movementMethods={
     this.advanceWorkers(elapsed);
     this.advanceForklifts(elapsed);
     for(const truck of this.repo.all('truck').filter(t=>t.status==='IN_TRANSIT')){truck.remainingMs=Math.max(0,truck.remainingMs-elapsed);if(truck.remainingMs===0){const destination=this.repo.get(truck.destination);truck.at=destination.id;truck.status=destination.kind==='site'?'AT_SITE':'AT_YARD';truck.destination=null;const delivery=this.repo.get(truck.delivery,'delivery');delivery.status=delivery.containers.length?'ARRIVED':'DELIVERED';this.repo.save(delivery);this.notify('Truck arrived',`${truck.name} has arrived. Cargo stays on the truck until unloading.`,destination.kind==='site'?destination.id:null);}this.repo.save(truck);}
-    for(let task of this.tasks().filter(t=>active(t)&&t.state!=='BLOCKED')){
+    for(let task of this.tasks().filter(t=>active(t)&&t.state!=='BLOCKED').map((t,i)=>({t,i,p:this.taskPriority(t)})).sort((a,b)=>a.p-b.p||a.i-b.i).map(x=>x.t)){
       if(task.due>0){task.due=Math.max(0,task.due-elapsed);this.repo.save(task);continue;}
       this.db.exec('SAVEPOINT movement_step');
       try{this.advance(task);this.db.exec('RELEASE movement_step');}
       catch(error){this.db.exec('ROLLBACK TO movement_step');this.db.exec('RELEASE movement_step');task=this.repo.get(task.id,'task');task.resumeState=task.state;task.state='BLOCKED';task.reason=error.status?error.message:'Movement failed safely. Review the server log before retrying.';if(!error.status)console.error(JSON.stringify({event:'movement_error',task:task.id,message:error.message}));this.repo.save(task);}
     }
+    this.tickJobs(elapsed);
   }
 };

@@ -36,7 +36,7 @@ export const inventoryMethods={
     const queue=stored.filter(c=>affected.has(c.id)).sort((a,b)=>level(b)-level(a));
     // Crew: stop manual jobs (cargo stays on the forks), release mount claims, keep everyone as an obstacle for relocation
     const resources=this.repo.all('resource').filter(r=>r.enabled&&r.location===loc.id);let stopped=0;
-    for(const r of resources){let changed=false;if(r.walk||r.mountTarget){r.walk=null;this.releaseMount(r);r.workerMode='HOLD';r.workerReason='Boundary changed; give a new move order.';changed=true;stopped++;}if(r.drive){r.drive=null;r.manualReason='Boundary changed; give a new order.';changed=true;stopped++;}if(changed)this.repo.save(r);}
+    for(const r of resources){let changed=false;if(r.job){this.releaseJob(r,'Boundary changed');changed=true;}if(r.walk||r.mountTarget){r.walk=null;this.releaseMount(r);r.workerMode='HOLD';r.workerReason='Boundary changed; give a new move order.';changed=true;stopped++;}if(r.drive){r.drive=null;r.manualReason='Boundary changed; give a new order.';changed=true;stopped++;}if(changed)this.repo.save(r);}
     const crew=resources.filter(r=>Number.isFinite(r.x)&&Number.isFinite(r.y)&&!r.mountedOn).map(r=>r.type==='FORKLIFT'?{x:r.x,y:r.y,...this.forkliftShape(r)}:{x:r.x,y:r.y,w:500,h:500});
     this.relocating=new Set(affected);
     try{
