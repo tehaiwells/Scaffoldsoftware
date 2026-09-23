@@ -77,3 +77,10 @@ export const overlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
 export const containsRect=(o,i)=>i.x>=o.x&&i.y>=o.y&&i.x+i.w<=o.x+o.w&&i.y+i.h<=o.y+o.h;
 export function insidePolygon(p,poly){let r=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)r=!r;}return r;}
 export function fitsPolygon(r,poly){const e=1;return [{x:r.x+e,y:r.y+e},{x:r.x+r.w-e,y:r.y+e},{x:r.x+r.w-e,y:r.y+r.h-e},{x:r.x+e,y:r.y+r.h-e},{x:r.x+r.w/2,y:r.y+r.h/2}].every(p=>insidePolygon(p,poly));}
+
+// Overview predicates. Idle rules mirror src/domain/fleet.js; truckStage partitions each truck class into one of four stages.
+export const idleWorker=r=>!r.task&&!r.walk&&!r.mountedOn&&!r.mountTarget&&r.workerMode!=='MOVING';
+export const idleForklift=r=>!r.task&&!r.driver&&!r.claimedBy&&!r.cargo&&!r.drive;
+export const heavyTruck=t=>t.payload>=10000000;
+export const truckBooked=(t,state)=>state.requests.some(r=>r.truck===t.id&&['ALLOCATED','PARTIALLY ALLOCATED'].includes(r.status))||state.loadLists.some(l=>l.truck===t.id&&!l.cancelled&&!l.delivery);
+export function truckStage(t,state){const cargo=t.deckArea>0;if(t.status==='IN_TRANSIT')return cargo?'UNLOADING':state.sites.some(s=>s.id===t.destination)?'SCHEDULED':'COMPLETE';if(t.tasksFrom>0||(cargo&&t.trip?.status==='ARRIVED'))return 'UNLOADING';if(cargo||t.tasksStarted>0)return 'LOADING';if(t.tasksTo>0||truckBooked(t,state))return 'SCHEDULED';return 'COMPLETE';}

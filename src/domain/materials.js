@@ -57,6 +57,16 @@ export const materialsMethods={
     const taken=[];for(const x of holders.filter(x=>x.available>0).sort((a,b)=>level(b.c)-level(a.c)||b.c.name.localeCompare(a.c.name,undefined,{numeric:true}))){if(!left)break;const quantity=Math.min(left,x.available);this.repo.balance(x.c.id,p.id,-quantity);this.repo.event(this.user.id,'STOCK_REMOVED',{container:x.c.id,product:p.id,quantity,source:yard.id,reason,key:this.key});taken.push({container:x.c.id,name:x.c.name,quantity,emptied:!this.repo.lines(x.c.id).length});left-=quantity;}
     return {product:p.id,taken,message:input.quantity+' × '+p.name+' taken out of '+taken.map(t=>t.name+' ('+t.quantity+(t.emptied?', now empty':'')+')').join(', ')};
   },
+  // Stock per yard / site / truck for the Overview page, from every container (not the paged 100); stock on a forklift or crane counts at that machine's yard or site.
+  stockByLocation(balances,containers,products){
+    const byProduct=new Map(products.map(p=>[p.id,p])),place=new Map();
+    const placeOf=id=>{if(!place.has(id)){let p=id;try{const o=this.repo.get(id);if(o.kind==='resource')p=o.location;}catch{}place.set(id,p);}return place.get(id);};
+    const blocks=new Map();const block=id=>{let b=blocks.get(id);if(!b){b={pieces:0,reserved:0,unserviceable:0,containers:new Set(),rows:new Map()};blocks.set(id,b);}return b;};
+    for(const c of containers)block(placeOf(c.location)).containers.add(c.id);
+    for(const l of balances){const b=block(placeOf(l.location));const row=b.rows.get(l.product_id)??{product:l.product_id,quantity:0,reserved:0,unserviceable:0,containers:new Set()};const bad=l.condition==='SERVICEABLE'?0:l.quantity;row.quantity+=l.quantity;row.reserved+=l.reserved;row.unserviceable+=bad;row.containers.add(l.container);b.rows.set(l.product_id,row);b.pieces+=l.quantity;b.reserved+=l.reserved;b.unserviceable+=bad;}
+    const out={};for(const [id,b] of blocks)out[id]={pieces:b.pieces,reserved:b.reserved,unserviceable:b.unserviceable,containers:b.containers.size,rows:[...b.rows.values()].map(r=>{const p=byProduct.get(r.product);return {product:r.product,name:p?.name??'Unknown product',category:p?.category??null,unitWeight:p?.unitWeight??null,quantity:r.quantity,reserved:r.reserved,unserviceable:r.unserviceable,free:Math.max(0,r.quantity-r.reserved-r.unserviceable),containers:r.containers.size};}).sort((a,b)=>a.name.localeCompare(b.name))};
+    return out;
+  },
   register(balances,products){
     const rows=new Map(),kinds=new Map();
     const kindOf=id=>{if(kinds.has(id))return kinds.get(id);let kind='other';try{const o=this.repo.get(id);kind=o.kind==='resource'?kindOf(o.location):o.kind;}catch{}kinds.set(id,kind);return kind;};
@@ -88,7 +98,7 @@ export const materialsMethods={
   cancelLoadList(input){
     const list=this.repo.get(input.id,'loadList');this.assertSite(list.site);requireRule(!list.cancelled,'This yard list is already cancelled.');const reason=label(input.reason,'Cancellation reason');
     for(const line of list.lines){const request=this.repo.get(line.request,'request');if(!['CANCELLED','DELIVERED','RETURNED'].includes(request.status))this.cancelRequest({id:request.id,reason,fromList:true});}
-    list.cancelled=true;list.cancelReason=reason;return this.repo.save(list);
+    list.cancelled=true;list.cancelReason=reason;const saved=this.repo.save(list);this.releaseTruck(list.truck);return saved;
   },
   loadListView(list){
     const truck=list.truck?this.repo.get(list.truck,'truck'):null;

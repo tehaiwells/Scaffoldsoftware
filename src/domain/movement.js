@@ -24,7 +24,7 @@ export const movementMethods={
       requireRule(c.location===task.machine,'Cargo is not on the assigned machine.');requireRule(task.resources.every(id=>this.repo.get(id,'resource').task===task.id),'The assigned resources changed.');this.validatePlacement(c,task.to,task.position);if(c.capacity!==null)requireRule(this.weight(c)<=c.capacity,'Container exceeds configured loaded capacity.');
       const source=c.location;c.location=task.to;Object.assign(c,task.position);c.sourceYard=c.sourceYard??(this.repo.get(task.from).kind==='yard'?task.from:null);c.placedAt=new Date().toISOString();const from=this.repo.get(task.from);c.delivery=from.kind==='truck'?from.delivery:c.delivery??null;this.repo.save(c);
       for(const l of this.repo.lines(c.id))this.repo.event(task.actor,'PLACEMENT',{container:c.id,product:l.product_id,quantity:l.quantity,source,destination:c.location,task:task.id,request:task.request,key:task.id+':place'});
-      this.release(task);this.reconcileDeliveries();
+      this.release(task);this.reconcileDeliveries();if(from.kind==='truck')this.releaseTruck(from.id);
     }
     task.state=states[states.indexOf(task.state)+1];task.reason=null;task.due=config.stepMs;
     if(task.state==='CARRYING'&&task.path){const distance=task.path.slice(1).reduce((sum,p,i)=>sum+Math.hypot(p.x-task.path[i].x,p.y-task.path[i].y),0);task.due=Math.max(config.stepMs,Math.round(distance/config.speed*1000));}
@@ -32,10 +32,10 @@ export const movementMethods={
   },
   reconcileDeliveries(){
     for(const delivery of this.repo.all('delivery').filter(d=>d.status==='ARRIVED')){
-      if(delivery.containers.every(id=>this.repo.get(id,'container').location===delivery.to)){delivery.status='DELIVERED';delivery.completedAt=new Date().toISOString();this.repo.save(delivery);this.notify('Delivery complete','Every container has been placed at its destination.',this.repo.get(delivery.to).kind==='site'?delivery.to:null);}
+      if(delivery.containers.every(id=>{const c=this.repo.get(id,'container');return c.location===delivery.to||c.delivery===delivery.id;})){delivery.status='DELIVERED';delivery.completedAt=new Date().toISOString();this.repo.save(delivery);this.notify('Delivery complete','Every container has been placed at its destination.',this.repo.get(delivery.to).kind==='site'?delivery.to:null);}
     }
     for(const request of this.repo.all('request').filter(r=>['ALLOCATED','PARTIALLY ALLOCATED','DELIVERED'].includes(r.status))){
-      const relevant=this.tasks().filter(t=>t.request===request.id&&t.type==='MOVE'&&t.state!=='CANCELLED');const quantity=relevant.reduce((sum,t)=>{const c=this.repo.get(t.container,'container');return sum+(c.location===request.site?this.repo.quantity(c.id,request.product):0);},0);request.delivered=quantity;if(quantity===request.quantity)request.status='DELIVERED';else if(request.status==='DELIVERED'&&quantity===0)request.status='RETURNED';this.repo.save(request);
+      const relevant=this.tasks().filter(t=>t.request===request.id&&t.type==='MOVE'&&t.state!=='CANCELLED');const quantity=relevant.reduce((sum,t)=>{const c=this.repo.get(t.container,'container');return sum+(c.location===request.site?this.repo.quantity(c.id,request.product):0);},0);request.delivered=quantity;const onTheWay=relevant.some(t=>{if(active(t))return true;const loc=this.repo.get(this.repo.get(t.container,'container').location);return loc.kind==='truck'||loc.kind==='resource';});if(quantity===request.quantity)request.status='DELIVERED';else if(request.status==='PARTIALLY ALLOCATED'&&quantity>0&&!onTheWay)request.status='DELIVERED';else if(request.status==='DELIVERED'&&quantity===0)request.status='RETURNED';this.repo.save(request);
     }
   },
   tick(elapsed=250){
