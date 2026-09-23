@@ -1,13 +1,16 @@
 @echo off
 title Scaffold Yard
-set "APP=C:\Users\tehai\OneDrive\Documents\ChatGPT\scaffold\SCAFFOLD_YARD_V1"
+rem The project folder is wherever this repo was cloned: the parent of this scripts folder.
+for %%I in ("%~dp0..") do set "APP=%%~fI"
 set "URL=http://127.0.0.1:3000/"
+set "NODE=%ProgramFiles%\nodejs\node.exe"
+if not exist "%NODE%" set "NODE=node"
 
 rem Server already running? Just open the app.
 curl -s -o nul --max-time 2 %URL%health && goto open
 
 rem Start the server in its own minimised window (close that window to stop it, e.g. after changing code in src/).
-start "Scaffold Yard server" /min cmd /k "cd /d "%APP%" && set "HOST=0.0.0.0" && "C:\Program Files\nodejs\node.exe" src\server.js"
+start "Scaffold Yard server" /min cmd /k "cd /d "%APP%" && set "HOST=0.0.0.0" && "%NODE%" src\server.js"
 for /l %%i in (1,1,40) do (
   curl -s -o nul --max-time 1 %URL%health && goto open
   timeout /t 1 /nobreak >nul
