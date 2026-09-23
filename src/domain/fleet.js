@@ -20,9 +20,10 @@ export const fleetMethods={
       return this.retireResource(idle.at(-1));
     }
     if(kind==='TRUCK'){
-      const trucks=this.repo.all('truck').filter(t=>t.yard===yard.id&&!t.retired);
-      if(input.delta===1)return this.truck({name:nextName(new Set(this.repo.all('truck').map(t=>t.name)),'T-',2),yard:yard.id});
-      requireRule(trucks.length,'There are no trucks for this yard.');const idle=trucks.filter(t=>t.at===yard.id&&this.idleTruck(t));
+      const payload=input.payload===undefined?12500000:Number(input.payload);requireRule([2000000,12500000].includes(payload),'Choose a 2 tonne or 12.5 tonne truck.');const light=payload<10000000;
+      const trucks=this.repo.all('truck').filter(t=>t.yard===yard.id&&!t.retired&&(t.payload<10000000)===light);
+      if(input.delta===1)return this.truck({name:nextName(new Set(this.repo.all('truck').map(t=>t.name)),light?'L-':'T-',2),yard:yard.id,payload,length:light?4200:6000,width:light?1900:2050,stackLimit:light?1:2});
+      requireRule(trucks.length,light?'There are no 2 tonne trucks for this yard.':'There are no 12.5 tonne trucks for this yard.');const idle=trucks.filter(t=>t.at===yard.id&&this.idleTruck(t));
       requireRule(idle.length,'Every truck is loaded, away or planned for a trip; unload and finish its trip first.');return this.retireTruck(idle.at(-1));
     }
     const stillages=this.containers().filter(c=>c.location===yard.id&&c.type==='STILLAGE');
