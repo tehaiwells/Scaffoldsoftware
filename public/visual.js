@@ -1,6 +1,9 @@
 import {normalise} from './shape.js';
 export const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export const kg=v=>v==null?'Unknown':`${(v/1000).toLocaleString(undefined,{maximumFractionDigits:3})} kg`;
+// Shared formatters: one Intl.NumberFormat instead of a new one per call (same locale, same output as toLocaleString).
+const KG=new Intl.NumberFormat(undefined,{maximumFractionDigits:3}),INT=new Intl.NumberFormat();
+export const kg=v=>v==null?'Unknown':`${KG.format(v/1000)} kg`;
+export const num=v=>INT.format(v);
 export function outline(segments,closed=false){let x=0,y=0;const points=[{x,y}],dirs={RIGHT:[1,0],LEFT:[-1,0],UP:[0,-1],DOWN:[0,1],NE:[1,-1],SE:[1,1],SW:[-1,1],NW:[-1,-1]};for(const s of segments){const d=dirs[s.direction],scale=Math.hypot(...d);x+=d[0]*s.length/scale;y+=d[1]*s.length/scale;points.push({x,y});}return {points,closed};}
 
 export const DEFAULT_VIEW={zoom:1,rotate:0,tilt:true,pan:{x:0,y:0}};
@@ -26,7 +29,9 @@ export function yardSVG(location,containers=[],tasks=[],selected=null,trucks=[],
  const upUnit=mul(inverse,{x:0,y:-1}),k=view.tilt?0.9:0.22,up=h=>({x:upUnit.x*h*k,y:upUnit.y*h*k});
  const stored=containers.filter(c=>c.location===location.id),byId=new Map(stored.map(c=>[c.id,c]));
  const stackBase=c=>{let h=0,cur=byId.get(c.support),n=0;while(cur&&n<9){h+=cur.height;cur=byId.get(cur.support);n++;}return h;};
- const contents=c=>(opts.balances||[]).filter(l=>l.container===c.id&&l.quantity>0).map(l=>({name:(opts.products||[]).find(p=>p.id===l.product_id)?.name??'Material',quantity:l.quantity,reserved:l.reserved||0}));
+ // Contents per stillage from one pass over the balances and the catalogue (was a scan of both per stillage); same lines, same order, first product match.
+ const linesOf=new Map(),productOf=new Map();for(const l of opts.balances||[])if(l.quantity>0){const list=linesOf.get(l.container);if(list)list.push(l);else linesOf.set(l.container,[l]);}for(const p of opts.products||[])if(!productOf.has(p.id))productOf.set(p.id,p);
+ const contents=c=>(linesOf.get(c.id)??[]).map(l=>({name:productOf.get(l.product_id)?.name??'Material',quantity:l.quantity,reserved:l.reserved||0}));
  const shade=(hex,f)=>{const n=parseInt(hex.slice(1),16),r=Math.round(((n>>16)&255)*f),g=Math.round(((n>>8)&255)*f),b=Math.round((n&255)*f);return '#'+[r,g,b].map(x=>Math.max(0,Math.min(255,x)).toString(16).padStart(2,'0')).join('');};
  const centroid={x:pts.reduce((s,p)=>s+p.x,0)/pts.length,y:pts.reduce((s,p)=>s+p.y,0)/pts.length};
  const fixtureArt=f=>{const lane=f.kind==='ENTRY'||f.kind==='EXIT';const cx=f.x+f.w/2,cy=f.y+f.h/2;

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { openDatabase } from './database.js';
+import { openDatabase,cached } from './database.js';
 import { Service, AppError } from './service.js';
 import { Simulation, startScheduler } from './simulation.js';
 
@@ -15,7 +15,7 @@ export function createApp(db) {
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
     try {
       const path=new URL(req.url,'http://localhost').pathname;
-      if(req.method==='GET'&&path==='/health'){send(200,{status:'ok',mode:'simulation',database:db.prepare('SELECT MAX(version) version FROM schema_migrations').get().version});return;}
+      if(req.method==='GET'&&path==='/health'){send(200,{status:'ok',mode:'simulation',database:cached(db,'SELECT MAX(version) version FROM schema_migrations').get().version});return;}
       if(req.method==='GET'&&assets[path]) {const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type});res.end(readFileSync(new URL(`../public/${file}`,import.meta.url)));return;}
       if(!path.startsWith('/api/')) throw new AppError(404,'Not found.');
       if(!['GET','POST'].includes(req.method)) throw new AppError(405,'Method not allowed.');
@@ -28,7 +28,7 @@ export function createApp(db) {
         if(!body||typeof body!=='object'||Array.isArray(body)) throw new AppError(400,'Invalid request.');
       }
       const cookie=token=>res.setHeader('Set-Cookie',`session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token?28800:0}${process.env.COOKIE_SECURE==='true'?'; Secure':''}`);
-      if(req.method==='GET'&&path==='/api/systems') {send(200,db.prepare('SELECT * FROM scaffold_systems ORDER BY name').all());return;}
+      if(req.method==='GET'&&path==='/api/systems') {send(200,cached(db,'SELECT * FROM scaffold_systems ORDER BY name').all());return;}
       if(req.method==='POST'&&['/api/register','/api/login'].includes(path)) {
         const now=Date.now(),key=req.socket.remoteAddress;for(const [k,v] of attempts) if(v.until<now) attempts.delete(k);
         const entry=attempts.get(key)??{count:0,until:now+60000};attempts.set(key,entry);if(++entry.count>10) throw new AppError(429,'Too many attempts. Try again in a minute.');
@@ -38,7 +38,7 @@ export function createApp(db) {
       const user=service.authenticate(token);
       const simulation=new Simulation(db,user);
       if(req.method==='GET'&&path==='/api/me') send(200,service.snapshot(user));
-      else if(req.method==='GET'&&path==='/api/state') send(200,simulation.snapshot(Number(new URL(req.url,'http://localhost').searchParams.get('page')??0)));
+      else if(req.method==='GET'&&path==='/api/state') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.snapshot(Number(query.get('page')??0),{lean:true,catalogue:query.get('catalogue')}));}
       else if(req.method==='GET'&&path==='/api/history') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.history(Number(query.get('limit')??100),Number(query.get('after')??0)));}
       else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${['stock','register','additions','removals','yardlist'].includes(kind)?kind:'history'}.csv"`});res.end(output);}
       else if(req.method==='POST'&&path==='/api/placement-preview') send(200,simulation.placementPreview(body));
@@ -59,5 +59,6 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   const db=openDatabase(process.env.DATABASE_PATH??'./data/scaffold.sqlite');
   const stop=startScheduler(db);
   const server=createApp(db);server.listen(Number(process.env.PORT??3000),process.env.HOST??'127.0.0.1',()=>{const {address,port}=server.address();console.log(`Scaffold Yard: http://127.0.0.1:${port}`+(address!=='127.0.0.1'?` (listening on ${address} — reachable from other devices on this network at http://<this PC's IP>:${port})`:''));});
-  for(const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>server.close(()=>{stop();db.close();process.exit(0);}));
+  // SIGHUP: the console window was closed (Windows). Stop the engine first so held job countdowns are saved, then close.
+  for(const signal of ['SIGINT','SIGTERM','SIGHUP']) process.on(signal,()=>{stop();server.close(()=>{db.close();process.exit(0);});setTimeout(()=>process.exit(0),2000).unref();});
 }

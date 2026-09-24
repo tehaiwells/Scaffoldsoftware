@@ -1,4 +1,4 @@
-import {integer,requireRule,route,rect,overlap,fitsPolygon} from './geometry.js';
+import {integer,requireRule,route,rect,overlap,fitsPolygon,ObstacleIndex} from './geometry.js';
 const size=500;
 export const workerMethods={
   forkliftPosition(machine){
@@ -8,7 +8,8 @@ export const workerMethods={
     for(let y=Math.max(...loc.points.map(p=>p.y))-3000;y>=Math.min(...loc.points.map(p=>p.y));y-=2500)for(let x=Math.min(...loc.points.map(p=>p.x))+1000;x<Math.max(...loc.points.map(p=>p.x));x+=3000){const footprint={x,y,w:2400,h:2000};if(fitsPolygon(footprint,loc.points)&&!obstacles.some(o=>overlap(footprint,o))&&slot++===index)return {x,y};}
     return null;
   },
-  workerObstacles(location){return [...this.occupied(location).map(c=>rect(c)),...this.fixtureObstacles(location),...this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&r.location===location&&!r.task).flatMap(r=>{const p=this.forkliftPosition(r);return p?[{...p,...this.forkliftShape(r)}]:[];})];},
+  // During one advanceWorkers pass (this.passObstacles set) the list is built once per location: nothing in the pass moves stock, tasks or parked forklifts.
+  workerObstacles(location){const cache=this.passObstacles;if(cache?.has(location))return cache.get(location).list;const list=[...this.occupied(location).map(c=>rect(c)),...this.fixtureObstacles(location),...this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&r.location===location&&!r.task).flatMap(r=>{const p=this.forkliftPosition(r);return p?[{...p,...this.forkliftShape(r)}]:[];})];if(cache)cache.set(location,{list,index:null});return list;},
   releaseMount(worker){if(worker.mountTarget){const machine=this.repo.get(worker.mountTarget,'resource');if(machine.claimedBy===worker.id){machine.claimedBy=null;this.repo.save(machine);}worker.mountTarget=null;}},
   workerPosition(worker){
     if(Number.isFinite(worker.x)&&Number.isFinite(worker.y))return {x:worker.x,y:worker.y};
@@ -42,16 +43,18 @@ export const workerMethods={
   },
   advanceWorkers(elapsed){
     for(const machine of this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&!Number.isFinite(r.x))){const p=this.forkliftPosition(machine);if(p){Object.assign(machine,p);this.repo.save(machine);}}
+    this.passObstacles=new Map();try{
     for(const worker of this.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER')){
       if(!Number.isFinite(worker.x)){const pos=this.workerPosition(worker);if(pos){Object.assign(worker,pos);this.repo.save(worker);}}
       if(!worker.walk||worker.task)continue;
-      const loc=this.repo.get(worker.location),obstacles=this.workerObstacles(loc.id);let remaining=1400*elapsed/1000;
-      while(worker.walk&&remaining>0){const target=worker.walk.path[worker.walk.next];if(!target){const {job,resume}=worker.walk;worker.walk=null;if(job){if(worker.workerMode==='MOVING')worker.workerMode='HOLD';let j=null;try{j=this.repo.get(job,'job');}catch{}if(j&&j.state==='ASSIGNED'&&j.worker===worker.id){j.state='IN_PROGRESS';j.startedAt=new Date().toISOString();this.repo.save(j);}break;}worker.workerMode=resume?'AUTO':'HOLD';if(resume)worker.dwellUntil=new Date(Date.now()+30000).toISOString();if(worker.mountTarget){const machine=this.repo.get(worker.mountTarget,'resource');if(machine.enabled&&!machine.task&&machine.claimedBy===worker.id&&!machine.driver){machine.driver=worker.id;machine.claimedBy=null;this.repo.save(machine);worker.mountedOn=machine.id;worker.mountTarget=null;worker.workerMode='MOUNTED';worker.x=machine.x+600;worker.y=machine.y+350;}else{this.releaseMount(worker);worker.workerReason='Forklift no longer available.';}}break;}
+      const loc=this.repo.get(worker.location);this.workerObstacles(loc.id);const cached=this.passObstacles.get(loc.id),obstacles=cached.index??=new ObstacleIndex(cached.list);let remaining=1400*elapsed/1000;
+      while(worker.walk&&remaining>0){const target=worker.walk.path[worker.walk.next];if(!target){const {job,resume}=worker.walk;worker.walk=null;if(job){if(worker.workerMode==='MOVING')worker.workerMode='HOLD';let j=null;try{j=this.getJob(job);}catch{}if(j&&j.state==='ASSIGNED'&&j.worker===worker.id){j.state='IN_PROGRESS';j.startedAt=new Date().toISOString();this.repo.save(j);}break;}worker.workerMode=resume?'AUTO':'HOLD';if(resume)worker.dwellUntil=new Date(Date.now()+30000).toISOString();if(worker.mountTarget){const machine=this.repo.get(worker.mountTarget,'resource');if(machine.enabled&&!machine.task&&machine.claimedBy===worker.id&&!machine.driver){machine.driver=worker.id;machine.claimedBy=null;this.repo.save(machine);worker.mountedOn=machine.id;worker.mountTarget=null;worker.workerMode='MOUNTED';worker.x=machine.x+600;worker.y=machine.y+350;}else{this.releaseMount(worker);worker.workerReason='Forklift no longer available.';}}break;}
         const dx=target.x-worker.x,dy=target.y-worker.y,distance=Math.hypot(dx,dy),step=Math.min(remaining,distance,100),next=distance?{x:worker.x+dx*step/distance,y:worker.y+dy*step/distance}:{...target};
-        const footprint={...next,w:size,h:size};if(!fitsPolygon(footprint,loc.points)||obstacles.some(o=>overlap(footprint,o))){const job=worker.walk?.job;worker.walk=null;this.releaseMount(worker);if(job){this.releaseJob(worker,'Walking route is blocked',5000);worker.jobSkipUntil=new Date(Date.now()+5000).toISOString();}else{worker.workerMode='HOLD';worker.workerReason='Walking route is blocked. Give a new move order.';}break;}
+        const footprint={...next,w:size,h:size};if(!fitsPolygon(footprint,loc.points)||obstacles.hits(footprint)){const job=worker.walk?.job;worker.walk=null;this.releaseMount(worker);if(job){this.releaseJob(worker,'Walking route is blocked',5000);worker.jobSkipUntil=new Date(Date.now()+5000).toISOString();}else{worker.workerMode='HOLD';worker.workerReason='Walking route is blocked. Give a new move order.';}break;}
         Object.assign(worker,next);remaining-=step;if(distance<=step+.001)worker.walk.next++;
       }
       this.repo.save(worker);
     }
+    }finally{this.passObstacles=null;}
   }
 };

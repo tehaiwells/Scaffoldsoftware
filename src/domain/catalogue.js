@@ -1,11 +1,16 @@
 import { integer, requireRule } from './geometry.js';
 import { readFileSync } from 'node:fs';
+import { catalogueRevision } from '../repository.js';
+import { cached } from '../database.js';
 const synthetic=JSON.parse(readFileSync(new URL('../../catalogues/synthetic.json',import.meta.url),'utf8'));
 export const label=(v,name='Name')=>{requireRule(typeof v==='string'&&v.trim().length>0&&v.length<=250,`${name} is required (maximum 250 characters).`);return v.trim();};
 export const nullable=(v,name)=>v===null||v===undefined?null:integer(v,name,0);
+const catalogueCache=new WeakMap();
+const byIdOf=list=>{const m=new Map();for(const p of list)if(!m.has(p.id))m.set(p.id,p);return m;};
+export function computeEffectiveProducts(repo){const first=(kind)=>{const m=new Map();for(const s of repo.all(kind))if(!m.has(s.product))m.set(s.product,s);return m;};const settings=first('productSettings'),packs=first('packaging');return repo.all('product').map(p=>{const setting=settings.get(p.id),pack=packs.get(p.id);return {...p,unitWeight:setting?.unitWeight??p.unitWeight,packQuantity:setting?.packQuantity??pack?.operatingQuantity??null};});}
 export const catalogueMethods={
   product(input){
-    const system=this.db.prepare('SELECT s.id FROM scaffold_systems s JOIN company_systems c ON c.system_id=s.id WHERE c.company_id=? AND s.id=? AND c.enabled=1').get(this.user.company_id,input.system);
+    const system=cached(this.db,'SELECT s.id FROM scaffold_systems s JOIN company_systems c ON c.system_id=s.id WHERE c.company_id=? AND s.id=? AND c.enabled=1').get(this.user.company_id,input.system);
     requireRule(system,'Enable this scaffold system before selecting new materials.');
     const reference=label(input.reference,'Manufacturer or demo reference'),manufacturer=label(input.manufacturer??'Synthetic demonstration','Manufacturer'),region=label(input.region??'DEMO','Region');
     const same=this.repo.all('product').find(p=>p.reference===reference&&p.manufacturer===manufacturer&&p.region===region);
@@ -20,11 +25,13 @@ export const catalogueMethods={
     return product;
   },
   override(input){const product=this.repo.get(input.product,'product');const settings=this.repo.all('productSettings').find(s=>s.product===product.id);const data={product:product.id,unitWeight:nullable(input.unitWeight,'Unit weight (g)'),packQuantity:input.packQuantity==null?null:integer(input.packQuantity,'Pack quantity',1),spannerSize:input.spannerSize==null?null:integer(input.spannerSize,'Spanner size (tenths mm)',1),reason:label(input.reason,'Reason'),status:'COMPANY CONFIGURED',actor:this.user.id};const result=settings?this.repo.save({...settings,...data}):this.repo.add('productSettings',data);this.repo.event(this.user.id,'PRODUCT_OVERRIDE',{product:product.id,reason:data.reason,key:this.key});return result;},
-  effectiveProducts(){const first=(kind)=>{const m=new Map();for(const s of this.repo.all(kind))if(!m.has(s.product))m.set(s.product,s);return m;};const settings=first('productSettings'),packs=first('packaging');return this.repo.all('product').map(p=>{const setting=settings.get(p.id),pack=packs.get(p.id);return {...p,unitWeight:setting?.unitWeight??p.unitWeight,packQuantity:setting?.packQuantity??pack?.operatingQuantity??null};});},
-  effective(productId){const p=this.repo.get(productId,'product'),setting=this.repo.all('productSettings').find(s=>s.product===productId),pack=this.repo.all('packaging').find(s=>s.product===productId);return {...p,unitWeight:setting?.unitWeight??p.unitWeight,packQuantity:setting?.packQuantity??pack?.operatingQuantity??null};},
+  // Cached per company by the exact catalogue revision (see Repository); callers get fresh shallow copies and may mutate them.
+  catalogue(){if(this.catalogueMemo)return this.catalogueMemo;if(this.catalogueBypass){const list=computeEffectiveProducts(this.repo);return {list,byId:byIdOf(list)};}let byCompany=catalogueCache.get(this.db);if(!byCompany)catalogueCache.set(this.db,byCompany=new Map());const rev=catalogueRevision(this.db,this.user.company_id);let entry=byCompany.get(this.user.company_id);if(entry?.rev!==rev){const list=computeEffectiveProducts(this.repo);entry={rev,list,byId:byIdOf(list)};byCompany.set(this.user.company_id,entry);}return entry;},
+  effectiveProducts(){return this.catalogue().list.map(p=>({...p}));},
+  effective(productId){const p=this.catalogueBypass?null:this.catalogue().byId.get(productId);if(p)return {...p};const q=this.repo.get(productId,'product'),setting=this.repo.all('productSettings').find(s=>s.product===productId),pack=this.repo.all('packaging').find(s=>s.product===productId);return {...q,unitWeight:setting?.unitWeight??q.unitWeight,packQuantity:setting?.packQuantity??pack?.operatingQuantity??null};},
   seed(){
     requireRule(!this.repo.all('product').length,'Synthetic catalogue has already been configured.');
-    const system=this.db.prepare('SELECT system_id FROM company_systems WHERE company_id=? AND enabled=1 ORDER BY system_id LIMIT 1').get(this.user.company_id)?.system_id;
+    const system=cached(this.db,'SELECT system_id FROM company_systems WHERE company_id=? AND enabled=1 ORDER BY system_id LIMIT 1').get(this.user.company_id)?.system_id;
     return synthetic.map(product=>this.product({...product,system}));
   },
   importCatalogue(input){requireRule(Array.isArray(input.products)&&input.products.length>0&&input.products.length<=100,'Import between 1 and 100 factual variants per batch.');const batch=this.repo.add('importBatch',{actor:this.user.id,createdAt:new Date().toISOString(),status:'REVIEWED BY COMPANY',name:label(input.name,'Batch name')});const products=input.products.map(p=>this.product(p));batch.products=products.map(p=>p.id);this.repo.save(batch);return {batch,products};}

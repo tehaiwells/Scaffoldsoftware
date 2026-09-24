@@ -49,7 +49,9 @@ export const movementMethods={
     this.advanceWorkers(elapsed);
     this.advanceForklifts(elapsed);
     for(const truck of this.repo.all('truck').filter(t=>t.status==='IN_TRANSIT')){truck.remainingMs=Math.max(0,truck.remainingMs-elapsed);if(truck.remainingMs===0){const destination=this.repo.get(truck.destination);truck.at=destination.id;truck.status=destination.kind==='site'?'AT_SITE':'AT_YARD';truck.destination=null;const delivery=this.repo.get(truck.delivery,'delivery');delivery.status=delivery.containers.length?'ARRIVED':'DELIVERED';this.repo.save(delivery);this.notify('Truck arrived',`${truck.name} has arrived. Cargo stays on the truck until unloading.`,destination.kind==='site'?destination.id:null);}this.repo.save(truck);}
-    for(let task of this.tasks().filter(t=>active(t)&&t.state!=='BLOCKED').map((t,i)=>({t,i,p:this.taskPriority(t)})).sort((a,b)=>a.p-b.p||a.i-b.i).map(x=>x.t)){
+    // Priority order (the title-free part of taskInfo), with one id -> kind lookup per id for the sort.
+    this.taskKinds=new Map();let order;try{order=this.tasks().filter(t=>active(t)&&t.state!=='BLOCKED').map((t,i)=>({t,i,p:this.taskPriority(t)})).sort((a,b)=>a.p-b.p||a.i-b.i).map(x=>x.t);}finally{this.taskKinds=null;}
+    for(let task of order){
       if(task.due>0){task.due=Math.max(0,task.due-elapsed);this.repo.save(task);continue;}
       this.db.exec('SAVEPOINT movement_step');
       try{this.advance(task);this.db.exec('RELEASE movement_step');}

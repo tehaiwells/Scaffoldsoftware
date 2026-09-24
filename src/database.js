@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 export function openDatabase(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+  // synchronous=NORMAL: WAL stays consistent; a power cut (not a process crash) can lose the last few commits.
+  db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS companies(id TEXT PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,company_id TEXT NOT NULL REFERENCES companies(id),name TEXT NOT NULL,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL, UNIQUE(company_id,id));
@@ -31,7 +32,16 @@ export function openDatabase(path) {
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=2').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/002_simulation.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=3').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/003_memberships.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=4').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/004_manager_stock_adjust.sql',import.meta.url),'utf8')));
+  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=5').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/005_perf_indexes.sql',import.meta.url),'utf8')));
   return db;
+}
+
+// One prepared statement per SQL text per connection (statements are synchronous and reset after every call).
+const statements=new WeakMap();
+export function cached(db, sql) {
+  let map=statements.get(db); if(!map) statements.set(db,map=new Map());
+  let statement=map.get(sql); if(!statement) map.set(sql,statement=db.prepare(sql));
+  return statement;
 }
 
 export function atomic(db, operation) {
