@@ -3,7 +3,10 @@ const app=document.querySelector('#app'),message=document.querySelector('#messag
 let systems=[],state=null;
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,data) {const res=await fetch(`/api/${path}`,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const value=await res.json();if(!res.ok)throw Object.assign(new Error(value.error),{status:res.status});return value;}
-function notify(text){message.textContent=text;}
+// The toast hides itself after 6 s (10 s for long texts) or on a click; a new message restarts the timer.
+let toastTimer=null;
+function notify(text){clearTimeout(toastTimer);toastTimer=null;text=String(text??'');message.textContent=text;if(text)toastTimer=setTimeout(()=>{message.textContent='';toastTimer=null;},text.length>120?10000:6000);}
+message.addEventListener('click',()=>{clearTimeout(toastTimer);toastTimer=null;message.textContent='';});
 const checks=(items,selected,name)=>`<div class="checks">${items.map(x=>`<label><input type="checkbox" name="${name}" value="${escape(x.id)}" ${selected.includes(x.id)?'checked':''}>${escape(x.name)}</label>`).join('')}</div>`;
 const field=(name,label,type='text',value='')=>`<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required maxlength="${type==='email'?254:128}" ${type==='password'?'minlength="12" autocomplete="new-password"':''}></label>`;
 function auth(register=true){

@@ -1,5 +1,6 @@
 import { requireRule } from './geometry.js';
-import { active } from './inventory.js';
+import { active,spotProblem } from './inventory.js';
+import { rect,contains } from './geometry.js';
 import { skillOn } from './jobs.js';
 const states=['QUEUED','RESERVED','ASSIGNED','TRAVELLING_TO_PICKUP','PICKING','CARRYING','PLACING','COMPLETE'];
 export const movementMethods={
@@ -8,6 +9,10 @@ export const movementMethods={
     const c=this.repo.get(task.container,'container'),config=this.repo.all('config')[0]??{stepMs:700,speed:4000,craneWorkers:1};
     if(task.dependency){const dependency=this.repo.get(task.dependency,'task');requireRule(dependency.state!=='CANCELLED','The step this movement depends on was cancelled.');if(dependency.state!=='COMPLETE')return task;}
     this.assertCountFree(c);
+    // Before anything is lifted: the destination must still fit the location's current shape (a boundary, loading zone or fixture change may cover it).
+    // A stack destination: the stillage it goes on must still stand there under it (a boundary save may have moved it) and the stack must fit the height.
+    if(['RESERVED','PICKING'].includes(task.state)&&!task.picked&&task.position){const to=this.repo.get(task.to);if(to.kind!=='truck'){const problem=spotProblem(rect(c,task.position),to);requireRule(!problem,problem);}
+      const s=task.position.support?this.repo.get(task.position.support,'container'):null;if(s&&!this.tasks().some(t=>active(t)&&t.container===s.id)){requireRule(s.location===task.to&&!s.retired&&contains(rect(s),rect(c,task.position)),'The stillage '+c.name+' was to go on ('+s.name+') is no longer under that spot. Cancel this movement and plan again.');let h=c.height,cur=s,n=0;while(cur&&n++<9){h+=cur.height;cur=cur.support?this.repo.get(cur.support,'container'):null;}requireRule(h<=(to.height??10000),'The stack exceeds the configured height.');}}
     if(task.state==='RESERVED'){
       // One machine route per handling area avoids intersecting moving loads in V1.
       if(this.tasks().some(other=>other.id!==task.id&&active(other)&&other.handling===task.handling&&other.resources.length))return task;
@@ -23,7 +28,7 @@ export const movementMethods={
     }
     if(task.state==='PLACING'){
       requireRule(c.location===task.machine,'Cargo is not on the assigned machine.');requireRule(task.resources.every(id=>this.repo.get(id,'resource').task===task.id),'The assigned resources changed.');this.validatePlacement(c,task.to,task.position);if(c.capacity!==null)requireRule(this.weight(c)<=c.capacity,'Container exceeds configured loaded capacity.');
-      const source=c.location;c.location=task.to;Object.assign(c,task.position);c.sourceYard=c.sourceYard??(this.repo.get(task.from).kind==='yard'?task.from:null);c.placedAt=new Date().toISOString();const from=this.repo.get(task.from);c.delivery=from.kind==='truck'?from.delivery:c.delivery??null;this.repo.save(c);
+      const source=c.location,was={x:c.x,y:c.y,rotation:c.rotation??0};c.location=task.to;Object.assign(c,task.position);c.turnedFrom=task.turn&&!task.layout?{...was,after:{x:c.x,y:c.y,rotation:c.rotation}}:null;if(task.turn&&was.rotation!==(c.rotation??0))this.repo.event(task.actor,'TURNED',{container:c.id,source:task.to,destination:task.to,task:task.id,reason:'Turned 90°: '+was.x+','+was.y+' r'+was.rotation+' to '+c.x+','+c.y+' r'+c.rotation,key:task.id+':turned'});c.sourceYard=c.sourceYard??(this.repo.get(task.from).kind==='yard'?task.from:null);c.placedAt=new Date().toISOString();const from=this.repo.get(task.from);c.delivery=from.kind==='truck'?from.delivery:c.delivery??null;this.repo.save(c);
       for(const l of this.repo.lines(c.id))this.repo.event(task.actor,'PLACEMENT',{container:c.id,product:l.product_id,quantity:l.quantity,source,destination:c.location,task:task.id,request:task.request,key:task.id+':place'});
       this.release(task);this.reconcileDeliveries();if(from.kind==='truck')this.releaseTruck(from.id);
     }

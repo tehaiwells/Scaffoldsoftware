@@ -8,7 +8,7 @@ import { Simulation, startScheduler } from './simulation.js';
 
 export function createApp(db) {
   const service=new Service(db), attempts=new Map();
-  const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/style.css':['style.css','text/css']};
+  const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/shape.js':['shape.js','text/javascript'],'/shape-editor.js':['shape-editor.js','text/javascript'],'/style.css':['style.css','text/css']};
   return createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -43,6 +43,8 @@ export function createApp(db) {
       else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${['stock','register','additions','removals','yardlist'].includes(kind)?kind:'history'}.csv"`});res.end(output);}
       else if(req.method==='POST'&&path==='/api/placement-preview') send(200,simulation.placementPreview(body));
       else if(req.method==='POST'&&path==='/api/layout-preview') send(200,simulation.layoutPreview(body));
+      else if(req.method==='POST'&&path==='/api/turn-preview') send(200,simulation.turnPreview(body));
+      else if(req.method==='POST'&&path==='/api/boundary-preview') send(200,simulation.boundaryPreview(body));
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}

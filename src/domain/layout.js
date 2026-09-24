@@ -1,4 +1,4 @@
-import { integer,requireRule,rect,overlap,contains,fitsPolygon,route } from './geometry.js';
+import { integer,requireRule,rect,overlap,contains,fitsPolygon,carryRoute,turnPath,sweepOf,circleBox } from './geometry.js';
 import { label } from './catalogue.js';
 import { active } from './inventory.js';
 import { solidFixture } from './fixtures.js';
@@ -7,7 +7,7 @@ const metres=p=>(p.x/1000).toFixed(1)+', '+(p.y/1000).toFixed(1)+' m';
 export const layoutMethods={
   keepClear(loc){return [{...(loc.loading??{x:0,y:0}),w:2000,h:1500,name:'loading zone'},...(loc.fixtures??[])];},
   fixtureObstacles(loc){const location=typeof loc==='string'?this.repo.get(loc):loc;return (location.fixtures??[]).filter(solidFixture).map(f=>({x:f.x,y:f.y,w:f.w,h:f.h}));},
-  fixtures(input){const yard=this.repo.get(input.id,'yard');return this.reshape(yard,{segments:yard.segments,closed:true,fixtures:input.fixtures});},
+  fixtures(input){const yard=this.repo.get(input.id,'yard');return this.reshape(yard,{fixtures:input.fixtures});},
   // A layout plan lists new positions for stillages already in the yard. Everything not listed stays where it is.
   layoutMoves(yard,input){
     requireRule(Array.isArray(input.moves)&&input.moves.length>0&&input.moves.length<=100,'Plan between 1 and 100 stillage moves.');
@@ -46,7 +46,7 @@ export const layoutMethods={
     const work=new Map(stored.map(c=>[c.id,at(c)]));const pending=[...moves];const steps=[];
     const buried=id=>[...work].some(([,p])=>p.support===id);
     const blockers=(id,to)=>{const r=foot(id,to);return [...work].filter(([o,p])=>o!==id&&(p.support??null)===(to.support??null)&&overlap(foot(o,p),r)).map(([o])=>o);};
-    const path=(id,from,to)=>{const c=byId.get(id),shape=rect(c,{x:0,y:0,rotation:from.rotation});shape.w=Math.max(1500,shape.w);shape.h=Math.max(1000,shape.h);const chain=s=>{const out=[];let cur=s,n=0;while(cur&&n++<9){out.push(cur);cur=work.get(cur)?.support;}return out;};const skip=new Set([id,...chain(from.support),...chain(to.support)]);const obstacles=[...[...work].filter(([o])=>!skip.has(o)).map(([o,p])=>foot(o,p)),...solids];return route({x:from.x,y:from.y},{x:to.x,y:to.y},shape,yard.points,obstacles);};
+    const path=(id,from,to)=>{const c=byId.get(id),shape=rect(c,{x:0,y:0,rotation:from.rotation});const chain=s=>{const out=[];let cur=s,n=0;while(cur&&n++<9){out.push(cur);cur=work.get(cur)?.support;}return out;};const skip=new Set([id,...chain(from.support),...chain(to.support)]);const obstacles=[...[...work].filter(([o])=>!skip.has(o)).map(([o,p])=>foot(o,p)),...solids];if((from.rotation??0)!==(to.rotation??0)){const t=turnPath(yard.points,c,from,to,obstacles);return t?t.path:null;}return carryRoute({x:from.x,y:from.y},{x:to.x,y:to.y},shape,yard.points,obstacles);};
     let parks=0;
     while(pending.length){
       let progress=false;
@@ -68,11 +68,14 @@ export const layoutMethods={
   },
   parkingSpot(yard,c,cur,work,pending,foot,zones,path){
     const xs=yard.points.map(p=>p.x),ys=yard.points.map(p=>p.y),x0=Math.ceil(Math.min(...xs)/500)*500,y0=Math.ceil(Math.min(...ys)/500)*500,x1=Math.max(...xs),y1=Math.max(...ys);
-    const finals=pending.map(m=>foot(m.container,m.to)),ground=[...work].filter(([o,p])=>o!==c.id&&(p.support??null)===null).map(([o,p])=>foot(o,p));
+    const finals=pending.map(m=>{const w=work.get(m.container),a=foot(m.container,w),b=foot(m.container,m.to);return (w.rotation??0)!==(m.to.rotation??0)&&overlap(a,b)?circleBox(sweepOf(a,b)):b;}),ground=[...work].filter(([o,p])=>o!==c.id&&(p.support??null)===null).map(([o,p])=>foot(o,p));
     const candidates=[];for(const rotation of [0,90])for(let y=y0;y<y1;y+=500)for(let x=x0;x<x1;x+=500){const p={x,y,rotation,support:null},r=foot(c.id,p);if(!fitsPolygon(r,yard.points)||zones.some(z=>overlap(r,z))||ground.some(o=>overlap(r,o))||finals.some(f=>overlap(r,f)))continue;candidates.push({p,d:Math.hypot(x-cur.x,y-cur.y)+(rotation===cur.rotation?0:1)});}
     candidates.sort((a,b)=>a.d-b.d);
-    for(const {p} of candidates.slice(0,60))if(path(c.id,cur,p))return p;
-    return null;
+    // Setting c down must not cut off the move it frees (a pile base that has to be carried out to open ground to turn): check that move's path
+    // for up to 12 reachable spots; if none keeps it open, fall back to the nearest reachable spot as before.
+    const freed=pending.filter(m=>m.container!==c.id&&m.container===cur.support);let first=null,checked=0;
+    for(const {p} of candidates.slice(0,60)){if(!path(c.id,cur,p))continue;if(!freed.length)return p;first??=p;if(checked++>=12)break;work.set(c.id,p);const ok=freed.every(m=>path(m.container,work.get(m.container),m.to));work.set(c.id,cur);if(ok)return p;}
+    return first;
   },
   layoutPreview(input){
     this.auth.require(this.user,'operations.manage');const yard=this.repo.get(input.yard,'yard');
@@ -80,28 +83,41 @@ export const layoutMethods={
     catch(error){if(!error.status)throw error;return {ok:false,message:error.message,steps:[]};}
   },
   layoutWarnings(yard){const crew=this.repo.all('resource').filter(r=>r.enabled&&r.location===yard.id);const warnings=[];if(!crew.some(r=>r.type==='FORKLIFT'&&!r.driver&&!r.claimedBy))warnings.push('No free forklift at the yard: the instructions will wait until one is available.');if(!crew.some(r=>r.type==='WORKER'&&!r.mountedOn&&(!r.workerMode||r.workerMode==='AUTO')))warnings.push('No worker is on automatic work: return a worker to work so the instructions can start.');if(this.repo.all('config')[0]?.paused)warnings.push('The simulation is paused.');return warnings;},
+  // One running plan (layout or pile turn) per yard or site: plans would otherwise fight over the same stillages and parking spots.
+  assertNoActivePlan(loc,doing='committing another'){const running=this.layouts().find(l=>l.status==='ACTIVE'&&l.yard===loc.id);requireRule(!running,'Finish or cancel the current layout plan before '+doing+(running?' ('+running.name+', '+running.done+' of '+running.steps.length+' done).':'.'));},
   commitLayout(input){
     const yard=this.repo.get(input.yard,'yard');
-    requireRule(!this.layouts().some(l=>l.status==='ACTIVE'&&l.yard===yard.id),'Finish or cancel the current layout plan before committing another.');
+    this.assertNoActivePlan(yard);
     const steps=this.sequenceLayout(yard,input);
-    const layout=this.repo.add('layout',{name:label(input.name??'Layout plan '+new Date().toISOString().slice(0,16).replace('T',' '),'Plan name'),yard:yard.id,actor:this.user.id,createdAt:new Date().toISOString(),steps:[],status:'ACTIVE'});
-    let previous=null;const tasks=[];
-    steps.forEach((s,i)=>{const task=this.makeTask({type:'MOVE',container:s.container,from:yard.id,to:yard.id,handling:yard.id,position:{x:s.to.x,y:s.to.y,rotation:s.to.rotation,support:s.to.support},request:null,actor:this.user.id,state:'QUEUED',dependency:previous,layout:layout.id,step:i+1,park:s.park});previous=task.id;tasks.push(task);});
-    layout.steps=steps.map((s,i)=>({...s,task:tasks[i].id}));this.repo.save(layout);
-    this.repo.event(this.user.id,'LAYOUT_PLANNED',{destination:yard.id,quantity:steps.length,reason:layout.name+': '+steps.length+' step(s)',key:this.key});
+    const {layout,tasks}=this.commitSteps(yard,steps,label(input.name??'Layout plan '+new Date().toISOString().slice(0,16).replace('T',' '),'Plan name'),'PLAN');
     const message=steps.length+' instruction'+(steps.length===1?'':'s')+' sent to the yard crew.';this.notify('Layout plan committed',layout.name+': '+message,null);
     return {layout,tasks,warnings:this.layoutWarnings(yard),message};
+  },
+  // Records a sequenced plan and its chained MOVE tasks. purpose PLAN (layout planner) or TURN (pile turn); yard holds the yard or site id.
+  commitSteps(loc,steps,name,purpose){
+    const layout=this.repo.add('layout',{name,purpose,yard:loc.id,actor:this.user.id,createdAt:new Date().toISOString(),steps:[],status:'ACTIVE'});
+    let previous=null;const tasks=[];
+    steps.forEach((s,i)=>{const task=this.makeTask({type:'MOVE',container:s.container,from:loc.id,to:loc.id,handling:loc.id,position:{x:s.to.x,y:s.to.y,rotation:s.to.rotation,support:s.to.support},request:null,actor:this.user.id,state:'QUEUED',dependency:previous,layout:layout.id,step:i+1,park:s.park,...(purpose==='TURN'?{turn:true}:{})});previous=task.id;tasks.push(task);});
+    layout.steps=steps.map((s,i)=>({...s,task:tasks[i].id}));this.repo.save(layout);
+    this.repo.event(this.user.id,'LAYOUT_PLANNED',{destination:loc.id,quantity:steps.length,reason:layout.name+': '+steps.length+' step(s)',key:this.key});
+    return {layout,tasks};
   },
   cancelLayout(input){
     const layout=this.repo.get(input.id,'layout');requireRule(layout.status==='ACTIVE','This layout plan is already closed.');
     const tasks=layout.steps.map(s=>this.repo.get(s.task,'task'));let cancelled=0,kept=0;
     for(const t of [...tasks].reverse()){if(!active(t))continue;if(t.picked){kept++;continue;}this.cancel({id:t.id});cancelled++;}
     layout.status='CANCELLED';layout.cancelledAt=new Date().toISOString();this.repo.save(layout);
-    return {layout,cancelled,kept,message:cancelled+' step(s) cancelled'+(kept?'; '+kept+' already on the forklift will be placed first':'')+'.'};
+    // Stillages set down for now whose way back was cancelled stay where they are; say where.
+    const now=layout.steps.map(s=>this.repo.get(s.task,'task'));
+    const left=[...new Set(layout.steps.filter((s,i)=>s.park&&now[i].state==='COMPLETE').map(s=>s.container))].filter(id=>layout.steps.some((s,i)=>s.container===id&&!s.park&&now[i].state==='CANCELLED')).map(id=>{const c=this.repo.get(id,'container');return c.name+' stays set down at '+(c.x/1000).toFixed(1)+', '+(c.y/1000).toFixed(1)+' m';});
+    return {layout,cancelled,kept,message:cancelled+' step(s) cancelled'+(kept?'; '+kept+' already on the forklift will be placed first':'')+'.'+(left.length?' '+left.join('; ')+'.':'')};
   },
+  // Every running plan, plus the last 10 closed ones (a running plan must never drop out of view or out of the one-plan rule).
   layouts(){
-    return this.repo.all('layout').slice(-10).map(l=>{const steps=l.steps.map(s=>{let task=null;try{task=this.repo.get(s.task,'task');}catch{}return {...s,state:task?.state??'UNKNOWN',reason:task?.reason??null};});
+    const tasks=new Map(this.tasks().map(t=>[t.id,t]));
+    const all=this.repo.all('layout').map(l=>{const steps=l.steps.map(s=>{const task=tasks.get(s.task)??null;return {...s,state:task?.state??'UNKNOWN',reason:task?.reason??null};});
       const status=l.status==='CANCELLED'?'CANCELLED':steps.every(s=>s.state==='COMPLETE')?'COMPLETE':steps.some(s=>s.state==='CANCELLED')&&!steps.some(s=>active({state:s.state}))?'STOPPED':'ACTIVE';
-      return {...l,steps,status,done:steps.filter(s=>s.state==='COMPLETE').length};});
+      return {...l,purpose:l.purpose??'PLAN',steps,status,done:steps.filter(s=>s.state==='COMPLETE').length};});
+    const closed=all.filter(l=>l.status!=='ACTIVE').slice(-10);return all.filter(l=>l.status==='ACTIVE'||closed.includes(l));
   }
 };

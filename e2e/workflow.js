@@ -14,7 +14,8 @@ export async function setupDemo(p,email){
   await setupYard(p);
 }
 export async function setupYard(p){
-  await visible(p,button(p,'Add segment'));await button(p,'Add segment').click();await p.getByRole('radio',{name:'↓ DOWN',exact:true}).check();await p.getByRole('spinbutton',{name:'Line length (m)',exact:true}).fill('16');await button(p,'Add segment').click();await p.getByRole('radio',{name:'← LEFT',exact:true}).check();await button(p,'Add segment').click();await button(p,'Preview and close perimeter').click();await button(p,'Save yard').click();
+  // First run: the shape editor opens on its own with a 20 × 16 m rectangle already filled in.
+  await visible(p,button(p,'Create yard'));assert.equal(await p.getByRole('spinbutton',{name:'Width (m)',exact:true}).inputValue(),'20');assert.equal(await p.getByRole('spinbutton',{name:'Depth (m)',exact:true}).inputValue(),'16');await button(p,'Create yard').click();
   await visible(p,p.getByText('Configure workers & equipment · DEMO ONLY',{exact:true}));await p.getByText('Configure workers & equipment · DEMO ONLY',{exact:true}).click();await button(p,'Save resources').click();await visible(p,button(p,'Pause simulation'));
   await button(p,'⚙ SETTINGS').click();await button(p,'Add synthetic demo catalogue').click();await visible(p,p.getByRole('status').filter({hasText:'Synthetic catalogue added.'}));await button(p,'← Open yard').click();await p.getByText('Add an empty container',{exact:true}).click();await button(p,'Register empty container').click();await visible(p,button(p,'Select S-001'));
   await button(p,'▤ STOCK').click();await p.getByText('Add starting stock / authorised receipt',{exact:true}).click();await button(p,'Record stock receipt').click();const stock=p.getByRole('row').filter({hasText:'DEMO ledger — 2 m'});await visible(p,stock);assert.equal(await stock.getByRole('cell',{name:'100',exact:true}).count(),2);assert.match(await stock.innerText(),/Main yard/);
