@@ -20,7 +20,7 @@ label{font-size:12px;font-weight:600;color:#53684a;margin:18px 0 8px}input,selec
 
 .worker-command-panel{background:#faffee;border:1px solid #bdd49d;border-radius:12px;padding:22px;margin:18px 0;box-shadow:0 5px 20px #223d2510}.worker-roster{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}.worker-roster .worker-active{background:#d3ed8c;border-color:#86a556}.worker-orders{display:flex;align-items:center;gap:18px}.worker-orders h2{margin:6px 0}.worker-orders p{margin:3px 0}.worker-portrait{width:62px;height:70px;border-radius:10px;background:linear-gradient(#e9d963 45%,#354f36 45%);display:grid;place-items:center;color:#fff}.worker-portrait .line-icon{width:30px;height:30px}.worker-buttons{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.worker-help{font-size:12px;margin-bottom:0}.yard-worker{cursor:pointer}.yard-worker:hover{filter:brightness(1.1)}.yard-worker:focus-visible{outline:none;filter:drop-shadow(0 0 60px #efff85)}
 
-.worker-command-panel:has(.worker-orders){position:fixed;right:26px;bottom:18px;width:min(510px,calc(100vw - 32px));z-index:12;margin:0;padding:16px 20px;box-shadow:0 12px 40px #142e3540}.worker-command-panel:has(.worker-orders) .worker-roster{display:none}.worker-command-panel:has(.worker-orders) .worker-help{font-size:10px;line-height:1.5}.worker-portrait svg{width:55px;height:65px}.worker-portrait{background:#426447}.worker-command-panel .worker-buttons{margin-top:12px}.worker-command-panel .worker-orders p{font-size:12px}.worker-command-panel .worker-orders h2{font-size:19px}.yard-worker:not(.chosen) text{font-size:230px}@media(max-width:650px){.worker-command-panel:has(.worker-orders){right:12px;bottom:10px;padding:12px}.worker-command-panel .worker-buttons{gap:5px}.worker-command-panel .worker-buttons button{padding:8px 10px;font-size:11px}}
+.worker-command-panel:has(.worker-orders){position:fixed;right:26px;bottom:18px;width:min(510px,calc(100vw - 32px));z-index:12;margin:0;padding:16px 20px;box-shadow:0 12px 40px #142e3540}.worker-command-panel:has(.worker-orders) .worker-roster{display:none}.worker-command-panel:has(.worker-orders) .worker-help{font-size:10px;line-height:1.5}.worker-portrait svg{width:55px;height:65px}.worker-portrait{background:#426447}.worker-command-panel .worker-buttons{margin-top:12px}.worker-command-panel .worker-orders p{font-size:12px}.worker-command-panel .worker-orders h2{font-size:19px}@media(max-width:650px){.worker-command-panel:has(.worker-orders){right:12px;bottom:10px;padding:12px}.worker-command-panel .worker-buttons{gap:5px}.worker-command-panel .worker-buttons button{padding:8px 10px;font-size:11px}}
 
 .worker-close{position:absolute;right:12px;top:12px;min-height:28px;width:28px;padding:0;font-size:19px}.worker-orders{padding-right:22px}
 
@@ -227,3 +227,39 @@ body:has(.shape-savebar) #message:not(:empty){bottom:calc(var(--savebar-h,80px) 
 .load-now{list-style:none;padding:0;margin:0}
 .load-now li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;font-size:13px}
 .load-now li button{min-height:32px;padding:4px 10px}
+/* Yard plan and truck deck art. Name tags (.tg) are pills drawn in plan units and scaled by --ls = k*(.25+.75/z), so they keep about the same on-screen size at every zoom and grow on narrow plans (--k).
+   fbN on the svg is the current label band (syncPlanLabels in visual.js); a tag with vN shows from band N up and one with hN hides again from band N, so tags that would overlap stay hidden until zooming in makes room. */
+.plan-wrap{container-type:inline-size}
+.yard-svg{--k:1;--ls:calc(var(--k)*(.25 + .75/var(--z,1)))}
+.yard-svg,.yard-svg.tilted{background:#a3b27a;border-color:#c9d3bd;box-shadow:inset 0 0 0 1px #ffffff40}
+@container (max-width:900px){.yard-svg{--k:1.08}}
+@container (max-width:760px){.yard-svg{--k:1.25}}
+@container (max-width:620px){.yard-svg{--k:1.4}}
+@container (max-width:520px){.yard-svg{--k:1.7}}
+@container (max-width:420px){.yard-svg{--k:2.05}}
+.yard-svg text,.deck-svg text{font-family:inherit}
+.yard-svg .tg{scale:var(--ls);transform-origin:0 0;transform-box:view-box}
+.yard-svg .tg text,.deck-svg .tg text{font-weight:700;letter-spacing:.01em}
+.yard-svg .tg .tg-sub text,.deck-svg .tg .tg-sub text{font-weight:600;letter-spacing:0}
+.yard-svg .tg .tg-badge text{font-weight:800}
+.yard-svg .nm,.yard-svg .dim{--fs:calc(var(--u)*var(--k)*1px*(.45 + .55/var(--z)));paint-order:stroke;stroke-linejoin:round}
+.yard-svg .nm{font-size:calc(var(--fs)*11.5);font-weight:700;fill:#fff;stroke:#17241c;stroke-width:.3em;letter-spacing:.02em}
+.yard-svg .dim{font-size:calc(var(--fs)*9);font-weight:700;fill:#2e3a2f;stroke:#f7f4ea;stroke-width:.32em;letter-spacing:.06em}
+.yard-svg .corner-number circle{fill:#214d3e}
+.yard-svg.fb0 :is(.v1,.v2,.v3,.v4,.v5,.v6,.v7,.v8,.v9,.v10,.v11,.v12){display:none}
+.yard-svg.fb1 :is(.v2,.v3,.v4,.v5,.v6,.v7,.v8,.v9,.v10,.v11,.v12,.h1){display:none}
+.yard-svg.fb2 :is(.v3,.v4,.v5,.v6,.v7,.v8,.v9,.v10,.v11,.v12,.h1,.h2){display:none}
+.yard-svg.fb3 :is(.v4,.v5,.v6,.v7,.v8,.v9,.v10,.v11,.v12,.h1,.h2,.h3){display:none}
+.yard-svg.fb4 :is(.v5,.v6,.v7,.v8,.v9,.v10,.v11,.v12,.h1,.h2,.h3,.h4){display:none}
+.yard-svg.fb5 :is(.v6,.v7,.v8,.v9,.v10,.v11,.v12,.h1,.h2,.h3,.h4,.h5){display:none}
+.yard-svg.fb6 :is(.v7,.v8,.v9,.v10,.v11,.v12,.h1,.h2,.h3,.h4,.h5,.h6){display:none}
+.yard-svg.fb7 :is(.v8,.v9,.v10,.v11,.v12,.h1,.h2,.h3,.h4,.h5,.h6,.h7){display:none}
+.yard-svg.fb8 :is(.v9,.v10,.v11,.v12,.h1,.h2,.h3,.h4,.h5,.h6,.h7,.h8){display:none}
+.yard-svg.fb9 :is(.v10,.v11,.v12,.h1,.h2,.h3,.h4,.h5,.h6,.h7,.h8,.h9){display:none}
+.yard-svg.fb10 :is(.v11,.v12,.h1,.h2,.h3,.h4,.h5,.h6,.h7,.h8,.h9,.h10){display:none}
+.yard-svg.fb11 :is(.v12,.h1,.h2,.h3,.h4,.h5,.h6,.h7,.h8,.h9,.h10,.h11){display:none}
+.yard-svg.fb12 :is(.h1,.h2,.h3,.h4,.h5,.h6,.h7,.h8,.h9,.h10,.h11,.h12){display:none}
+.deck-svg{background:#e9e6dc;max-height:360px;padding:0}
+.deck-svg .tg{transform-box:view-box;transform-origin:0 0}
+@media (max-width:640px){.deck-svg .deck-tag .tg-sub{display:none}}
+.legend-dot.stillage{background:#98cc2e}.legend-dot.cage{background:#f0c230}.legend-dot.loading{background:repeating-linear-gradient(45deg,#efc52f 0 3px,#f6e9b8 3px 5px);box-shadow:inset 0 0 0 1px #d9ab1e}.legend-dot.damaged{background:#d65f37}
