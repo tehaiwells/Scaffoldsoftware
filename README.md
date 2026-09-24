@@ -41,6 +41,8 @@ For blank setup, create a simulation company in the UI; choose systems; create a
 
 POST /api/commands/yard and /api/commands/siteBoundary take {id?, shapeRev?, name, height, points, loading, gate, fixtures?}; points is the closed ring of corners in millimetres (segments with closed:true is still accepted). POST /api/boundary-preview takes the same body plus detail:'quick' or 'full' and never writes. POST /api/turn-preview {container, rotation?} explains what a turn would do, and POST /api/commands/rotate {container, rotation} queues it, where rotation is the target orientation (90 minus the current one); both need operations.manage.
 
+POST /api/commands/loadTruck takes {truck, containers:[ids]} and loads those stillages onto a truck parked at their yard or site. Stillages stacked on them are included and loaded top first as chained crew movements; the whole request is refused if any stillage cannot go.
+
 ## Tests
 
     npm.cmd test

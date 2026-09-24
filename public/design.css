@@ -208,3 +208,22 @@ body:has(.shape-savebar) #message:not(:empty){bottom:calc(var(--savebar-h,80px) 
 .svg-container.pulse>g>rect:first-child{animation:pulse-stock 1s ease-in-out 3}
 @keyframes pulse-stock{50%{stroke:#ffd84d;stroke-width:160}}
 @media(prefers-reduced-motion:reduce){.svg-container.pulse>g>rect:first-child{animation:none;stroke:#ffd84d}}
+
+/* ---- Loading stillages onto trucks ---- */
+.load-row{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;margin:6px 0}
+.load-row button{min-height:40px}
+.load-hint{font-size:13px;color:var(--muted)}
+.load-hint.warn{color:#8a6412}
+.load-hint.bad{color:#a64d2f}
+.load-status{font-weight:650;color:var(--ink)}
+.load-picker{margin:14px 0;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#f7f9f3}
+.load-picker h3{margin:0 0 8px;font-size:15px}
+.load-picker h4{margin:12px 0 6px;font-size:13px}
+.load-pick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;max-height:260px;overflow:auto;padding:2px}
+.load-pick{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;margin:0;font-weight:400}
+.load-pick input{width:auto;min-height:0;margin:3px 0 0}
+.load-pick small{display:block;color:var(--muted);font-size:11px}
+.load-pick.busy{opacity:.55;cursor:not-allowed}
+.load-now{list-style:none;padding:0;margin:0}
+.load-now li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;font-size:13px}
+.load-now li button{min-height:32px;padding:4px 10px}
