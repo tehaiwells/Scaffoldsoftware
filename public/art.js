@@ -137,3 +137,45 @@ export function siSceneArt(){if(siSceneHTML)return siSceneHTML;let panels='';for
 // Line glyphs for the site chips (24 grid, currentColor).
 const SI_GLYPHS={pin:'M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11ZM12 12.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z',client:'M4 21V5.5L12 3v18M12 8.5h8V21M7 8h2M7 12h2M7 16h2M15 12h2M15 16h2M2 21h20',person:'M12 11.5a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6ZM4.5 20.5a7.5 7.5 0 0 1 15 0',phone:'M6.5 3.5h3l1.6 4.4-2.2 1.4a10.5 10.5 0 0 0 5.8 5.8l1.4-2.2 4.4 1.6v3a2 2 0 0 1-2.1 2A15.5 15.5 0 0 1 4.5 5.6a2 2 0 0 1 2-2.1Z',mail:'M3.5 6h17v12h-17zM3.5 7l8.5 6 8.5-6',size:'M4 20V4M4 20h16M8 16l8-8M13 8h3v3M8 13v3h3',hat:'M3.5 17.5h17M5.5 17.5a6.5 6.5 0 0 1 13 0M10 11.5V7.5h4v4',clock:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7.5V12l3 2',drop:'M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14',road:'M8 3 5 21M16 3l3 18M12 4v3M12 10v3M12 16v3'};
 export const siGlyph=k=>'<svg class="si-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+(SI_GLYPHS[k]??SI_GLYPHS.pin)+'"/></svg>';
+export const scheduleIcon=()=>'<svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v16H4zM4 10h16M8 3v4M16 3v4M8 14h3v3H8z"/></svg>';
+// ---- Materials list sprites: a cantilever stock rack loaded with tubes, ledgers and timber boards, a platform scale (own sheet, built once), and the page's hero scene. ----
+const mlF=n=>+n.toFixed(1),mlPt=p=>mlF(p[0])+' '+mlF(p[1]),mlPoly=(ps,a)=>'<path d="M'+ps.map(mlPt).join('L')+'Z" '+a+'/>',mlLine=(a,b,attr)=>'<path d="M'+mlPt(a)+'L'+mlPt(b)+'" '+attr+'/>';
+// Isometric, lit from the upper left like the yard plan. Uprights along x at the back (y=0), arms reach forward (+y), each level holds a different load.
+function mlRack(){const P=(x,y,z)=>[46+(x-y)*17,116+(x+y)*9.8-z*22];let s=mlPoly([P(-.7,-.5,0),P(5.9,-.5,0),P(5.9,1.9,0),P(-.7,1.9,0)],'fill="#2a1d08" fill-opacity=".16"');
+ const xs=[0,1.8,3.6,5.3],levels=[.75,2.15,3.55],top=4.25;
+ const steel=(a,b,w,c='#2f6b47',hi='#4f9a6c')=>mlLine(a,b,'stroke="#173826" stroke-width="'+(w+1.6)+'" stroke-linecap="round"')+mlLine(a,b,'stroke="'+c+'" stroke-width="'+w+'" stroke-linecap="round"')+mlLine(a,b,'stroke="'+hi+'" stroke-width="'+mlF(w*.35)+'" stroke-linecap="round" transform="translate(-.6 -.4)"');
+ // Feet and the back bracing between the columns.
+ for(const x of xs)s+=steel(P(x,-.25,0),P(x,1.55,0),3.2);
+ for(let k=0;k<xs.length-1;k++)s+=steel(P(xs[k],0,.35),P(xs[k+1],0,top-.3),1.3,'#3f5a4b','#6d8a79')+steel(P(xs[k],0,top-.3),P(xs[k+1],0,.35),1.3,'#3f5a4b','#6d8a79');
+ for(const x of xs)s+=steel(P(x,0,0),P(x,0,top),4.6);
+ const tube=(a,b,w,c='#c4ced2')=>mlLine(a,b,'stroke="#3d494e" stroke-width="'+mlF(w+1.8)+'" stroke-linecap="round"')+mlLine(a,b,'stroke="'+c+'" stroke-width="'+w+'" stroke-linecap="round"')+mlLine(a,b,'stroke="#f6fafb" stroke-width="'+mlF(w*.32)+'" stroke-linecap="round" transform="translate(-.4 -.6)"');
+ const cap=(p,r,fill='#5c686d')=>'<ellipse cx="'+mlF(p[0])+'" cy="'+mlF(p[1])+'" rx="'+mlF(r*.8)+'" ry="'+r+'" fill="'+fill+'" stroke="#3d494e" stroke-width=".9"/>';
+ levels.forEach((z,i)=>{for(const x of xs)s+=steel(P(x,0,z),P(x,1.45,z+.08),2.6,'#e3bd2c','#fbe38a')+'<path d="M'+mlPt(P(x,1.45,z+.08))+'l0 -4" stroke="#8a6d10" stroke-width="2.4" stroke-linecap="round"/>';
+  if(i===0){for(const [y,dz] of [[.3,.14],[.6,.14],[.9,.14],[1.2,.14],[.75,.38],[1.05,.38]]){const a=P(-.45,y,z+dz),b=P(5.75,y,z+dz);s+=tube(a,b,3.6)+cap(b,2.1);}}
+  else if(i===1){for(const [y,dz] of [[.3,.13],[.62,.13],[.94,.13],[1.24,.13],[.78,.34],[1.1,.34]]){const a=P(-.1,y,z+dz),b=P(4.6,y,z+dz);s+=tube(a,b,3,'#d3dadd')+'<path d="M'+mlPt(a)+'l-3.4 1.7M'+mlPt(b)+'l3.4 -1.7" stroke="#e38a2c" stroke-width="4.2" stroke-linecap="round"/>';}}
+  else{for(let k=0;k<2;k++){const y0=.2,y1=1.3,x0=-.3,x1=5.6,zb=z+.08+k*.17,zt=zb+.15;s+=mlPoly([P(x0,y1,zb),P(x1,y1,zb),P(x1,y1,zt),P(x0,y1,zt)],'fill="#b07d42" stroke="#7d5428" stroke-width=".7"')+mlPoly([P(x1,y0,zb),P(x1,y1,zb),P(x1,y1,zt),P(x1,y0,zt)],'fill="#c48f48" stroke="#7d5428" stroke-width=".7"')+mlPoly([P(x0,y0,zt),P(x1,y0,zt),P(x1,y1,zt),P(x0,y1,zt)],'fill="#dcae70" stroke="#7d5428" stroke-width=".7"');}
+   const t=z+.08+2*.17;s+='<path d="M'+mlPt(P(.4,.45,t))+'L'+mlPt(P(5.1,.45,t))+'M'+mlPt(P(.4,1.05,t))+'L'+mlPt(P(5.1,1.05,t))+'" stroke="#c99356" stroke-width=".8"/>';}});
+ s+='<path d="M'+mlPt(P(5.3,0,top))+'l7 -3.5 0 7z" fill="#b9ef4b" stroke="#58801f" stroke-width=".8" stroke-linejoin="round"/>';
+ return s;}
+// A platform scale: steel deck on a low base, the read-out post with a lime display.
+function mlScale(){const P=(x,y,z)=>[40+(x-y)*13,34+(x+y)*7.5-z*12];let s=mlPoly([P(-.3,-.3,0),P(3.3,-.3,0),P(3.3,2.4,0),P(-.3,2.4,0)],'fill="#2a1d08" fill-opacity=".16"');
+ const box=(x0,y0,x1,y1,z0,z1,top,side,end)=>mlPoly([P(x0,y1,z0),P(x1,y1,z0),P(x1,y1,z1),P(x0,y1,z1)],'fill="'+side+'" stroke="#3d494e" stroke-width=".9" stroke-linejoin="round"')+mlPoly([P(x1,y0,z0),P(x1,y1,z0),P(x1,y1,z1),P(x1,y0,z1)],'fill="'+end+'" stroke="#3d494e" stroke-width=".9" stroke-linejoin="round"')+mlPoly([P(x0,y0,z1),P(x1,y0,z1),P(x1,y1,z1),P(x0,y1,z1)],'fill="'+top+'" stroke="#3d494e" stroke-width=".9" stroke-linejoin="round"');
+ s+=box(0,0,3,2.1,0,.35,'#c9d3d7','#8e9ba1','#a7b3b8');
+ let g='';for(let k=1;k<6;k++){g+='M'+mlPt(P(k/2,0.1,.35))+'L'+mlPt(P(k/2,2,.35));}s+='<path d="'+g+'" stroke="#9aa6ab" stroke-width=".8"/>';
+ s+=box(.15,-.15,.45,.15,.35,3.2,'#56636a','#3d494e','#4a565c')+box(-.35,-.3,.95,.25,3.2,4.3,'#2f3734','#1d2422','#2a302e');
+ const d=[P(-.35,.25,3.4),P(.95,.25,3.4),P(.95,.25,4.1),P(-.35,.25,4.1)];s+=mlPoly([[d[0][0]+1.4,d[0][1]-.4],[d[1][0]-1.4,d[1][1]-.4],[d[2][0]-1.4,d[2][1]+.8],[d[3][0]+1.4,d[3][1]+.8]],'fill="#b9ef4b"');
+ s+=box(1.1,.5,2.2,1.5,.35,1.05,'#e3bd2c','#b38714','#c99a1c');
+ return s;}
+// The rack and the scale go into cached pictures (ovImg) as nested <svg>s: one <img> per use instead of a <use> that re-clones the drawing on every render.
+let mlRackSVG=null,mlSceneBody=null;
+const mlRackArt=()=>mlRackSVG??=mlRack();
+const mlNest=(vb,body,x,y,w,h)=>'<svg x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" viewBox="'+vb+'">'+body+'</svg>';
+// ml-rack (160x200), ml-scale (80x72), or any sprite of the main sheet (spr-*).
+export const mlImg=(key,cls='')=>key==='ml-rack'?ovImg('ml-rack',cls,'0 0 160 200',mlRackArt()):key==='ml-scale'?ovImg('ml-scale',cls,'0 0 80 72',mlScale()):ovImg(key,cls);
+// The Materials hero scene: a stock-yard pad with two loaded racks, stillages and a cage, a forklift bringing a stillage in, crew and trees.
+export function mlSceneArt(){return ovImg('ml-scene','ml-diorama','-14 -34 588 256',mlSceneBody??='<path d="M-20 150 250 32 600 150 330 290Z" fill="#8fa866"/><path d="M-20 196 430 0h60L-20 224Z" fill="#55595b" opacity=".9"/><path d="M-4 206 450 8" stroke="#e8e4d6" stroke-width="2" stroke-dasharray="14 12" opacity=".75"/><path d="M50 152 262 60 510 152 298 244Z" fill="#d8d1c1"/><path d="M50 152 298 244 510 152v7L298 251 50 159Z" fill="#a79f8b"/><path d="M92 152 262 78 468 152 298 226Z" fill="none" stroke="#e3bd2c" stroke-width="2" stroke-dasharray="9 6" opacity=".9"/>'+
+ '<use href="#spr-tree" x="214" y="-22" width="54" height="64"/><use href="#spr-tree" x="480" y="54" width="58" height="68"/><use href="#spr-tree" x="0" y="90" width="64" height="76"/>'+
+ mlNest('0 0 160 200',mlRackArt(),250,-40,150,188)+mlNest('0 0 160 200',mlRackArt(),138,0,150,188)+
+ '<use href="#spr-stillage" x="392" y="104" width="74" height="49"/><use href="#spr-stillage" x="392" y="76" width="74" height="49"/><use href="#spr-cage" x="438" y="128" width="56" height="37"/>'+
+ '<use href="#spr-bundle" x="92" y="160" width="54" height="40"/><use href="#spr-worker-busy" x="136" y="150" width="24" height="46"/>'+
+ '<use href="#spr-forklift-load" x="300" y="138" width="98" height="75"/><use href="#spr-worker" x="416" y="162" width="24" height="44"/>');}

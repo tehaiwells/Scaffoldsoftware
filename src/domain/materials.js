@@ -2,6 +2,7 @@ import { integer,requireRule } from './geometry.js';
 import { label } from './catalogue.js';
 import { active } from './inventory.js';
 import { cached } from '../database.js';
+import { parseDay,parseSlot } from './schedule.js';
 const LIST_EVENTS={additions:['OPENING_BALANCE','PURCHASE'],removals:['STOCK_REMOVED']};
 export const materialsMethods={
   purgeDemo(){
@@ -79,10 +80,11 @@ export const materialsMethods={
   siteVisible(id){const find=x=>{if(typeof x!=='string')return null;try{return this.repo.get(x);}catch{return null;}};const object=find(id);if(!object)return false;const site=object.kind==='container'?find(object.location):object.kind==='truck'?find(object.at):object;return !!site&&site.kind==='site'&&site.supervisor===this.user.id;},
   createLoadList(input){
     const site=this.repo.get(input.site,'site');this.assertSite(site.id);requireRule(site.status==='ACTIVE','Choose an active site.');
+    const cal=this.calendar(),neededOn=parseDay(input.neededOn,{required:false,cal}),slot=parseSlot(input.slot);// validated before any request is written
     requireRule(Array.isArray(input.lines)&&input.lines.length>0&&input.lines.length<=50,'Add between 1 and 50 lines to the yard list.');
     const seen=new Set();for(const line of input.lines){requireRule(typeof line?.product==='string'&&!seen.has(line.product),'Each product may appear once per yard list; combine the quantities.');seen.add(line.product);}
     const requests=input.lines.map(line=>this.request({site:site.id,product:line.product,quantity:line.quantity,notes:input.notes??''}));
-    const list=this.repo.add('loadList',{name:label(input.name??`Yard list ${new Date().toISOString().slice(0,10)}`,'Yard list name'),site:site.id,truck:null,notes:input.notes??'',lines:requests.map(r=>({product:r.product,quantity:r.quantity,request:r.id})),actor:this.user.id,createdAt:new Date().toISOString(),cancelled:false});
+    const list=this.repo.add('loadList',{name:label(input.name??`Yard list ${cal.today}`,'Yard list name'),site:site.id,truck:null,neededOn,slot,plannedTruck:null,notes:input.notes??'',lines:requests.map(r=>({product:r.product,quantity:r.quantity,request:r.id})),actor:this.user.id,createdAt:new Date().toISOString(),cancelled:false});
     for(const r of requests){r.loadList=list.id;this.repo.save(r);}
     return list;
   },
@@ -95,7 +97,7 @@ export const materialsMethods={
       catch(error){this.db.exec('ROLLBACK TO yard_list_line');this.db.exec('RELEASE yard_list_line');if(!error.status)throw error;outcome.push({product:line.product,status:'SHORT',reason:error.message});}
     }
     requireRule(outcome.some(o=>o.status==='ALLOCATED'),outcome.find(o=>o.reason)?.reason??'Nothing on this yard list could be reserved.');
-    const fresh=this.repo.get(list.id,'loadList');fresh.truck=truck.id;fresh.lines=fresh.lines.map(l=>({...l,lastReason:outcome.find(o=>o.product===l.product)?.reason??null}));this.repo.save(fresh);
+    const fresh=this.repo.get(list.id,'loadList');fresh.truck=truck.id;fresh.plannedTruck=truck.id;fresh.lines=fresh.lines.map(l=>({...l,lastReason:outcome.find(o=>o.product===l.product)?.reason??null}));this.repo.save(fresh);
     return {list:fresh,outcome};
   },
   cancelLoadList(input){
@@ -103,14 +105,15 @@ export const materialsMethods={
     for(const line of list.lines){const request=this.repo.get(line.request,'request');if(!['CANCELLED','DELIVERED','RETURNED'].includes(request.status))this.cancelRequest({id:request.id,reason,fromList:true});}
     list.cancelled=true;list.cancelReason=reason;const saved=this.repo.save(list);this.releaseTruck(list.truck);return saved;
   },
-  loadListView(list){
+  loadListView(list,cal=this.calendar(),ctx=this.scheduleCtx()){
     const truck=list.truck?this.repo.get(list.truck,'truck'):null;
     const lines=list.lines.map(line=>{const request=this.repo.get(line.request,'request');const moves=this.tasks().filter(t=>t.request===request.id&&t.type==='MOVE');const onTruck=truck?moves.reduce((s,t)=>{const c=this.repo.get(t.container,'container');return s+(c.location===truck.id?this.repo.quantity(c.id,line.product):0);},0):0;const product=this.repo.get(line.product,'product');return {...line,name:product.name,status:request.status,reserved:request.allocated,loaded:onTruck,sent:line.sent??(list.delivery?Math.max(onTruck,request.delivered):null),delivered:request.delivered};});
     const statuses=lines.map(l=>l.status);const every=s=>statuses.every(x=>x===s),some=s=>statuses.some(x=>x===s);
     const delivery=list.delivery?this.repo.get(list.delivery,'delivery'):null;
     const status=list.cancelled?'CANCELLED':every('DELIVERED')?'DELIVERED':delivery&&delivery.status==='IN_TRANSIT'?'IN_TRANSIT':delivery?(delivery.status==='DELIVERED'&&statuses.every(s=>['DELIVERED','REQUESTED','CANCELLED'].includes(s))?'DELIVERED':'AT_SITE'):lines.every(l=>l.status==='REQUESTED')?'OPEN':lines.every(l=>['ALLOCATED','DELIVERED'].includes(l.status))?(lines.every(l=>l.loaded>=l.quantity||l.status==='DELIVERED')?'LOADED':'RESERVED'):some('ALLOCATED')||some('PARTIALLY ALLOCATED')?'PARTIAL':every('CANCELLED')?'CANCELLED':'OPEN';
-    return {...list,lines,status,truckName:truck?.name??null,deliveryStatus:delivery?.status??null,short:lines.filter(l=>l.status==='REQUESTED').length,requested:lines.reduce((s,l)=>s+l.quantity,0),loaded:lines.reduce((s,l)=>s+l.loaded,0),delivered:lines.reduce((s,l)=>s+l.delivered,0)};
+    const view={...list,lines,status,truckName:truck?.name??null,deliveryStatus:delivery?.status??null,short:lines.filter(l=>l.status==='REQUESTED').length,requested:lines.reduce((s,l)=>s+l.quantity,0),loaded:lines.reduce((s,l)=>s+l.loaded,0),delivered:lines.reduce((s,l)=>s+l.delivered,0)};
+    return Object.assign(view,this.scheduleFields(view,cal,ctx));
   },
-  loadLists(){const operations=this.auth.permissions(this.user).includes('operations.manage');return this.repo.all('loadList').filter(l=>operations||this.siteVisible(l.site)).map(l=>this.loadListView(l));},
+  loadLists(cal=this.calendar()){const perms=this.auth.permissions(this.user),operations=perms.includes('operations.manage'),ctx=this.scheduleCtx(perms);return this.repo.all('loadList').filter(l=>operations||this.siteVisible(l.site)).map(l=>this.loadListView(l,cal,ctx));},
   manifest(deliveryId){return this.loadLists().filter(l=>l.delivery===deliveryId);}
 };
