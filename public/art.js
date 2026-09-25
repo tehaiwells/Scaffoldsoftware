@@ -68,3 +68,72 @@ const ICONS={
  small:['zinc',T(8,31,27,12,3.6)+Q(8,17,17,13,18,24),E(30,9,4.8,4.8)+E(30,9,2.6,2.6)],
  box:['box',Q(6,16,6,28,20,34,20,22)+Q(20,22,20,34,34,28,34,16),Q(6,16,20,10,34,16,20,22)]};
 const ICON_HTML={};for(const [k,[cls,a,b]] of Object.entries(ICONS))ICON_HTML[k]='<svg class="tile-icon ci-'+cls+'" viewBox="0 0 40 40" aria-hidden="true"><path class="a" d="'+a+'"/>'+(b?'<path class="b" d="'+b+'"/>':'')+'</svg>';
+// ---- Overview (page o): a client site - a small building wrapped in scaffold, on its own pad - as the <symbol> #ov-site; ovPicture / ovImg below draw it (and the sheet's sprites) as cached images. ----
+export function ovSiteSymbol(){
+ const P=(u,v,z=0)=>f1(60+.87*u-.87*v)+' '+f1(52+.42*u+.42*v-z),poly=(pts,a)=>'<path d="M'+pts.map(p=>P(...p)).join('L')+'Z" '+a+'/>',L=36,W=30,H=34;
+ let s='<ellipse cx="60" cy="80" rx="52" ry="14" fill="#2a1d08" fill-opacity=".13"/>'+poly([[-10,-8],[L+12,-8],[L+12,W+18],[-10,W+18]],'fill="#d8d1c1"')+poly([[-10,W+18],[L+12,W+18],[L+12,W+18,-3],[-10,W+18,-3]],'fill="#a79f8b"')+poly([[L+12,-8],[L+12,W+18],[L+12,W+18,-3],[L+12,-8,-3]],'fill="#bdb49f"');
+ s+=poly([[0,W],[L,W],[L,W,H],[0,W,H]],'fill="#efe6d4" '+ol)+poly([[L,0],[L,W],[L,W,H],[L,0,H]],'fill="#cbbd9f" '+ol)+poly([[0,0],[L,0],[L,W],[0,W]].map(p=>[...p,H]),'fill="#7f8b86" '+ol);
+ for(const z of [9,20])for(const v of [6,15,24])s+=poly([[L,v,z],[L,v+5,z],[L,v+5,z+6],[L,v,z+6]],'fill="#4a6470"');
+ const V=W+6,tub=(a,b,c=S.st,w=2.2)=>tube('M'+P(...a)+'L'+P(...b),c,w);let g='';
+ for(const z of [11,22,33])g+='<path d="M'+P(0,W,z)+'L'+P(L,W,z)+'L'+P(L,V,z)+'L'+P(0,V,z)+'Z" fill="#c98f3e" stroke="#7d5428" stroke-width=".9"/>';
+ for(const u of [0,12,24,L])g+=tub([u,V,0],[u,V,H+8]);for(const z of [11,22,33,H+6])g+=tub([0,V,z],[L,V,z]);g+=tub([L+.5,V,11],[L+.5,W,11],S.st,1.8)+tub([L+.5,V,H+6],[L+.5,W-2,H+6],S.st,1.8)+tub([0,V,3],[12,V,11],'#e3bd2c',1.8)+tub([12,V,11],[24,V,22],'#e3bd2c',1.8);
+ s+='<g fill="none" stroke-linecap="round">'+g+'</g><path d="M'+P(L+8,-4,0)+'V'+f1(52+.42*(L+8)+.42*-4-44)+'" stroke="#5c686d" stroke-width="1.6"/><path d="M'+P(L+8,-4,44)+'l13 3-13 5z" fill="#d9f56b" stroke="#40601c" stroke-width="1" stroke-linejoin="round"/>';
+ return '<symbol id="ov-site" viewBox="6 4 112 92">'+s+'</symbol>';}
+// Overview pictures: a sprite (or a small scene of sprites) as one cached image URL, so a page render draws an <img> instead of instantiating a <use> shadow tree per copy (the Overview re-renders every second).
+const ovPics=new Map();let ovDefs=null;
+const ovURL=svg=>{try{if(typeof Blob!=='undefined'&&typeof URL!=='undefined'&&URL.createObjectURL)return URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'}));}catch{}return 'data:image/svg+xml,'+encodeURIComponent(svg);};
+const ovSymbols=()=>ovDefs??=new Map([...(spriteSheet()+ovSiteSymbol()).matchAll(/<symbol id="([^"]+)" viewBox="([^"]+)">([\s\S]*?)<\/symbol>/g)].map(m=>[m[1],[m[2],m[3]]]));
+// key: cache key; one sprite id -> that sprite alone; otherwise viewBox + body with <use href="#spr-..."> references (all sprite symbols are included).
+export function ovPicture(key,viewBox,body){let url=ovPics.get(key);if(url)return url;const defs=ovSymbols();if(viewBox==null){const [vb,inner]=defs.get(key)??['0 0 1 1',''];url=ovURL('<svg xmlns="http://www.w3.org/2000/svg" viewBox="'+vb+'">'+inner+'</svg>');}else url=ovURL('<svg xmlns="http://www.w3.org/2000/svg" viewBox="'+viewBox+'"><defs>'+[...defs].map(([id,[vb,inner]])=>'<symbol id="'+id+'" viewBox="'+vb+'">'+inner+'</symbol>').join('')+'</defs>'+body+'</svg>');ovPics.set(key,url);return url;}
+export const ovImg=(key,cls='',viewBox,body)=>'<img class="ov-img'+(cls?' '+cls:'')+'" src="'+ovPicture(key,viewBox,body)+'" alt="" aria-hidden="true" decoding="sync">';
+// ---- Sites page sprites: a building going up inside its scaffold, a tower crane, a docket clipboard (own sheet, built once), a small site scene and line glyphs. ----
+const siF=n=>+n.toFixed(1),siPt=p=>siF(p[0])+' '+siF(p[1]),siPoly=(ps,a)=>'<path d="M'+ps.map(siPt).join('L')+'Z" '+a+'/>',siLine=(ps,a)=>'<path d="M'+ps.map(siPt).join('L')+'" '+a+'/>';
+// A three-storey frame going up (open floors, bare columns and rebar on top) wrapped in an access scaffold with timber decks, braces and a lime site flag. Isometric, lit from the upper left like the yard plan.
+function siBuilding(){const P=(x,y,z)=>[80+(x-y)*13.9,58+(x+y)*8-z*13];let s=siPoly([P(-.5,-.3,0),P(5.2,-.3,0),P(5.2,4.1,0),P(-.5,4.1,0)],'fill="#2a1d08" fill-opacity=".16"');
+ const top=3.75;
+ s+=siPoly([P(0,0,0),P(4,0,0),P(4,0,2.5),P(0,0,2.5)],'fill="#56615c"')+siPoly([P(0,0,0),P(0,3,0),P(0,3,2.5),P(0,0,2.5)],'fill="#48524e"');
+ for(const z of [0,1.25])s+=siPoly([P(0,0,z),P(4,0,z),P(4,3,z),P(0,3,z)],'fill="#6b7571"');
+ const col=(x,y,z0,z1,w=2.6)=>siLine([P(x,y,z0),P(x,y,z1)],'stroke="#6f7975" stroke-width="'+w+'"')+siLine([P(x,y,z0),P(x,y,z1)],'stroke="#c9cfcb" stroke-width="'+siF(w*.4)+'" transform="translate(-.6 0)"');
+ for(const z of [0,1.25])for(const [x,y] of [[4,0],[4,1.5],[4,3],[2,3],[0,3]])s+=col(x,y,z,z+1.25);
+ const slab=z=>siPoly([P(0,0,z),P(4,0,z),P(4,3,z),P(0,3,z)],'fill="#dcdfd9"')+siPoly([P(4,0,z),P(4,3,z),P(4,3,z-.25),P(4,0,z-.25)],'fill="#a3aaa5"')+siPoly([P(0,3,z),P(4,3,z),P(4,3,z-.25),P(0,3,z-.25)],'fill="#c2c8c3"');
+ s+=slab(1.25)+slab(2.5);
+ // Top floor: formwork on the back edges, bare columns with rebar, a bundle of tubes on the slab.
+ s+=siPoly([P(0,0,2.5),P(2.4,0,2.5),P(2.4,0,3.3),P(0,0,3.3)],'fill="#d9a55c" stroke="#9c6f3c" stroke-width=".8"')+siPoly([P(0,0,2.5),P(0,1.6,2.5),P(0,1.6,3.3),P(0,0,3.3)],'fill="#c48f48" stroke="#9c6f3c" stroke-width=".8"');
+ for(const [x,y] of [[0,0],[4,0],[0,3],[2,3],[4,1.5],[4,3]]){s+=col(x,y,2.5,top);const t=P(x,y,top);s+='<path d="M'+siF(t[0]-1.5)+' '+siF(t[1])+'v-5M'+siF(t[0]+1.5)+' '+siF(t[1])+'v-4" stroke="#9a5a2e" stroke-width=".9"/>';}
+ for(let k=0;k<3;k++){const a=P(1.2+k*.18,1.2,2.62+k*.1),b=P(2.9+k*.18,1.2,2.62+k*.1);s+=siLine([a,b],'stroke="#56636a" stroke-width="2.4" stroke-linecap="round"')+siLine([a,b],'stroke="#dfe5e8" stroke-width="1.2" stroke-linecap="round"');}
+ // Scaffold on the two faces we see: timber decks at every floor, braces, ledgers and guard rails, standards.
+ const X=4.5,Y=3.5,xs=[-.15,1.05,2.2,3.35,X],ys=[-.15,1.1,2.3],deck=[1.25,2.5,3.75],rails=[.62,1.87,3.12,4.25,4.65];
+ for(const z of deck)s+=siPoly([P(4,-.15,z),P(X,-.15,z),P(X,Y,z),P(-.15,Y,z),P(-.15,3,z),P(4,3,z)],'fill="#cf9b5c"')+siPoly([P(X,-.15,z),P(X,Y,z),P(X,Y,z-.14),P(X,-.15,z-.14)],'fill="#8f6333"')+siPoly([P(-.15,Y,z),P(X,Y,z),P(X,Y,z-.14),P(-.15,Y,z-.14)],'fill="#a9773f"');
+ const tube=(a,b,w=1.9)=>siLine([a,b],'stroke="#56636a" stroke-width="'+siF(w+1)+'" stroke-linecap="round"')+siLine([a,b],'stroke="#d3dadd" stroke-width="'+siF(w*.55)+'" stroke-linecap="round"');
+ for(const z of rails)s+=tube(P(X,-.15,z),P(X,Y,z),1.5)+tube(P(-.15,Y,z),P(X,Y,z),1.5);
+ s+=tube(P(X,-.15,0),P(X,1.1,1.25),1.2)+tube(P(X,1.1,1.25),P(X,2.3,2.5),1.2)+tube(P(-.15,Y,0),P(1.05,Y,1.25),1.2)+tube(P(1.05,Y,1.25),P(2.2,Y,2.5),1.2)+tube(P(2.2,Y,2.5),P(3.35,Y,3.75),1.2);
+ for(const y of ys)s+=tube(P(X,y,0),P(X,y,4.65));for(const x of xs)s+=tube(P(x,Y,0),P(x,Y,4.65));
+ const f=P(X,-.15,4.65),g=P(X,-.15,5.9);s+=siLine([f,g],'stroke="#3d494e" stroke-width="1.3"')+'<path d="M'+siPt(g)+'l15 4.5-15 5z" fill="#b9ef4b" stroke="#58801f" stroke-width=".9" stroke-linejoin="round"/>';
+ return s;}
+function siCraneArt(){let s='<ellipse cx="40" cy="163" rx="22" ry="6" fill="#2a1d08" fill-opacity=".16"/><path d="M26 160l14-6 14 6-14 6z" fill="#b8b3a6"/><path d="M26 160v3l14 6v-3zM54 160v3l-14 6v-3z" fill="#8d887b"/>';
+ let m='';for(let y=156;y>42;y-=9)m+='M34 '+y+'L46 '+(y-9)+'M34 '+y+'H46';s+='<path d="'+m+'" stroke="#9b7414" stroke-width="1.3" fill="none"/><path d="M34 158V40M46 158V40" stroke="#6f520c" stroke-width="3.6"/><path d="M34 158V40M46 158V40" stroke="#f0c230" stroke-width="2"/>';
+ let j='';for(let x=48;x<134;x+=8)j+='M'+x+' '+siF(35+(x-48)*.058)+'L'+(x+4)+' '+siF(29.5+(x-44)*.058)+'L'+(x+8)+' '+siF(35+(x-40)*.058);s+='<path d="'+j+'" stroke="#9b7414" stroke-width="1.1" fill="none"/><path d="M46 35.2L136 40.4M46 29.4L136 34.6M6 34H34M8 29.5H34" stroke="#6f520c" stroke-width="3.2"/><path d="M46 35.2L136 40.4M46 29.4L136 34.6M6 34H34M8 29.5H34" stroke="#f0c230" stroke-width="1.8"/>';
+ s+='<path d="M40 6L8 29.5M40 6L134 34.6" stroke="#4a4f4c" stroke-width=".9"/><path d="M36 30L40 6l4 24" fill="none" stroke="#6f520c" stroke-width="3.2"/><path d="M36 30L40 6l4 24" fill="none" stroke="#f0c230" stroke-width="1.7"/>';
+ s+='<rect x="3" y="27" width="14" height="13" rx="1.5" fill="#9aa39f" stroke="#5c6561" stroke-width="1"/><path d="M3 32h14" stroke="#7f8884" stroke-width="1"/><rect x="31" y="35" width="18" height="9" rx="1.5" fill="#e3b21f" stroke="#6f520c" stroke-width="1"/><path d="M46 36h7.5l1.5 8h-9z" fill="#bfe0ee" stroke="#34525e" stroke-width="1"/>';
+ s+='<rect x="100" y="36" width="8" height="5" rx="1" fill="#3d494e"/><path d="M104 41V104" stroke="#3d494e" stroke-width="1"/><path d="M101 104h6l-1 4h-4z" fill="#3d494e"/><path d="M104 108v3.5a3 3 0 1 1-4 2.8" fill="none" stroke="#3d494e" stroke-width="1.6"/><path d="M104 111L90 120M104 111L118 120" stroke="#3d494e" stroke-width=".8"/>';
+ for(let k=0;k<3;k++)s+='<path d="M89 '+siF(122+k*3.4)+'L119 '+siF(120+k*3.4)+'" stroke="#56636a" stroke-width="3.8" stroke-linecap="round"/><path d="M89 '+siF(122+k*3.4)+'L119 '+siF(120+k*3.4)+'" stroke="#dfe5e8" stroke-width="1.8" stroke-linecap="round"/>';
+ return s;}
+const SI_DOCKET='<ellipse cx="25" cy="45" rx="17" ry="3" fill="#2a1d08" fill-opacity=".15"/><rect x="8" y="6" width="33" height="38" rx="4" fill="#b98a4e" stroke="#7d5428" stroke-width="1.4"/><rect x="11.5" y="11" width="26" height="29.5" rx="1.5" fill="#fdfdf8"/><path d="M16 19h11M16 25h15M16 31h9" stroke="#bfcab6" stroke-width="2.2" stroke-linecap="round"/><path d="M29.5 18.5l1.8 1.8 3.4-3.6M33 24.5l1.8 1.8 3.4-3.6" fill="none" stroke="#5e9a2c" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="17" y="3" width="15" height="7.5" rx="2.5" fill="#2f6b47" stroke="#1b4430" stroke-width="1.2"/><circle cx="24.5" cy="5.6" r="1.4" fill="#b9ef4b"/>';
+let siSheetHTML=null;
+// Symbols: si-site (building + scaffold, 160x130), si-crane (140x170), si-docket (48x48). The sheet sits once in <body> next to the main sprite sheet.
+export function siSheet(){if(siSheetHTML)return siSheetHTML;return siSheetHTML='<svg id="si-sprite-sheet" class="sprite-sheet" width="0" height="0" aria-hidden="true" focusable="false"><defs><symbol id="si-site" viewBox="0 0 160 130">'+siBuilding()+'</symbol><symbol id="si-crane" viewBox="0 0 140 170">'+siCraneArt()+'</symbol><symbol id="si-docket" viewBox="0 0 48 48">'+SI_DOCKET+'</symbol></defs></svg>';}
+export function siMount(){if(typeof document==='undefined'||document.getElementById('si-sprite-sheet'))return;document.body.insertAdjacentHTML('beforeend',siSheet());}
+// One Sites sprite (spr-* from the main sheet or si-* from this one) as an inline <svg><use>: the server's CSP (img-src 'self') rules out blob: and data: image URLs.
+export const siImg=(key,cls='')=>'<svg class="si-img'+(cls?' '+cls:'')+'" aria-hidden="true" focusable="false"><use href="#'+key+'"/></svg>';
+// The Sites hero scene: a site pad behind green hoarding, the building in its scaffold, the tower crane, a 12.5 t truck unloading stillages at the gate, crew and trees. Uses the main sheet's truck, worker, stillage and tree sprites.
+let siSceneHTML=null;
+export function siSceneArt(){if(siSceneHTML)return siSceneHTML;let panels='';for(let k=1;k<8;k++){const x=60+k*29.75,y=150+k*11;panels+='M'+siF(x)+' '+siF(y-18)+'v18';}
+ return siSceneHTML='<svg class="si-diorama" viewBox="-14 -40 588 262" aria-hidden="true" focusable="false"><path d="M-20 150 250 32 600 150 330 290Z" fill="#8fa866"/><path d="M-20 196 430 0h60L-20 224Z" fill="#55595b" opacity=".9"/><path d="M-4 206 450 8" stroke="#e8e4d6" stroke-width="2" stroke-dasharray="14 12" opacity=".75"/><path d="M60 150 262 62 500 150 298 238Z" fill="#cfc3a9"/><path d="M60 150 298 238 500 150v6L298 244 60 156Z" fill="#a39479"/>'+
+ '<use href="#spr-tree" x="226" y="-6" width="52" height="62"/><use href="#spr-tree" x="474" y="58" width="58" height="68"/><use href="#spr-tree" x="0" y="92" width="64" height="76"/>'+
+ '<use href="#si-crane" x="96" y="-38" width="150" height="182"/><use href="#si-site" x="158" y="-8" width="206" height="168"/>'+
+ '<path d="M298 238 60 150V132L298 220Z" fill="#2f6b47"/><path d="M298 238 60 150V146L298 234Z" fill="#b9ef4b" opacity=".85"/><path d="M60 132 298 220" stroke="#1d4a32" stroke-width="1.5"/><path d="'+panels+'" stroke="#1d4a32" stroke-width="1"/>'+
+ '<use href="#spr-stillage" x="330" y="150" width="62" height="41"/><use href="#spr-stillage" x="362" y="136" width="62" height="41"/><use href="#spr-cage" x="300" y="170" width="50" height="33"/>'+
+ '<use href="#spr-truck12" x="378" y="86" width="176" height="94"/><use href="#spr-worker" x="420" y="160" width="24" height="44"/><use href="#spr-worker-busy" x="286" y="128" width="22" height="40"/></svg>';}
+// Line glyphs for the site chips (24 grid, currentColor).
+const SI_GLYPHS={pin:'M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11ZM12 12.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z',client:'M4 21V5.5L12 3v18M12 8.5h8V21M7 8h2M7 12h2M7 16h2M15 12h2M15 16h2M2 21h20',person:'M12 11.5a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6ZM4.5 20.5a7.5 7.5 0 0 1 15 0',phone:'M6.5 3.5h3l1.6 4.4-2.2 1.4a10.5 10.5 0 0 0 5.8 5.8l1.4-2.2 4.4 1.6v3a2 2 0 0 1-2.1 2A15.5 15.5 0 0 1 4.5 5.6a2 2 0 0 1 2-2.1Z',mail:'M3.5 6h17v12h-17zM3.5 7l8.5 6 8.5-6',size:'M4 20V4M4 20h16M8 16l8-8M13 8h3v3M8 13v3h3',hat:'M3.5 17.5h17M5.5 17.5a6.5 6.5 0 0 1 13 0M10 11.5V7.5h4v4',clock:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7.5V12l3 2',drop:'M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14',road:'M8 3 5 21M16 3l3 18M12 4v3M12 10v3M12 16v3'};
+export const siGlyph=k=>'<svg class="si-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+(SI_GLYPHS[k]??SI_GLYPHS.pin)+'"/></svg>';
