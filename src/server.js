@@ -5,8 +5,11 @@ import { resolve } from 'node:path';
 import { openDatabase,cached } from './database.js';
 import { Service, AppError } from './service.js';
 import { Simulation, startScheduler } from './simulation.js';
+import { prepareDatabase } from './relocate.js';
+import { createBackups } from './backups.js';
+import { backupDirectory } from './paths.js';
 
-export function createApp(db) {
+export function createApp(db,{backups=null}={}) {
   const service=new Service(db), attempts=new Map();
   const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/shape.js':['shape.js','text/javascript'],'/shape-editor.js':['shape-editor.js','text/javascript'],'/style.css':['style.css','text/css']};
   return createServer(async(req,res)=>{
@@ -46,6 +49,8 @@ export function createApp(db) {
       else if(req.method==='POST'&&path==='/api/turn-preview') send(200,simulation.turnPreview(body));
       else if(req.method==='POST'&&path==='/api/boundary-preview') send(200,simulation.boundaryPreview(body));
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
+      else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');send(200,backups.status());}
+      else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),file:result.file});}
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/users') send(201,service.addUser(user,body));
@@ -56,9 +61,12 @@ export function createApp(db) {
   });
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  const db=openDatabase(process.env.DATABASE_PATH??'./data/scaffold.sqlite');
+  // Without DATABASE_PATH the database lives outside the (often synced) project folder; an old ./data/scaffold.sqlite is moved there once, safely (src/relocate.js).
+  const {path:databasePath}=await prepareDatabase();
+  const db=openDatabase(databasePath);console.log(`Database: ${databasePath}`);
   const stop=startScheduler(db);
-  const server=createApp(db);server.listen(Number(process.env.PORT??3000),process.env.HOST??'127.0.0.1',()=>{const {address,port}=server.address();console.log(`Scaffold Yard: http://127.0.0.1:${port}`+(address!=='127.0.0.1'?` (listening on ${address} — reachable from other devices on this network at http://<this PC's IP>:${port})`:''));});
+  const backups=createBackups({databasePath,directory:backupDirectory()});backups.start();
+  const server=createApp(db,{backups});server.listen(Number(process.env.PORT??3000),process.env.HOST??'127.0.0.1',()=>{const {address,port}=server.address();console.log(`Scaffold Yard: http://127.0.0.1:${port}`+(address!=='127.0.0.1'?` (listening on ${address} — reachable from other devices on this network at http://<this PC's IP>:${port})`:''));});
   // SIGHUP: the console window was closed (Windows). Stop the engine first so held job countdowns are saved, then close.
-  for(const signal of ['SIGINT','SIGTERM','SIGHUP']) process.on(signal,()=>{stop();server.close(()=>{db.close();process.exit(0);});setTimeout(()=>process.exit(0),2000).unref();});
+  for(const signal of ['SIGINT','SIGTERM','SIGHUP']) process.on(signal,()=>{stop();backups.stop();server.close(()=>{db.close();process.exit(0);});setTimeout(()=>process.exit(0),2000).unref();});
 }

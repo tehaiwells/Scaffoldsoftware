@@ -2,7 +2,8 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import {openDatabase} from '../src/database.js';
 import {Service} from '../src/service.js';
 import {Simulation} from '../src/simulation.js';
-const db=openDatabase(process.env.DATABASE_PATH??'./data/scaffold.sqlite');
+import {resolveDatabasePath} from '../src/paths.js';
+const db=openDatabase(resolveDatabasePath());
 try{
  const auth=new Service(db),password=process.env.DEMO_PASSWORD??randomBytes(18).toString('base64url');
  const token=auth.register({name:'Demonstration Owner',companyName:'SCAFFOLD · SYNTHETIC DEMO',email:process.env.DEMO_EMAIL??'demo@example.test',password,systems:['quickstage','at-pac','tube-clip']});

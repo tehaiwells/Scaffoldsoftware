@@ -10,11 +10,11 @@ Requires Node.js 24+. From PowerShell:
     npm.cmd ci
     npm.cmd start
 
-Open http://127.0.0.1:3000. Runtime needs no third-party packages; npm ci installs locked browser-test tooling. SQLite is at data/scaffold.sqlite. The app binds to loopback. Stop with Ctrl+C. After abrupt termination, allow five seconds for the engine lease to expire before restarting. No downtime is fast-forwarded.
+Open http://127.0.0.1:3000. Runtime needs no third-party packages; npm ci installs locked browser-test tooling. The database location is described under "Where your data lives" below. The app binds to loopback. Stop with Ctrl+C. After abrupt termination, allow five seconds for the engine lease to expire before restarting. No downtime is fast-forwarded.
 
 ## Desktop app setup
 
-`scripts/launch.cmd` starts the server in a minimised "Scaffold Yard server" window if it is not already running (shared on the local network with HOST=0.0.0.0) and opens the app in its own Edge app window. It works from wherever the repo is cloned, so each collaborator points their own desktop shortcut at their clone's scriptslaunch.cmd (run minimised) for a one-click icon. Close the server window to stop it, for example after changing code in `src/`; static files under `public/` reload on refresh without a restart.
+`scripts/launch.cmd` starts the server in a minimised "Scaffold Yard server" window if it is not already running (shared on the local network with HOST=0.0.0.0) and opens the app in its own Edge app window. It works from wherever the repo is cloned, so each collaborator points their own desktop shortcut at their clone's `scripts\launch.cmd` (run minimised) for a one-click icon. Close the server window to stop it, for example after changing code in `src/`; static files under `public/` reload on refresh without a restart.
 
 ## Fast demonstration
 
@@ -35,7 +35,7 @@ WORKERS is the crew board: every worker has the ten yard skills, the five contro
 
 OVERVIEW is the glance page: crew and forklift counts, each truck class split into Scheduled / Loading / Unloading / Complete, the stock in the yard, and a site list whose hover (or click) card shows the address, client details and the materials on that site. Client details are entered on the Client sites page.
 
-For blank setup, create a simulation company in the UI; choose systems; create a yard in the shape editor (it starts as a 20 × 16 m rectangle: adjust Width and Depth or the shape, then Create yard); configure resources; add the synthetic catalogue under SETTINGS; register physical containers; record opening stock under STOCK. New yards never receive automatic stock.
+For blank setup, create a simulation company in the UI; choose systems; create a yard in the shape editor (it starts as a 20 × 16 m rectangle: adjust Width and Depth or the shape, then Create yard); configure resources; add the synthetic catalogue under Account; register physical containers; record opening stock under STOCK. New yards never receive automatic stock.
 
 ## Yard shape and turning API
 
@@ -55,15 +55,53 @@ For independent Playwright browser testing:
     npx.cmd playwright install chromium
     npm.cmd run test:e2e
 
-The browser test uses port 3100 and data/e2e.sqlite with a fresh demo email. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
+To use the Edge that is already installed instead of downloading Chromium, and a port other than 3100 (for example while the app itself runs on 3100), set two variables first (PowerShell):
+
+    $env:PW_CHANNEL='msedge'; $env:E2E_PORT='3417'; npm.cmd run test:e2e
+
+The browser tests start their own server with a throwaway database and backup folder in the system temp folder (never data/ or your live database) and use fresh demo emails.
+
+GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml): npm ci, npm run check and npm test on Node 24, then the browser tests with Playwright's bundled Chromium on Linux. The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
 
 ## Configuration and maintenance
 
-PORT, DATABASE_PATH and COOKIE_SECURE are shell environment variables. .env.example documents them; .env is not loaded automatically.
+PORT, HOST, DATABASE_PATH, BACKUP_DIR and COOKIE_SECURE are shell environment variables. .env.example documents them; .env is not loaded automatically.
 
-    npm.cmd run backup -- data/backup-2026-09-22.sqlite
+### Where your data lives
 
-This uses SQLite's consistent backup API, including committed WAL data, and never overwrites an existing backup. To restore: stop the server; preserve the old database/WAL/SHM files; copy the backup to a new filename; point DATABASE_PATH to it; start and verify integrity and stock totals. Do not copy an active main database while ignoring its WAL.
+- **Windows:** the live database is `%LOCALAPPDATA%\ScaffoldYard\scaffold.sqlite` (for example `C:\Users\<you>\AppData\Local\ScaffoldYard\scaffold.sqlite`). That folder is on the PC only and is not synced by OneDrive, so the server can write to it several times a second without sync churn or file locks.
+- **Other systems:** data/scaffold.sqlite in the project folder.
+- **DATABASE_PATH** overrides both. The server prints the path it uses when it starts ("Database: …"), and the Account page shows it under Backups.
+
+**One-time move from data/scaffold.sqlite.** Older versions kept the database in the project's data folder. On the first start of this version (Windows, DATABASE_PATH not set, no database at the new place yet, data/scaffold.sqlite present) the server moves it, safely:
+
+1. If another Scaffold Yard server is still using the old file (its engine lease is live), nothing is moved: the server prints "Database NOT moved …" and keeps using the old file. Close the other server window and start again.
+2. Otherwise it holds the engine lease itself, makes a consistent copy with SQLite's backup API, and checks the copy (integrity check, and identical row counts in every table).
+3. Only then is the old file renamed to data/scaffold.sqlite.moved-<date and time> (with its -wal/-shm files, if any), so it is kept as a backup and can never be opened by accident, and data/DATABASE-MOVED.txt says where the live database went.
+4. If any step fails, the copy is deleted, the old database is left as it was and stays in use, and the move is tried again on the next start.
+
+The server prints one line either way ("Database moved to …" or "Database NOT moved (…)"). Later starts find the database at its new place and do nothing. Scripts (seed:demo, backup, import-catalogue) use the same location and keep using the old file until the server has moved it.
+
+### Automatic backups
+
+While the server runs it makes a consistent copy of the whole database once a day (the first hourly check after midnight) and, 30 seconds after start-up, whenever the newest daily copy is more than 24 hours old. Copies go to data/backups in the project folder (BACKUP_DIR overrides it), named scaffold-YYYY-MM-DD.sqlite. On Windows that folder is inside the synced project folder on purpose: one file a day gives an off-site copy without constant churn. Each copy is made through its own read-only connection with SQLite's backup API, never inside the movement engine's transaction, checked, and saved as a single self-contained file. The 14 newest daily copies are kept plus one per week for 8 weeks; only files named exactly scaffold-YYYY-MM-DD.sqlite are ever removed. The server prints "Backup saved: …" or "Backup FAILED (…)".
+
+Owners see a **Backups** panel on the Account page: the live database path, when the last backup ran, the backup folder, how many are kept, and **Back up now** (at most once a minute). Those manual copies are named scaffold-<date>T<time>-manual.sqlite and are never deleted automatically.
+
+A one-off copy to a file name of your choice still works, and never overwrites an existing file:
+
+    npm.cmd run backup -- my-backup-2026-09-22.sqlite
+
+### Restoring a backup
+
+There is no restore button, on purpose. To restore:
+
+1. Stop the server: close the "Scaffold Yard server" window (or press Ctrl+C where it runs).
+2. In the live database folder (shown on the Account page), move scaffold.sqlite and any scaffold.sqlite-wal and scaffold.sqlite-shm files next to it into a spare folder. Keep them until you are sure.
+3. Copy the backup you want from the backup folder into the live database folder and rename the copy to scaffold.sqlite.
+4. Start Scaffold Yard again and check your stock.
+
+Never copy a backup over the live file while the server is running, and never leave an old -wal file next to a restored database.
 
 Reviewed JSON catalogue batches can be imported with node scripts/import-catalogue.js approved-batch.json and local IMPORT_EMAIL / IMPORT_PASSWORD environment variables. See CATALOGUE_PROVENANCE.md. No PDFs are read automatically.
 
