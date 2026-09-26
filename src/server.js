@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { openDatabase,cached } from './database.js';
@@ -7,7 +7,7 @@ import { Service, AppError } from './service.js';
 import { Simulation, startScheduler } from './simulation.js';
 import { prepareDatabase } from './relocate.js';
 import { createBackups } from './backups.js';
-import { backupDirectory } from './paths.js';
+import { backupDirectory, backupName } from './paths.js';
 
 export function createApp(db,{backups=null}={}) {
   const service=new Service(db), attempts=new Map();
@@ -62,10 +62,15 @@ export function createApp(db,{backups=null}={}) {
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   // Without DATABASE_PATH the database lives outside the (often synced) project folder; an old ./data/scaffold.sqlite is moved there once, safely (src/relocate.js).
-  const {path:databasePath}=await prepareDatabase();
+  // prepareDatabase holds a lock file until release(): kept until the movement engine has claimed the database, so a second server started at the same moment waits and then finds it in use.
+  const refuse=message=>{console.error(`Scaffold Yard did NOT start: ${message}.`);process.exit(1);};
+  let prepared;try{prepared=await prepareDatabase();}catch(error){refuse(error.message);}
+  const {path:databasePath,status}=prepared;
+  // An existing database is expected here: never let SQLite create an empty one in its place.
+  if(!['new','env','default'].includes(status)&&!existsSync(databasePath))refuse(`the database ${databasePath} disappeared while starting; start again`);
   const db=openDatabase(databasePath);console.log(`Database: ${databasePath}`);
-  const stop=startScheduler(db);
-  const backups=createBackups({databasePath,directory:backupDirectory()});backups.start();
+  const stop=startScheduler(db);prepared.release();
+  const backups=createBackups({databasePath,directory:backupDirectory(),name:backupName({databasePath})});backups.start();
   const server=createApp(db,{backups});server.listen(Number(process.env.PORT??3000),process.env.HOST??'127.0.0.1',()=>{const {address,port}=server.address();console.log(`Scaffold Yard: http://127.0.0.1:${port}`+(address!=='127.0.0.1'?` (listening on ${address} — reachable from other devices on this network at http://<this PC's IP>:${port})`:''));});
   // SIGHUP: the console window was closed (Windows). Stop the engine first so held job countdowns are saved, then close.
   for(const signal of ['SIGINT','SIGTERM','SIGHUP']) process.on(signal,()=>{stop();backups.stop();server.close(()=>{db.close();process.exit(0);});setTimeout(()=>process.exit(0),2000).unref();});

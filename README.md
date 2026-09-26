@@ -75,18 +75,24 @@ PORT, HOST, DATABASE_PATH, BACKUP_DIR and COOKIE_SECURE are shell environment va
 
 **One-time move from data/scaffold.sqlite.** Older versions kept the database in the project's data folder. On the first start of this version (Windows, DATABASE_PATH not set, no database at the new place yet, data/scaffold.sqlite present) the server moves it, safely:
 
-1. If another Scaffold Yard server is still using the old file (its engine lease is live), nothing is moved: the server prints "Database NOT moved …" and keeps using the old file. Close the other server window and start again.
-2. Otherwise it holds the engine lease itself, makes a consistent copy with SQLite's backup API, and checks the copy (integrity check, and identical row counts in every table).
-3. Only then is the old file renamed to data/scaffold.sqlite.moved-<date and time> (with its -wal/-shm files, if any), so it is kept as a backup and can never be opened by accident, and data/DATABASE-MOVED.txt says where the live database went.
-4. If any step fails, the copy is deleted, the old database is left as it was and stays in use, and the move is tried again on the next start.
+1. It takes a lock file (%LOCALAPPDATA%\ScaffoldYard\relocate.lock) so only one Scaffold Yard program at a time can choose, move or create the database. A second server started at the same moment waits for the first, then finds the moved database already in use and stops ("Another movement engine is running…"). A lock left by a program that no longer runs is taken over automatically.
+2. If another Scaffold Yard server is still using the old file (its engine lease is live), nothing is moved: the server prints "Database NOT moved …" and keeps using the old file. Close the other server window and start again.
+3. Otherwise it holds a write lock on the old file (anything else that tries to write waits, then fails, rather than writing to a file that is about to be retired; the lock disappears by itself if the server is killed, so nothing is left blocking the next start), makes a consistent copy with SQLite's backup API, and checks the copy (integrity check, and identical row counts in every table).
+4. It puts the checked copy in the new place first, while the old file is still untouched, and only then renames the old file to data/scaffold.sqlite.moved-<date and time>, so it is kept as a backup and can never be opened by accident. data/DATABASE-MOVED.txt says where the live database went. If the old file changed in the moment between the copy and the rename, the move is undone and tried again next time.
+5. If any step fails, the copy is removed, the old database is left as it was and stays in use, and the move is tried again on the next start. If the server is killed half-way, the next start finds either the untouched old file or the complete new one, never nothing.
 
-The server prints one line either way ("Database moved to …" or "Database NOT moved (…)"). Later starts find the database at its new place and do nothing. Scripts (seed:demo, backup, import-catalogue) use the same location and keep using the old file until the server has moved it.
+The server prints one line either way ("Database moved to …" or "Database NOT moved (…)"). Later starts find the database at its new place and do nothing. Two safety nets:
+
+- If the new place holds an empty database (for example one an old test run created) while data/scaffold.sqlite still has your companies, the empty one is set aside as scaffold.sqlite.empty-<date and time> and your real database is moved in.
+- If the database is missing from the new place (or is there but empty) while a scaffold.sqlite.moved-… file with your data shows it was moved before, the server refuses to start ("Scaffold Yard did NOT start: … EMPTY database …") instead of quietly starting with an empty database. Put the file back (see Restoring a backup) and start again.
+
+Scripts that write (seed:demo, import-catalogue) take the same lock and keep using the old file until the server has moved it; npm run backup only reads.
 
 ### Automatic backups
 
-While the server runs it makes a consistent copy of the whole database once a day (the first hourly check after midnight) and, 30 seconds after start-up, whenever the newest daily copy is more than 24 hours old. Copies go to data/backups in the project folder (BACKUP_DIR overrides it), named scaffold-YYYY-MM-DD.sqlite. On Windows that folder is inside the synced project folder on purpose: one file a day gives an off-site copy without constant churn. Each copy is made through its own read-only connection with SQLite's backup API, never inside the movement engine's transaction, checked, and saved as a single self-contained file. The 14 newest daily copies are kept plus one per week for 8 weeks; only files named exactly scaffold-YYYY-MM-DD.sqlite are ever removed. The server prints "Backup saved: …" or "Backup FAILED (…)".
+While the server runs it makes a consistent copy of the whole database once a day (the first hourly check after midnight) and, 30 seconds after start-up, whenever the newest daily copy is more than 24 hours old. Copies go to data/backups in the project folder (BACKUP_DIR overrides it), named scaffold-YYYY-MM-DD.sqlite. A server run on another database with DATABASE_PATH names its copies scaffold-<file name>-<8-character code>-YYYY-MM-DD.sqlite instead, so a test database never takes the live database's daily slot or rotates its files, even in the same folder. On Windows that folder is inside the synced project folder on purpose: one file a day gives an off-site copy without constant churn. Each copy is made through its own read-only connection with SQLite's backup API, never inside the movement engine's transaction, checked, and saved as a single self-contained file. The 14 newest daily copies are kept plus one per week for 8 weeks; only files named exactly scaffold-YYYY-MM-DD.sqlite (and the manual copies below) are ever removed. Copies dated in the future (from a wrong clock) are left alone and never push real ones out. Unfinished copies (*.partial) from a server that stopped mid-backup are removed at the next start. The server prints "Backup saved: …" or "Backup FAILED (…)".
 
-Owners see a **Backups** panel on the Account page: the live database path, when the last backup ran, the backup folder, how many are kept, and **Back up now** (at most once a minute). Those manual copies are named scaffold-<date>T<time>-manual.sqlite and are never deleted automatically.
+Owners see a **Backups** panel on the Account page: the live database path, when the last backup ran, the backup folder, how many are kept, and **Back up now** (at most once a minute). Those manual copies are named scaffold-<date>T<time>-manual.sqlite; the 10 newest are kept and older ones are removed automatically.
 
 A one-off copy to a file name of your choice still works, and never overwrites an existing file:
 
@@ -100,6 +106,8 @@ There is no restore button, on purpose. To restore:
 2. In the live database folder (shown on the Account page), move scaffold.sqlite and any scaffold.sqlite-wal and scaffold.sqlite-shm files next to it into a spare folder. Keep them until you are sure.
 3. Copy the backup you want from the backup folder into the live database folder and rename the copy to scaffold.sqlite.
 4. Start Scaffold Yard again and check your stock.
+
+On Windows the live database folder is normally C:\Users\<you>\AppData\Local\ScaffoldYard (paste %LOCALAPPDATA%\ScaffoldYard into the File Explorer address bar), and the backup folder is data\backups inside the project folder.
 
 Never copy a backup over the live file while the server is running, and never leave an old -wal file next to a restored database.
 
