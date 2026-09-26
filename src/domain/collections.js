@@ -46,6 +46,8 @@ export const collectionMethods={
   // Cancels a collection that has not left the site. Loading moves not started yet are cancelled; a stillage already on the truck stays there (it never teleports back).
   cancelCollection(input){
     const o=this.repo.get(input?.id,'collection');this.assertSite(o.site);requireRule(['REQUESTED','BOOKED','LOADING'].includes(o.status),o.status==='CANCELLED'?'This collection is already cancelled.':o.status==='RETURNED'?'This collection is already back at the yard.':'The truck has left the site with this collection. Unload it at the yard.');
+    // Loading moves are the office's work: only the office can cancel them (a supervisor can still cancel a collection that is not loading yet).
+    if(o.status==='LOADING'&&!this.auth.permissions(this.user).includes('operations.manage'))throw new AppError(403,'This collection is loading. Ask the yard office to cancel it.');
     const reason=notes(input.reason);let kept=0;
     if(o.status==='LOADING'){const tasks=this.tasks().filter(t=>o.tasks.includes(t.id)&&active(t));requireRule(!tasks.some(t=>t.picked),'A stillage is on the crane right now. Let it land on the truck, then cancel.');
       for(const t of tasks.reverse()){t.state='CANCELLED';this.repo.save(t);this.release(t);}kept=o.taken.filter(id=>{try{return this.repo.get(id,'container').location===o.truck;}catch{return false;}}).length;}
@@ -78,6 +80,10 @@ export const collectionMethods={
   // After every command (execute) and every placement (reconcileDeliveries). Cheap when there is nothing open.
   rtSync(){
     const open=this.repo.all('collection').filter(o=>RT_OPEN.includes(o.status));if(!open.length)return;
+    // What is still at each site for a collection that has not started loading: on the ground, on a site crane, or on a truck parked there.
+    let atSite=null;const stillThere=site=>{if(!atSite){atSite=new Map();const objs=new Map([...this.repo.all('resource'),...this.repo.all('truck')].map(x=>[x.id,x]));
+      for(const c of this.containers()){if(c.retired)continue;const at=objs.get(c.location),s=at?(at.kind==='truck'?(at.status==='AT_SITE'?at.at:null):at.location):c.location;if(!s)continue;let l=atSite.get(s);if(!l)atSite.set(s,l=new Set());l.add(c.id);}}
+      return atSite.get(site)??new Set();};
     const now=()=>new Date().toISOString(),where=id=>{try{const c=this.repo.get(id,'container');if(c.retired)return {kind:'gone'};const at=this.repo.get(c.location);return {kind:at.kind,id:at.id};}catch{return {kind:'gone'};}};
     for(const o of open){let changed=false;
       if(RT_EDITABLE.includes(o.status)){
@@ -85,6 +91,9 @@ export const collectionMethods={
         if(!site||site.status!=='ACTIVE'){o.status='CANCELLED';o.cancelledAt=now();o.reason='The site was archived.';changed=true;}
         else if(o.plannedTruck){let t=null;try{t=this.repo.get(o.plannedTruck,'truck');}catch{}if(!t||t.retired){o.plannedTruck=null;o.status='REQUESTED';changed=true;this.notify('Truck booking removed',(t?.name??'The truck')+' was removed; '+this.rtLabel(o)+' needs a truck again.',o.site);}else if(o.status!=='BOOKED'){o.status='BOOKED';changed=true;}}
         else if(o.status!=='REQUESTED'){o.status='REQUESTED';changed=true;}
+        // Nothing left to collect (it went back another way, or was removed): the collection closes itself instead of turning overdue.
+        if(o.status!=='CANCELLED'){const here=stillThere(o.site),left=o.scope==='ALL'?here.size:o.containers.filter(id=>here.has(id)).length;
+          if(!left){Object.assign(o,{status:'CANCELLED',cancelledAt:now(),reason:'Nothing left on site to collect: it went back another way.'});changed=true;this.notify('Collection closed',this.rtLabel(o)+' closed: nothing is left on site to collect.',o.site);}}
       }else if(o.status==='LOADING'){
         let t=null;try{t=this.repo.get(o.truck,'truck');}catch{}
         const on=o.taken.filter(id=>where(id).id===o.truck),live=this.tasks().some(x=>o.tasks.includes(x.id)&&active(x));
@@ -140,7 +149,7 @@ export const collectionMethods={
       const truckHere=!!rt&&rt.status==='AT_SITE'&&rt.at===o.site;
       return {id:o.id,kind:'collection',site:o.site,siteName:site?.name??null,scope:o.scope,status:o.status,name:o.scope==='ALL'?'Collect everything on site':'Collect '+plural(o.containers.length,'stillage','stillages'),
         neededOn:o.neededOn??null,slot:o.slot??'ANY',urgency,daysLate,plannedTruck,plannedTruckName:plannedTruck?ctx.truckName(plannedTruck):null,truck:o.truck??null,truckName:o.truck?ctx.truckName(o.truck):null,runTruck,runTruckName:runTruck?ctx.truckName(runTruck):null,
-        schedulable:editable,canReschedule:editable&&ctx.perms.includes('requests.create')&&(ops||site?.supervisor===this.user.id),canCancel:['REQUESTED','BOOKED','LOADING'].includes(o.status)&&ctx.perms.includes('requests.create'),
+        schedulable:editable,canReschedule:editable&&ctx.perms.includes('requests.create')&&(ops||site?.supervisor===this.user.id),canCancel:(RT_EDITABLE.includes(o.status)&&ctx.perms.includes('requests.create'))||(o.status==='LOADING'&&ops),
         canLoad:editable&&ops&&truckHere&&items.length>0,truckUnloading:rt?liveTasks.some(x=>x.from===rt.id):false,truckHere,truckStatus:rt?.status??null,truckAt:rt?.at??null,truckDestination:rt?.destination??null,truckYard:rt?.yard??null,
         quantity:pieces,pieces,stillages:editable?items.length:o.taken.length,items:items.slice(0,60),missing,notes:o.notes??'',left:o.left??[],tasksLeft:tasks.length,loaded:o.status==='LOADING'?o.taken.filter(id=>byId.get(id)?.location===o.truck).length:0,
         delivery:o.delivery??null,createdAt:o.createdAt,bookedAt:o.bookedAt??null,loadingAt:o.loadingAt??null,departedAt:o.departedAt??null,returnedAt:o.returnedAt??null,cancelledAt:o.cancelledAt??null,reason:o.reason??null,inYard:o.inYard??null,requestedBy:this.supervisorName(o.actor)};});
@@ -149,8 +158,8 @@ export const collectionMethods={
   rtAlerts(result){
     const list=result.collections??[],a=result.alerts;if(!list.length||!a)return;const items=[...a.items];
     for(const x of list){if(!['REQUESTED','BOOKED','LOADING'].includes(x.status))continue;const state=x.status==='LOADING'?'loading on '+(x.truckName??'a truck'):x.runTruck?'booked on '+(x.runTruckName??'a truck'):'no truck booked';
-      if(x.urgency==='OVERDUE')items.push({id:'OVERDUE:'+x.id,kind:'OVERDUE',severity:'high',title:'Collection from '+(x.siteName??'a site'),detail:'Collection · was needed '+dayLabel(x.neededOn)+' ('+plural(x.daysLate,'day','days')+' late) · '+state,target:{view:'SCHEDULE',id:x.id,day:x.neededOn},daysLate:x.daysLate,site:x.site});
-      else if(x.urgency==='TODAY'&&!x.runTruck)items.push({id:'DUE_TODAY:'+x.id,kind:'DUE_TODAY',severity:'medium',title:'Collection from '+(x.siteName??'a site'),detail:'Collection · needed today'+slotWords(x.slot)+' · no truck booked',target:{view:'SCHEDULE',id:x.id,day:x.neededOn},site:x.site});}
+      if(x.urgency==='OVERDUE')items.push({id:'OVERDUE:'+x.id,kind:'OVERDUE',severity:'high',title:'Collection from '+(x.siteName??'a site'),detail:'Collection · was needed '+dayLabel(x.neededOn)+' ('+plural(x.daysLate,'day','days')+' late) · '+state,target:{view:'SCHEDULE',id:x.id,day:x.neededOn},daysLate:x.daysLate,site:x.site,collection:true});
+      else if(x.urgency==='TODAY'&&!x.runTruck)items.push({id:'DUE_TODAY:'+x.id,kind:'DUE_TODAY',severity:'medium',title:'Collection from '+(x.siteName??'a site'),detail:'Collection · needed today'+slotWords(x.slot)+' · no truck booked',target:{view:'SCHEDULE',id:x.id,day:x.neededOn},site:x.site,collection:true});}
     const runs=[...(result.loadLists??[]),...(result.requests??[]).filter(r=>!r.loadList),...list],groups=new Map();
     for(const x of runs){if(!x.clash||!x.schedulable||!x.runTruck||!x.neededOn)continue;const k=x.runTruck+'|'+x.neededOn;let g=groups.get(k);if(!g)groups.set(k,g={truck:x.runTruck,truckName:x.runTruckName??'A truck',day:x.neededOn,runs:[],hidden:false,rt:false});g.runs.push(x);if((x.clashWith?.length??0)<x.clash)g.hidden=true;if(x.kind==='collection')g.rt=true;}
     for(const g of groups.values()){if(!g.rt)continue;const id='CLASH:'+g.truck+':'+g.day,at=items.findIndex(i=>i.id===id),sites=[...new Set(g.runs.map(x=>(x.siteName??'a site')+(x.kind==='collection'?' (collection)':'')))];

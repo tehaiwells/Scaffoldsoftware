@@ -151,9 +151,9 @@ test('schedule: collections are runs with clashes counted against yard lists, an
   f.cmd('cancelCollection',{id:c.id});assert.ok(!f.sim.snapshot().alerts.items.some(x=>x.id.endsWith(c.id)),'a cancelled collection raises nothing');
 });
 
-test('archiving the site cancels its open collections',t=>{
+test('a site emptied another way closes its open collection, and the site can then be archived',t=>{
   const f=setup(t);stockOnSite(f);const c=f.cmd('requestCollection',{site:f.site.id,neededOn:TOMORROW});
   f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id,f.b.id]});settle(f);home(f);f.cmd('unload',{id:f.truck.id});settle(f);
-  assert.equal(coll(f,c.id).status,'REQUESTED');f.cmd('archive',{id:f.site.id});
-  const o=coll(f,c.id);assert.equal(o.status,'CANCELLED');assert.equal(o.reason,'The site was archived.');
+  assert.equal(coll(f,c.id).status,'CANCELLED');assert.match(coll(f,c.id).reason,/Nothing left on site/);f.cmd('archive',{id:f.site.id});
+  const o=coll(f,c.id);assert.equal(o.status,'CANCELLED');assert.match(o.reason,/Nothing left on site/,'closed once, not again by the archive');
 });

@@ -29,6 +29,8 @@ export function createApp(db,{backups=null}={}) {
       if(req.method==='POST') {
         if(req.headers.origin && req.headers.origin!==`${req.socket.encrypted?'https':'http'}://${req.headers.host}`) throw new AppError(403,'Invalid request origin.');
         if(req.headers['content-type']?.split(';')[0]!=='application/json') throw new AppError(415,'JSON is required.');
+        // The logo upload may be bigger: only a signed-in owner gets that far before the body is read.
+        if(path==='/api/company-logo') service.require(service.authenticate(req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('session='))?.slice(8)),'company.manage');
         let size=0,chunks=[];for await(const chunk of req) {size+=chunk.length;if(size>(path==='/api/company-logo'?BD_LOGO_BODY:16384)) throw new AppError(413,'Request too large.');chunks.push(chunk);}
         try {body=JSON.parse(Buffer.concat(chunks).toString());}catch {throw new AppError(400,'Invalid JSON.');}
         if(!body||typeof body!=='object'||Array.isArray(body)) throw new AppError(400,'Invalid request.');

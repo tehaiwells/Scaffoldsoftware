@@ -12,15 +12,16 @@ export const BD_TYPES=['image/png','image/jpeg','image/svg+xml'];
 const MAX_SIDE=6000;
 // ---- ABN: 11 digits; subtract 1 from the first, weight 10,1,3,5,...,19, the sum divides by 89. ----
 const ABN_W=[10,1,3,5,7,9,11,13,15,17,19];
-export function bdAbnValid(value){const d=String(value??'').replace(/\s+/g,'');if(!/^\d{11}$/.test(d)||d[0]==='0')return false;let sum=0;for(let i=0;i<11;i++)sum+=((+d[i])-(i===0?1:0))*ABN_W[i];return sum%89===0;}
-export const bdAbnFormat=d=>{const s=String(d??'').replace(/\s+/g,'');return /^\d{11}$/.test(s)?s.slice(0,2)+' '+s.slice(2,5)+' '+s.slice(5,8)+' '+s.slice(8):s;};
+export function bdAbnValid(value){const d=String(value??'').replace(/[\s.-]+/g,'');if(!/^\d{11}$/.test(d)||d[0]==='0')return false;let sum=0;for(let i=0;i<11;i++)sum+=((+d[i])-(i===0?1:0))*ABN_W[i];return sum%89===0;}
+export const bdAbnFormat=d=>{const s=String(d??'').replace(/[\s.-]+/g,'');return /^\d{11}$/.test(s)?s.slice(0,2)+' '+s.slice(2,5)+' '+s.slice(5,8)+' '+s.slice(8):s;};
 // ---- Field checks ----
-const CTRL=/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+// Control characters, line/paragraph separators and the bidi marks, overrides and isolates (they can reverse or disguise printed text).
+const CTRL=/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 function line(v,label,max){if(v==null)return '';requireRule(typeof v==='string',label+' must be text.');const s=v.replace(/\s+/g,' ').trim();requireRule(!CTRL.test(s),label+' has characters that cannot be printed.');requireRule(s.length<=max,label+' is too long (maximum '+max+' characters).');return s;}
 export function bdDetails(input){
   requireRule(input&&typeof input==='object'&&!Array.isArray(input),'Send the company details.');
   const tradingName=line(input.tradingName,'Trading name',120);
-  const abnRaw=line(input.abn,'ABN',20).replace(/\s+/g,'');
+  const abnRaw=line(input.abn,'ABN',20).replace(/[\s.-]+/g,'');// spaces, dashes and dots are fine: 53 004 085 616, 53-004-085-616
   requireRule(!abnRaw||/^\d{11}$/.test(abnRaw),'An ABN has 11 digits, for example 12 345 678 901.');
   requireRule(!abnRaw||bdAbnValid(abnRaw),'That ABN is not valid: check the digits against your ABN record (the check digits do not match).');
   const lines=input.address==null?[]:input.address;requireRule(Array.isArray(lines)&&lines.length<=3,'Give up to three address lines.');
@@ -47,9 +48,11 @@ const NAMED={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:'\u00a0'};
 const decode=s=>s.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]+);?/gi,(m,e)=>{if(e[0]==='#'){const n=e[1]==='x'||e[1]==='X'?parseInt(e.slice(2),16):parseInt(e.slice(1),10);return n>0&&n<=0x10ffff&&!(n>=0xd800&&n<=0xdfff)?String.fromCodePoint(n):'';}return NAMED[e.toLowerCase()]??'';});
 const xmlEsc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(CTRL_XML,'');
 const CTRL_XML=/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
-const BAD_CSS=/@import|@font-face|@namespace|expression\s*\(|javascript:|vbscript:|behavior\s*:|-moz-binding|\\|<|image-set|src\s*\(/i;
+const BAD_CSS=/@import|@font-face|@namespace|expression\s*\(|javascript:|vbscript:|behavior\s*:|-moz-binding|\\|<|image-set|image\s*\(|cross-fade|element\s*\(|attr\s*\(|src\s*\(/i;
 // CSS kept only when it holds nothing that can fetch, run or escape; url() may point only inside the file (url(#id)).
-function cleanCss(css){const s=css.replace(/\/\*[\s\S]*?\*\//g,' ');if(BAD_CSS.test(s))return null;return s.replace(/url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi,(m,q,u)=>u.trim().startsWith('#')?'url(#'+u.trim().slice(1).replace(/[^\w.:-]/g,'')+')':'none');}
+// Anything that still says url( after the rewrite (a quoted URL holding a bracket, an escape) drops the whole style.
+function cleanCss(css){const s=css.replace(/\/\*[\s\S]*?\*\//g,' ');if(BAD_CSS.test(s))return null;const out=s.replace(/url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi,(m,q,u)=>u.trim().startsWith('#')?'url(#'+u.trim().slice(1).replace(/[^\w.:-]/g,'')+')':'none');
+  return /url\s*\(/i.test(out.replace(/url\(#[\w.:-]*\)/g,''))?null:out;}
 function cleanAttr(name,raw){const v=decode(raw);if(/[\u0000-\u0008]/.test(v))return null;
   if(name==='href'||name==='xlink:href')return /^#[\w.:-]+$/.test(v.trim())?v.trim():null;
   if(name==='style')return cleanCss(v);
@@ -100,7 +103,8 @@ export function bdCheckLogo(input){
   let bytes=Buffer.from(input.data,'base64');
   requireRule(bytes.length>0,'That logo file is empty.');requireRule(bytes.length<=BD_LOGO_MAX,'That logo is too big: keep it under 300 KB.');
   let type=input.type,size;
-  if(type==='image/svg+xml'){requireRule(!sniff(bytes),'That file is a '+(sniff(bytes)==='image/png'?'PNG':'JPEG')+' picture, not an SVG. Choose it again.');const text=bytes.toString('utf8');requireRule(!text.includes('�'),'That SVG file is not plain text (UTF-8).');const clean=bdSanitiseSvg(text);bytes=Buffer.from(clean,'utf8');requireRule(bytes.length<=BD_LOGO_MAX,'That logo is too big: keep it under 300 KB.');size=svgSize(clean);}
+  if(type==='image/svg+xml'){requireRule(!sniff(bytes),'That file is a '+(sniff(bytes)==='image/png'?'PNG':'JPEG')+' picture, not an SVG. Choose it again.');const text=bytes.toString('utf8');requireRule(!text.includes('�'),'That SVG file is not plain text (UTF-8).');const clean=bdSanitiseSvg(text);bytes=Buffer.from(clean,'utf8');requireRule(bytes.length<=BD_LOGO_MAX,'That logo is too big: keep it under 300 KB.');size=svgSize(clean);
+    requireRule(size.width>0&&size.height>0,'That SVG does not say how big it is (no width and height, or viewBox). Save it again with a size, or use a PNG.');}
   else{const real=sniff(bytes);requireRule(real,'That file is not a PNG or JPEG picture.');requireRule(real===type,'That file is a '+(real==='image/png'?'PNG':'JPEG')+' picture, not a '+(type==='image/png'?'PNG':'JPEG')+'. Choose it again.');
     size=type==='image/png'?pngSize(bytes):jpegSize(bytes);requireRule(size,'That picture could not be read.');requireRule(size.width<=MAX_SIDE&&size.height<=MAX_SIDE,'That picture is too large: keep each side under '+MAX_SIDE+' pixels.');requireRule(size.width>=16&&size.height>=16,'That picture is too small for a logo (at least 16 × 16 pixels).');}
   const sha=createHash('sha256').update(bytes).digest('hex');

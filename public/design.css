@@ -3034,3 +3034,34 @@ header .brand .bd-top img,.bd-bar .bd-top img{display:block;width:auto;height:au
 .page-hire .hr-coll .rt-glyph{width:11px;height:11px;color:var(--rt)}
 .page-hire .hr-coll.late{background:#fdecea;color:#9a2f1f;border-color:#f0c2b5}
 .page-hire .hr-coll.late .rt-glyph{color:#b5462f}
+/* ===================== WAVE E REVIEW FIXES ===================== */
+/* Account: a square or tall logo stays inside its preview box */
+.bd-well{overflow:hidden}.bd-well-img{max-width:154px;max-height:78px;min-width:0;min-height:0}
+@media(max-width:750px){.bd-well-img{max-width:calc(100% - 22px);max-height:70px}}
+/* Hire: counter sub-lines wrap to two lines instead of losing the date; the day strip in the app green (as in print) */
+.page-hire .hr-stat-sub{white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;line-height:1.3}
+.page-hire .hr-days-bars rect{fill:#4f8a3c}.page-hire .hr-days-bars rect:hover{fill:#2d6b3f}
+.page-hire .hr-c-time{white-space:nowrap}
+.page-hire .hr-rate-when{display:block;font-size:10.5px;font-weight:700;color:#4d6a3a;margin-top:1px}
+.page-hire .hr-hist{color:#4d6a3a;font-weight:650}
+/* Hire rates: when a changed price applies */
+.page-hire .hr-f-eff{flex:0 1 190px;min-width:0}.page-hire .hr-f-eff input{width:100%}
+.page-hire .hr-eff-all{display:inline-flex;align-items:center;gap:7px;min-height:40px;font-size:12.5px;font-weight:650;color:#3d5536;cursor:pointer}.page-hire .hr-eff-all input{width:18px;height:18px;margin:0}
+.page-hire .hr-eff-note{flex:1 1 100%;margin:0;font-size:11.5px;line-height:1.45;color:#5f6f58}
+/* Hire rates for one site: the standard price as a caption under each box, and what the site pays in words */
+.page-hire .hr-rate.site .hr-in{align-self:start}
+.page-hire .hr-std{display:block;margin-top:3px;font-size:10px;line-height:1.2;color:#6f7e67;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page-hire .hr-rate-result{grid-column:1/-1;margin:2px 0 0;padding:6px 10px;border-radius:9px;background:var(--hr-site-bg,#eef4fa);border:1px solid var(--hr-site-bd,#d6e3ee);font-size:12px;line-height:1.4;color:#2c4d66}
+/* Schedule: a Return card says what it collects in one short line, its chips wrap together */
+.page-schedule .sch-card.rt-card .rt-l2{display:flex;flex-wrap:wrap;align-items:center;gap:3px 6px;-webkit-line-clamp:unset;line-clamp:unset}
+.page-schedule .sch-card.rt-card .rt-l2 .rt-kind{margin:0}
+.page-schedule .sch-card.rt-card .sch-l3{row-gap:3px}
+/* Today: crew in one column in the side column (pills stay on one line); alerts get three lines on a phone */
+@media(min-width:1101px){.page-today .td-side .td-crew-list{grid-template-columns:minmax(0,1fr)}}
+.page-today .td-crew-chip .state-pill{white-space:nowrap}
+.page-today .td-crew-cmds button[disabled]{opacity:.7;cursor:default}
+@media(max-width:650px){.page-today .td-al-list .al-detail{-webkit-line-clamp:3;line-clamp:3}}
+/* Book a collection on a phone: the whole stillage list in the page, a full-width Book button with Close under it */
+@media(max-width:650px){.rt-pick{max-height:none;overflow:visible}.rt-form-actions{flex-direction:column-reverse;align-items:stretch}.rt-form-actions button{flex:none;width:100%;justify-content:center;white-space:nowrap}}
+/* Toasts on a phone sit under the top bar, clear of the buttons just pressed */
+@media(max-width:650px){html body #message:not(:empty):not([hidden]){top:calc(70px + env(safe-area-inset-top,0px));bottom:auto;width:calc(100vw - 32px);max-width:calc(100vw - 32px);padding:11px 14px;text-align:center}}

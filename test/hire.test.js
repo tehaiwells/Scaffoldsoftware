@@ -53,10 +53,11 @@ test('minimum hire: pieces back early are topped up to the minimum, on the state
  const open=book([['in',5,'2026-08-30']]);assert.equal(hirePeriod(open,'2026-08-01','2026-08-31','2026-08-31',7).topUp,0);
 });
 
-test('rates: a site override wins field by field; a week rate costs a seventh a day; money and GST round to the cent',()=>{
+test('rates: a site price replaces the standard price as a whole, its minimum wins on its own; a week rate costs a seventh a day; money and GST round to the cent',()=>{
  const std={week:1400,day:null,minDays:7};
- assert.deepEqual(hireRateFor(std,null),{week:1400,day:null,minDays:7,source:'standard',priced:true,perDay:200,perWeek:1400});
- const r=hireRateFor(std,{week:null,day:250,minDays:null});assert.equal(r.day,250);assert.equal(r.week,1400);assert.equal(r.minDays,7);assert.equal(r.source,'site');assert.equal(r.perDay,250,'a day rate is charged when one is set');
+ assert.deepEqual(hireRateFor(std,null),{week:1400,day:null,minDays:7,source:'standard',minSource:'standard',priced:true,rule:'week',perDay:200,perWeek:1400});
+ const r=hireRateFor(std,{week:null,day:250,minDays:null});assert.equal(r.day,250);assert.equal(r.week,null,'the negotiated day price is not mixed with the standard week price');assert.equal(r.minDays,7);assert.equal(r.source,'site');assert.equal(r.minSource,'standard');assert.equal(r.perDay,250);
+ const minOnly=hireRateFor(std,{week:null,day:null,minDays:28});assert.equal(minOnly.source,'standard','a site minimum alone keeps the standard price (and its label)');assert.equal(minOnly.minSource,'site');assert.equal(minOnly.minDays,28);
  assert.equal(hireRateFor(std,{week:1050,day:null,minDays:14}).perDay,150);assert.equal(hireRateFor(std,{week:1050,day:null,minDays:14}).minDays,14);
  assert.equal(hireRateFor(null,null).priced,false);assert.equal(hireRateFor(null,{minDays:7}).priced,false,'a minimum alone is not a rate');
  assert.equal(hireAmount(10,hireRateFor({week:1000},null)),1429,'10 x $10.00/7 = $14.2857 -> $14.29');
@@ -128,8 +129,8 @@ test('only the owner sees hire: managers and supervisors get neither the figures
  assert.equal(f.sim.hire().totals.pieces,100);
 });
 
-test('the result is cached until the next ledger row, and a rate change shows at once',t=>{const f=story(t);
- const a=f.sim.hire({site:f.site.id});assert.equal(f.sim.hire({site:f.site.id}),a,'same object from the store');
+test('the sums are kept until the hire book, a rate or the day changes, and a rate change shows at once',t=>{const f=story(t);
+ const a=f.sim.hire({site:f.site.id});assert.equal(f.sim.hire({site:f.site.id}).statement.lines[0].daily,a.statement.lines[0].daily,'the kept statement is reused');
  f.cmd('hireRate',{product:f.products[0].id,day:100});const b=f.sim.hire({site:f.site.id});assert.notEqual(b,a);assert.equal(b.statement.lines[0].rate.day,100);assert.ok(b.seq>a.seq);
  assert.equal(b.statement.from,'2026-08-01','no dates: the month so far');assert.equal(b.statement.to,'2026-08-17');
 });

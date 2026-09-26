@@ -8,10 +8,12 @@ test('the installed app opens on Today, which fits a phone',async({page})=>{
   await page.getByRole('button',{name:'Create yard',exact:true}).click();await expect(page.getByRole('heading',{level:2,name:'Set up your real yard',exact:true})).toBeVisible({timeout:45000});
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href','/manifest.webmanifest');
   await page.goto('/?view=TODAY');await expect(page.getByRole('heading',{level:1,name:'Today',exact:true})).toBeVisible({timeout:45000});
-  await expect(page).toHaveURL(/\/$/);// the start link is used once, then the address is clean
+  await expect(page).toHaveURL(/\/\?view=TODAY$/);// kept while Today is open, so 'Add to Home screen' from here opens on Today
   await expect(page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Today',exact:true})).toHaveClass(/current/);
   for(const name of ['Loads due today','Alerts','Trucks now','Crew now','Quick actions'])await expect(page.getByRole('heading',{level:2,name:new RegExp('^'+name)})).toBeVisible();
   await page.setViewportSize({width:375,height:800});
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await page.locator('[data-td-jump="crew"]').click();await expect(page.locator('#td-crew')).toBeInViewport();
+  await page.setViewportSize({width:1280,height:900});await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page).toHaveURL(/\/$/);// another page: the address is clean again
 });

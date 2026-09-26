@@ -27,7 +27,11 @@ test('the Hire page: hero counters, the no-rate alert, sites, a statement and th
  f.cmd('hireRate',{product:f.products[0].id,week:700});d=f.sim.hire({site:f.site.id,from:'2026-09-01',to:'2026-09-21'});H.setData(d,{site:f.site.id,from:'2026-09-01',to:'2026-09-21'});html=H.view();
  assert.ok(!html.includes('Not complete:'));assert.ok(html.includes('$2,300.00')&&html.includes('$230.00')&&html.includes('$2,530.00'),'subtotal, GST 10%, total');
  assert.ok(/data-hr-f="week"[^>]*value="7\.00"/.test(html),'the saved week rate in the editor');
- H.setScope(f.site.id);const rows=H.rows();assert.ok(/data-hr-f="week"[^>]*value=""[^>]*placeholder="7\.00"/.test(rows),'a site shows the standard rate faintly');assert.ok(rows.includes('data-hr-f="note"'));H.setScope('STD');
+ H.setScope(f.site.id);const rows=H.rows();assert.ok(/data-hr-f="week"[^>]*value=""[^>]*><small class="hr-std">standard \$7\.00<\/small>/.test(rows),'a site shows the standard rate as a caption under the box');assert.ok(rows.includes('data-hr-f="note"'));
+ assert.ok(rows.includes('<p class="hr-rate-result" data-hr-result>Standard price: $7.00 a week</p>'),'and what the site pays, in words');
+ H.draft.set(f.site.id+'|'+f.products[0].id,{day:'0.90'});assert.ok(H.rows().includes('This site pays $0.90 a day (not the standard $7.00 a week)'));H.draft.clear();H.setScope('STD');
+ assert.ok(html.includes('id="hr-eff"')&&html.includes('Correct past hire too'),'when a changed price applies');
+ assert.ok(html.includes('Time on hire')&&html.includes('>2.1 weeks<'),'in weeks from two weeks on (days before that)');
  assert.ok(!/ style="/.test(html),'no inline style attributes (CSP)');});
 
 test('the A4 hire statement: HIRE STATEMENT, lines, GST, total, and a DEMO watermark for demonstration products',async t=>{const f=setup(t),{T,H,prSheetHTML}=await load();
