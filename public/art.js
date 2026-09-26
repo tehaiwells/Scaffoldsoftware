@@ -179,3 +179,20 @@ export function mlSceneArt(){return ovImg('ml-scene','ml-diorama','-14 -34 588 2
  '<use href="#spr-stillage" x="392" y="104" width="74" height="49"/><use href="#spr-stillage" x="392" y="76" width="74" height="49"/><use href="#spr-cage" x="438" y="128" width="56" height="37"/>'+
  '<use href="#spr-bundle" x="92" y="160" width="54" height="40"/><use href="#spr-worker-busy" x="136" y="150" width="24" height="46"/>'+
  '<use href="#spr-forklift-load" x="300" y="138" width="98" height="75"/><use href="#spr-worker" x="416" y="162" width="24" height="44"/>');}
+// ---- Set-up guide (Home): a fenced yard pad with its size marked out, and a dated yard list (own sheet, built once, next to the main sheet). Isometric, lit from the upper left like the yard plan; the pad reuses the main sheet's stillage. ----
+let sgSheetHTML=null;
+const SG_YARD='<ellipse cx="60" cy="76" rx="54" ry="9" fill="#1d3a2a" opacity=".13"/><path d="M60 8 118 38 60 68 2 38Z" fill="#8fa866"/><path d="M2 38 60 68 118 38v5L60 73 2 43Z" fill="#6f8a4e"/><path d="M60 15 106 38 60 61 14 38Z" fill="#d8d1c1"/><path d="M14 38 60 61 106 38v4L60 65 14 42Z" fill="#a79f8b"/>'
+ +'<path d="M60 21 94 38 60 55 26 38Z" fill="none" stroke="#e3bd2c" stroke-width="1.3" stroke-dasharray="4 3"/>'
+ +'<path d="M14 38v-9L60 6l46 23v9M14 33.5 60 10.5l46 23M26 32v-9M38 26v-9M49 20.5v-9M71 20.5v-9M82 26v-9M94 32v-9" fill="none" stroke="#9aa6a0" stroke-width="1.2" stroke-linecap="round"/>'
+ +'<use href="#spr-stillage" x="36" y="24" width="30" height="20"/><use href="#spr-stillage" x="54" y="32" width="30" height="20"/>'
+ +'<path d="M8 49 56 73M66 73l48-24" fill="none" stroke="#2b5a3d" stroke-width="1.3"/><path d="M8 49l1.2 4.2M8 49l4.3.6M56 73l-4.3-.6M56 73l-1.2-4.2M66 73l1.2-4.2M66 73l4.3-.6M114 49l-4.3.6M114 49l-1.2 4.2" fill="none" stroke="#2b5a3d" stroke-width="1.3" stroke-linecap="round"/>'
+ +'<rect x="18" y="56.5" width="24" height="11" rx="5.5" fill="#d2ea83" stroke="#5f7d2c" stroke-width=".9"/><text x="30" y="64.6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="7.2" font-weight="700" text-anchor="middle" fill="#27421f">30 m</text>'
+ +'<rect x="78" y="56.5" width="24" height="11" rx="5.5" fill="#d2ea83" stroke="#5f7d2c" stroke-width=".9"/><text x="90" y="64.6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="7.2" font-weight="700" text-anchor="middle" fill="#27421f">20 m</text>';
+const SG_LIST='<ellipse cx="29" cy="55" rx="21" ry="3.6" fill="#1d3a2a" opacity=".14"/><rect x="8" y="8" width="34" height="44" rx="4" fill="#b98a4e" stroke="#8a6232" stroke-width="1.2"/><rect x="12" y="13" width="26" height="35" rx="1.5" fill="#fbfaf4"/>'
+ +'<rect x="18" y="5" width="14" height="7" rx="2" fill="#7c8a86"/><rect x="21" y="3.4" width="8" height="3.2" rx="1.6" fill="#56636a"/>'
+ +'<path d="M15.5 19.5l1.4 1.4 2.6-2.8M15.5 26.5l1.4 1.4 2.6-2.8M15.5 33.5l1.4 1.4 2.6-2.8" fill="none" stroke="#6fae2f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 20h12M22 27h10M22 34h8" stroke="#c9d1c2" stroke-width="1.8" stroke-linecap="round"/>'
+ +'<rect x="31" y="29" width="23" height="23" rx="3.2" fill="#fff" stroke="#2b5a3d" stroke-width="1.4"/><path d="M31 32.2a3.2 3.2 0 0 1 3.2-3.2h16.6a3.2 3.2 0 0 1 3.2 3.2V37H31Z" fill="#6fae2f"/><path d="M36.5 27v4.4M48.5 27v4.4" stroke="#2b5a3d" stroke-width="1.8" stroke-linecap="round"/>'
+ +'<path d="M35 41h3M40.5 41h3M46 41h3M35 46h3M46 46h3" stroke="#c9d1c2" stroke-width="1.8" stroke-linecap="round"/><rect x="39.6" y="43.4" width="4.8" height="5" rx="1.2" fill="#d2ea83" stroke="#5f7d2c" stroke-width=".8"/>';
+// Symbols: sg-yard (120x84), sg-list (60x60).
+export function sgSheet(){return sgSheetHTML??='<svg id="sg-sprite-sheet" class="sprite-sheet" width="0" height="0" aria-hidden="true" focusable="false"><defs><symbol id="sg-yard" viewBox="0 0 120 84">'+SG_YARD+'</symbol><symbol id="sg-list" viewBox="0 0 60 60">'+SG_LIST+'</symbol></defs></svg>';}
+export function sgMount(){if(typeof document==='undefined'||document.getElementById('sg-sprite-sheet'))return;document.body.insertAdjacentHTML('beforeend',sgSheet());}
