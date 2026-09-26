@@ -1,4 +1,4 @@
-import {openOperations,stopOperations,catalogueSettings,bindCatalogue} from './operations.js';
+import {openOperations,stopOperations,catalogueSettings,bindCatalogue,bdCard,bdBind,bdClear} from './operations.js';
 import {mountSprites,sprite,siMount,siImg} from './art.js';
 const app=document.querySelector('#app'),message=document.querySelector('#message');
 let systems=[],state=null;
@@ -119,18 +119,19 @@ function settingsHome(){
   const switcher=state.memberships.length>1?`<section class="panel acct-card acct-switch">${cardHead('ac-switch','Company workspaces','You belong to '+state.memberships.length+' companies. Switch to open another one.')}<form id="switch-company"><label>Company workspace<select name="companyId">${state.memberships.map(c=>`<option value="${escape(c.id)}" ${c.id===state.company.id?'selected':''}>${escape(c.name)}</option>`).join('')}</select></label><div class="actions"><button>Switch company</button></div></form></section>`:'';
   const catalogue=owner?`<section class="panel acct-card acct-catalogue">${cardHead('spr-bundle','Catalogue','Your components, weights and pack sizes.')}${ops?`<div class="acct-pointer"><span class="acct-pointer-art">${sprite('spr-stillage')}</span><div><strong>Import your supplier’s list on the Materials list</strong><p>Paste or upload a spreadsheet with Import materials, then fix any missing weights and pack sizes there.</p></div><button type="button" class="secondary" id="acct-materials">Open the Materials list</button></div>`:''}<div class="acct-cat-admin">${catalogueSettings()}</div></section>`:'';
   const backups=owner?`<section class="panel acct-card" id="backups">${cardHead('ac-archive','Backups','Loading backup details…')}</section>`:'';
-  const activity=owner?`<section class="panel acct-card acct-activity">${cardHead('ac-log','Recent activity','Company changes, newest first.')}<ul class="activity-list">${state.audit.map(a=>`<li><span>${escape({'company.created':'Company created','company.updated':'Company settings saved','user.created':'Team member added','membership.created':'Company membership added'}[a.action]??a.action)}</span><time>${escape(new Date(a.created_at).toLocaleString())}</time></li>`).join('')||'<li><span class="muted">Nothing yet.</span></li>'}</ul></section>`:'';
+  const activity=owner?`<section class="panel acct-card acct-activity">${cardHead('ac-log','Recent activity','Company changes, newest first.')}<ul class="activity-list">${state.audit.map(a=>`<li><span>${escape({'company.created':'Company created','company.updated':'Company settings saved','user.created':'Team member added','membership.created':'Company membership added','company.paperwork':'Paperwork details saved','company.logo':'Paperwork logo changed'}[a.action]??a.action)}</span><time>${escape(new Date(a.created_at).toLocaleString())}</time></li>`).join('')||'<li><span class="muted">Nothing yet.</span></li>'}</ul></section>`:'';
   const access=owner?'':`<section class="panel acct-card acct-access">${cardHead('ac-key','What you can do here',escape(roles.map(r=>ROLE_NAME[r]).join(' · ')))}<ul class="access-list">${ACCESS.filter(([p])=>state.permissions.includes(p)).map(([,t])=>`<li>${t}</li>`).join('')}</ul><p class="acct-note">${ops?'Company settings, the team and backups are looked after by an owner.':'The office runs the yard; ask them for access to more sites.'}</p></section>`;
   const left=owner?company+members+membership+activity:company+switcher,right=owner?backups+catalogue+switcher:access;
-  app.innerHTML=`<div class="acct${owner?' is-owner':''}">${hero}<div class="acct-grid"><div class="acct-col">${left}</div><div class="acct-col">${right}</div></div></div>`;
+  app.innerHTML=`<div class="acct${owner?' is-owner':''}">${hero}${owner?bdCard():''}<div class="acct-grid"><div class="acct-col">${left}</div><div class="acct-col">${right}</div></div></div>`;
   bindCatalogue();
   if(owner)backupsPanel();
+  if(owner)bdBind(state.company.name);
   opsCounts(!owner);
   if(state.memberships.length>1)bind('switch-company',async data=>{await api('switch-company',data);await refresh();});
   if(owner)bind('membership',async data=>{await api('memberships',data);await refresh();notify('Company membership added.');},['roles']);
   document.querySelector('#back-yard').onclick=()=>refresh();
   const mat=document.querySelector('#acct-materials');if(mat)mat.onclick=async()=>{try{await refresh();const b=document.querySelector('.nav-button[data-view="MATERIALS"]');if(b){b.click();requestAnimationFrame(()=>document.getElementById('mi-import')?.scrollIntoView({block:'start'}));}}catch(error){notify(error.message);}};
-  document.querySelector('#logout').onclick=async()=>{try{stopOperations();await api('logout',{});state=null;auth(false);notify('Signed out.');}catch(error){notify(error.message);}};
+  document.querySelector('#logout').onclick=async()=>{try{stopOperations();await api('logout',{});bdClear();state=null;auth(false);notify('Signed out.');}catch(error){notify(error.message);}};
   if(owner)bind('company',async data=>{await api('company',data);await refresh();notify('Company settings saved.');},['systems']);
   if(team)bind('member',async data=>{await api('users',data);await refresh();notify('Team member added.');},['roles']);
 }

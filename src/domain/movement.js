@@ -40,6 +40,7 @@ export const movementMethods={
     for(const delivery of this.repo.all('delivery').filter(d=>d.status==='ARRIVED')){
       if(delivery.containers.every(id=>{const c=this.repo.get(id,'container');return c.location===delivery.to||c.delivery===delivery.id;})){delivery.status='DELIVERED';delivery.completedAt=new Date().toISOString();this.repo.save(delivery);this.notify('Delivery complete','Every container has been placed at its destination.',this.repo.get(delivery.to).kind==='site'?delivery.to:null);}
     }
+    this.rtSync();// scheduled collections follow their stillages (collections.js)
     for(const request of this.repo.all('request').filter(r=>['ALLOCATED','PARTIALLY ALLOCATED','DELIVERED'].includes(r.status))){
       const relevant=this.tasks().filter(t=>t.request===request.id&&t.type==='MOVE'&&t.state!=='CANCELLED');const quantity=relevant.reduce((sum,t)=>{const c=this.repo.get(t.container,'container');return sum+(c.location===request.site?this.repo.quantity(c.id,request.product):0);},0);request.delivered=quantity;const onTheWay=relevant.some(t=>{if(active(t))return true;const loc=this.repo.get(this.repo.get(t.container,'container').location);return loc.kind==='truck'||loc.kind==='resource';});if(quantity===request.quantity)request.status='DELIVERED';else if(request.status==='PARTIALLY ALLOCATED'&&quantity>0&&!onTheWay)request.status='DELIVERED';else if(request.status==='DELIVERED'&&quantity===0)request.status='RETURNED';this.repo.save(request);
     }

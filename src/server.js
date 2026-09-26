@@ -8,10 +8,13 @@ import { Simulation, startScheduler } from './simulation.js';
 import { prepareDatabase } from './relocate.js';
 import { createBackups } from './backups.js';
 import { backupDirectory, backupName } from './paths.js';
+import { bdRoute, BD_LOGO_BODY } from './domain/brand.js';
 
 export function createApp(db,{backups=null}={}) {
   const service=new Service(db), attempts=new Map();
   const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/shape.js':['shape.js','text/javascript'],'/shape-editor.js':['shape-editor.js','text/javascript'],'/style.css':['style.css','text/css']};
+  // The installable app (Today page): the web app manifest and its icons (PNG files made once by scripts/make-icons.js).
+  Object.assign(assets,{'/manifest.webmanifest':['manifest.webmanifest','application/manifest+json'],...Object.fromEntries(['icon-32','icon-192','icon-512','icon-maskable-512','apple-touch-icon'].map(n=>['/icons/'+n+'.png',['icons/'+n+'.png','image/png']]))});
   return createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -26,7 +29,7 @@ export function createApp(db,{backups=null}={}) {
       if(req.method==='POST') {
         if(req.headers.origin && req.headers.origin!==`${req.socket.encrypted?'https':'http'}://${req.headers.host}`) throw new AppError(403,'Invalid request origin.');
         if(req.headers['content-type']?.split(';')[0]!=='application/json') throw new AppError(415,'JSON is required.');
-        let size=0,chunks=[];for await(const chunk of req) {size+=chunk.length;if(size>16384) throw new AppError(413,'Request too large.');chunks.push(chunk);}
+        let size=0,chunks=[];for await(const chunk of req) {size+=chunk.length;if(size>(path==='/api/company-logo'?BD_LOGO_BODY:16384)) throw new AppError(413,'Request too large.');chunks.push(chunk);}
         try {body=JSON.parse(Buffer.concat(chunks).toString());}catch {throw new AppError(400,'Invalid JSON.');}
         if(!body||typeof body!=='object'||Array.isArray(body)) throw new AppError(400,'Invalid request.');
       }
@@ -44,6 +47,8 @@ export function createApp(db,{backups=null}={}) {
       else if(req.method==='GET'&&path==='/api/state') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.snapshot(Number(query.get('page')??0),{lean:true,catalogue:query.get('catalogue')}));}
       else if(req.method==='GET'&&path==='/api/history') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.history(Number(query.get('limit')??100),Number(query.get('after')??0)));}
       else if(req.method==='GET'&&path==='/api/reports') {const days=new URL(req.url,'http://localhost').searchParams.get('days');send(200,simulation.reports(days===null?30:Number(days)));}
+      else if(req.method==='GET'&&path==='/api/hire') send(200,simulation.hire(Object.fromEntries(new URL(req.url,'http://localhost').searchParams)));
+      else if(req.method==='GET'&&path==='/api/hire.csv') {const out=simulation.hireCSV(Object.fromEntries(new URL(req.url,'http://localhost').searchParams));res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="${out.name}"`});res.end('﻿'+out.csv);}
       else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${['stock','register','additions','removals','yardlist'].includes(kind)?kind:'history'}.csv"`});res.end(output);}
       else if(req.method==='POST'&&path==='/api/placement-preview') send(200,simulation.placementPreview(body));
       else if(req.method==='POST'&&path==='/api/layout-preview') send(200,simulation.layoutPreview(body));
@@ -52,6 +57,7 @@ export function createApp(db,{backups=null}={}) {
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
       else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');send(200,backups.status());}
       else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),file:result.file});}
+      else if(path==='/api/company-details'||path==='/api/company-logo') await bdRoute(req,res,simulation,path,body,send);
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/users') send(201,service.addUser(user,body));

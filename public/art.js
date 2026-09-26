@@ -236,3 +236,79 @@ let hcSheetHTML=null;
 export function hcSheet(){return hcSheetHTML??='<svg id="hc-sprite-sheet" class="sprite-sheet" width="0" height="0" aria-hidden="true" focusable="false"><defs><symbol id="hc-board" viewBox="0 0 170 184">'+hcBoardArt()+'</symbol></defs></svg>';}
 export function hcMount(){if(typeof document==='undefined'||document.getElementById('hc-sprite-sheet'))return;document.body.insertAdjacentHTML('beforeend',hcSheet());}
 export const hcIcon=()=>'<svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16M8.5 16v-4M12.5 16V8.5M16.5 16v-6"/></svg>';
+
+// ----- Hire (hr-): the hire board in the Hire hero (symbol hr-board, 170 x 184: a standing board turned the way the yard sprites face, with a month
+// calendar whose on-hire days are marked in lime and a yellow price tag hanging from its corner), a price tag (hr-tag, 48 x 48) and the nav icon.
+const hrP=(u,v)=>[18+u*132,62-u*62+v*84],hrN=p=>p.map(n=>+n.toFixed(1)).join(' '),hrQ=pts=>'M'+pts.map(hrN).join('L')+'Z';
+function hrBoardArt(){
+ const leg=u=>{const [a,b]=hrP(u,1);return '<path d="M'+hrN([a,b-4])+'v34" stroke="#3d494e" stroke-width="5" stroke-linecap="round"/><path d="M'+hrN([a-7,b+33])+'h14" stroke="#2c3438" stroke-width="4" stroke-linecap="round"/>';};
+ let s='<ellipse cx="86" cy="164" rx="74" ry="12" fill="#2a1d08" fill-opacity=".16"/>'+leg(.12)+leg(.88);
+ s+='<path d="'+hrQ([hrP(1,0),[154,2],[154,86],hrP(1,1)])+'" fill="#1f4a33"/><path d="'+hrQ([hrP(0,0),hrP(1,0),[154,2],[22,64]])+'" fill="#3e7a52"/>';
+ s+='<path d="'+hrQ([hrP(0,0),hrP(1,0),hrP(1,1),hrP(0,1)])+'" fill="#2b5a3d"/><path d="'+hrQ([hrP(.035,.06),hrP(.965,.06),hrP(.965,.94),hrP(.035,.94)])+'" fill="#fbfaf4"/>';
+ s+='<path d="'+hrQ([hrP(.035,.06),hrP(.965,.06),hrP(.965,.2),hrP(.035,.2)])+'" fill="#6fae2f"/>';
+ for(const u of [.2,.8]){const [x,y]=hrP(u,.04);s+='<path d="M'+hrN([x,y-3])+'v9" stroke="#3d494e" stroke-width="3" stroke-linecap="round"/>';}
+ // 7 x 4 day grid: the run of days a load has been out is lime, today is outlined.
+ const cols=7,rows=4,u0=.08,v0=.27,du=.84/cols,dv=.62/rows,on=new Set([9,10,11,12,13,16,17,18,19,20,23,24,25]);
+ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const i=r*cols+c,u=u0+c*du,v=v0+r*dv,cell=[hrP(u+.012,v+.02),hrP(u+du-.012,v+.02),hrP(u+du-.012,v+dv-.03),hrP(u+.012,v+dv-.03)];
+  s+='<path d="'+hrQ(cell)+'" fill="'+(on.has(i)?'#b9ef4b':'#e9eee2')+'"'+(i===25?' stroke="#2b5a3d" stroke-width="1.6"':'')+'/>';}
+ // the tag on its string from the top right corner
+ const [cx,cy]=hrP(.965,.06);s+='<path d="M'+hrN([cx-2,cy+2])+'q10 14 4 30" fill="none" stroke="#56636a" stroke-width="1.3"/>';
+ s+='<g transform="translate('+hrN([cx-10,cy+30])+') rotate(12)"><path d="M6 0h20l6 7v27a3 3 0 0 1-3 3H3a3 3 0 0 1-3-3V7Z" fill="#f2c434" stroke="#6f5a12" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="7" r="2.6" fill="#fbfaf4" stroke="#6f5a12" stroke-width="1.2"/><text x="16" y="29" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="800" fill="#3a2a05">$</text></g>';
+ return s;}
+const HR_TAG='<ellipse cx="25" cy="44" rx="15" ry="3" fill="#2a1d08" fill-opacity=".15"/><path d="M24 3c-7 0-9 6-6 9" fill="none" stroke="#56636a" stroke-width="1.6" stroke-linecap="round"/><g transform="rotate(-14 24 26)"><path d="M16 9h16l6 7v22a3 3 0 0 1-3 3H13a3 3 0 0 1-3-3V16Z" fill="#f2c434" stroke="#6f5a12" stroke-width="1.8" stroke-linejoin="round"/><circle cx="24" cy="16" r="2.8" fill="#fbfaf4" stroke="#6f5a12" stroke-width="1.3"/><text x="24" y="35" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="800" fill="#3a2a05">$</text></g>';
+let hrSheetHTML=null;
+export function hrSheet(){return hrSheetHTML??='<svg id="hr-sprite-sheet" class="sprite-sheet" width="0" height="0" aria-hidden="true" focusable="false"><defs><symbol id="hr-board" viewBox="0 0 170 184">'+hrBoardArt()+'</symbol><symbol id="hr-tag" viewBox="0 0 48 48">'+HR_TAG+'</symbol></defs></svg>';}
+export function hrMount(){if(typeof document==='undefined'||document.getElementById('hr-sprite-sheet'))return;document.body.insertAdjacentHTML('beforeend',hrSheet());}
+// The Hire hero scene: a client site (the building in its scaffold, stillages on the pad), the hire board, a 12.5 t truck at the gate, crew and trees.
+export const HR_SCENE='<svg class="hr-scene" viewBox="0 0 460 210" aria-hidden="true" focusable="false"><path d="M-10 146 236 38 470 132 224 250Z" fill="#8fa866"/><path d="M40 150 236 64 440 146 244 232Z" fill="#cfc3a9"/><path d="M40 150 244 232 440 146v7L244 239 40 157Z" fill="#a39479"/><path d="M70 150 236 78 410 146 244 218Z" fill="none" stroke="#e3bd2c" stroke-width="2" stroke-dasharray="9 6" opacity=".9"/>'+
+ '<use href="#spr-tree" x="0" y="50" width="66" height="78"/><use href="#spr-tree" x="404" y="26" width="54" height="64"/>'+
+ '<use href="#si-site" x="52" y="30" width="150" height="122"/><use href="#spr-stillage" x="150" y="138" width="64" height="43"/><use href="#spr-stillage" x="112" y="152" width="64" height="43"/>'+
+ '<use href="#hr-board" x="206" y="22" width="122" height="132"/><use href="#spr-worker" x="212" y="122" width="26" height="50"/>'+
+ '<use href="#spr-truck12" x="296" y="96" width="150" height="100"/></svg>';
+export const hrIcon=()=>'<svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12.2 11.8 3.9h7.3a1 1 0 0 1 1 1v7.3l-8.3 8.3a1.4 1.4 0 0 1-2 0L3.5 14.2a1.4 1.4 0 0 1 0-2ZM16 8.1h.01M9.5 12.5l3 3"/></svg>';
+
+// ----- Scheduled returns (rt-): collection pictures (a truck bringing a stillage home, with the violet return badge) and the inline return glyph. -----
+const RT_BADGE=(cx,cy,r)=>'<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="#7a5cc7" stroke="#fff" stroke-width="2.5"/><path d="M'+(cx+4.6)+' '+(cy+5.4)+'v-3.6a5 5 0 0 0-5-5h-6.4" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M'+(cx-3.4)+' '+(cy-7.6)+'l-3.6 3.4 3.6 3.4" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>';
+const RT_ART={
+ 'rt-collect':'<ellipse cx="38" cy="64" rx="30" ry="5" fill="#2a1d08" fill-opacity=".15"/><use href="#spr-truck12" x="-4" y="22" width="76" height="41"/><use href="#spr-stillage" x="16" y="14" width="34" height="23"/>'+RT_BADGE(62,17,13),
+ 'rt-site':'<path d="M4 48 60 22 116 48 60 74Z" fill="#8fa866"/><path d="M16 48 60 28 104 48 60 68Z" fill="#cfc3a9"/><path d="M4 48 60 74 116 48v4L60 78 4 52Z" fill="#6f8a4e"/>'
+  +'<use href="#spr-stillage" x="26" y="30" width="40" height="27"/><use href="#spr-stillage" x="26" y="18" width="40" height="27"/><use href="#spr-cage" x="52" y="40" width="30" height="20"/>'
+  +'<path d="M78 58c10-2 18-8 22-17" fill="none" stroke="#7a5cc7" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1 6"/>'+RT_BADGE(100,22,15)
+};
+const RT_BOX={'rt-site':'0 0 120 84'};
+export const rtImg=(key,cls='')=>ovImg(key,'rt-img'+(cls?' '+cls:''),RT_BOX[key]??'0 0 80 72',RT_ART[key]??RT_ART['rt-collect']);
+export const rtGlyph=()=>'<svg class="rt-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+
+// ===== TODAY PAGE AND THE INSTALLABLE APP (td-): the nav icon, the hero's day board and the app icon (drawn here, rendered to PNG once by scripts/make-icons.js). =====
+export const tdIcon=()=>'<svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v16H4zM4 10h16M8 3v4M16 3v4"/><circle cx="12" cy="15.6" r="2.4" fill="currentColor" stroke="none"/></svg>';
+// The hero's day board: a tear-off calendar page on two posts, the day ringed, beside the yard; drawn at 0 0 150 120 (placed by the scene).
+export const tdBoard=()=>{let cells='';for(let r=0;r<3;r++)for(let c=0;c<5;c++){const x=22+c*21,y=44+r*17,on=r===1&&c===2;cells+='<rect x="'+x+'" y="'+y+'" width="16" height="12" rx="2" fill="'+(on?'#e3b21c':r===0&&c<2?'#cfd6c8':'#e8ece3')+'"/>';}
+ return '<path d="M30 104v14M120 104v14" stroke="#5b4630" stroke-width="5" stroke-linecap="round"/><ellipse cx="75" cy="118" rx="58" ry="6" fill="#2a1d08" opacity=".14"/><rect x="10" y="14" width="130" height="92" rx="8" fill="#fbfaf3" stroke="#2e3b33" stroke-width="3.5"/><path d="M10 22a8 8 0 0 1 8-8h114a8 8 0 0 1 8 8v14H10z" fill="#d8472a"/><path d="M40 8v14M110 8v14" stroke="#2e3b33" stroke-width="4" stroke-linecap="round"/>'+cells+'<circle cx="74" cy="67" r="13" fill="none" stroke="#1f4a36" stroke-width="3"/><path d="M68 67l4 4 8-8" fill="none" stroke="#1f4a36" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>';};
+// The app icon (home screen, browser tab): the yard's galvanised stillage, two high, on a slab of the yard in the hero green. maskable: full bleed, the art inside the
+// 80 % safe circle; rounded: transparent corners (browsers, Android 'any'); neither: a full square (iOS rounds it itself). small: the brand mark only (favicons).
+export function tdAppIcon({maskable=false,rounded=false,small=false}={}){
+ const bg='<defs><radialGradient id="tdg" cx=".78" cy=".12" r="1.05"><stop offset="0" stop-color="#3f8159"/><stop offset=".42" stop-color="#245740"/><stop offset=".78" stop-color="#183f30"/><stop offset="1" stop-color="#122d23"/></radialGradient><pattern id="tds" width="28" height="28" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="28" fill="#fff" opacity=".035"/></pattern></defs>'+(rounded?'<rect width="512" height="512" rx="112" fill="url(#tdg)"/><rect width="512" height="512" rx="112" fill="url(#tds)"/>':'<rect width="512" height="512" fill="url(#tdg)"/><rect width="512" height="512" fill="url(#tds)"/>');
+ if(small){let cells='';for(let r=0;r<3;r++)for(let c=0;c<3;c++)cells+='<rect x="'+(146+c*76)+'" y="'+(146+r*76)+'" width="68" height="68" rx="10" fill="'+((r+c)%2?'#b9ef4b':'#d9f56b')+'"/>';return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'+bg+'<rect x="118" y="118" width="276" height="276" rx="40" fill="#16382c" stroke="#cce69e" stroke-width="16"/>'+cells+'</svg>';}
+ const k=maskable?.8:1,o=256*(1-k);
+ const slab='<path d="M40 322 256 214 472 322 256 430Z" fill="#8fa866"/><path d="M40 322 256 430 472 322v16L256 446 40 338Z" fill="#6c8a4a"/><path d="M92 322 256 240 420 322 256 404Z" fill="#d8d1c1"/><path d="M92 322 256 404 420 322v10L256 414 92 332Z" fill="#a79f8b"/><path d="M122 322 256 255 390 322 256 389Z" fill="none" stroke="#e3bd2c" stroke-width="5" stroke-dasharray="16 11" opacity=".9"/>';
+ const pack=(t,x,y,s)=>'<g transform="translate('+x+' '+y+') scale('+s+')">'+packShape(t)+'</g>';
+ return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'+bg+'<g transform="translate('+o+' '+o+') scale('+k+')"><g transform="translate(0 -30)">'+slab+pack('STILLAGE',84,116,1.08)+pack('CAGE',268,262,.62)+'</g></g></svg>';}
+
+// ----- Company details for paperwork (bd-): symbol bd-letterhead (80 x 64), a short stack of printed sheets lying on the desk the way the yard sprites face:
+// the top sheet carries a letterhead (a logo square, the name, a green rule), a few printed lines and the round company stamp. bdP(u,v) maps 0..1 across and down the sheet.
+const bdP=(u,v,z=0)=>[6+u*34+v*27,34-u*19+v*15-z],bdN=p=>p.map(n=>+n.toFixed(1)).join(' '),bdQ=(pts,z=0)=>'M'+pts.map(([u,v])=>bdN(bdP(u,v,z))).join('L')+'Z';
+function bdLetterheadArt(){
+ let s='<ellipse cx="40" cy="52" rx="33" ry="8" fill="#1c2a12" fill-opacity=".14"/>';
+ for(const [z,c] of [[0,'#d9d3bf'],[2.2,'#e8e2cf'],[4.4,'#f1ecdc']])s+='<path d="'+bdQ([[0,0],[1,0],[1,1],[0,1]],z)+'" fill="'+c+'" stroke="#23392c" stroke-width=".9" stroke-linejoin="round"/>';
+ const z=6.6;s+='<path d="'+bdQ([[0,0],[1,0],[1,1],[0,1]],z)+'" fill="#fbfaf4" stroke="#23392c" stroke-width="1.1" stroke-linejoin="round"/>';
+ s+='<path d="'+bdQ([[.07,.08],[.27,.08],[.27,.3],[.07,.3]],z)+'" fill="#2d6b3f"/><path d="'+bdQ([[.12,.13],[.22,.13],[.22,.25],[.12,.25]],z)+'" fill="#d4ec85"/>';
+ s+='<path d="M'+bdN(bdP(.34,.13,z))+'L'+bdN(bdP(.78,.13,z))+'" stroke="#1f3d2c" stroke-width="2.2" stroke-linecap="round"/><path d="M'+bdN(bdP(.34,.23,z))+'L'+bdN(bdP(.62,.23,z))+'" stroke="#9aa6a0" stroke-width="1.3" stroke-linecap="round"/>';
+ s+='<path d="M'+bdN(bdP(.05,.38,z))+'L'+bdN(bdP(.95,.38,z))+'" stroke="#6fae2f" stroke-width="1.6"/>';
+ for(const [v,e] of [[.52,.9],[.64,.8],[.76,.58]])s+='<path d="M'+bdN(bdP(.08,v,z))+'L'+bdN(bdP(e,v,z))+'" stroke="#c9d1c2" stroke-width="1.5" stroke-linecap="round"/>';
+ const [sx,sy]=bdP(.78,.78,z);s+='<ellipse cx="'+sx.toFixed(1)+'" cy="'+sy.toFixed(1)+'" rx="7.4" ry="4.6" fill="none" stroke="#c8641f" stroke-width="1.5" transform="rotate(-18 '+sx.toFixed(1)+' '+sy.toFixed(1)+')"/><ellipse cx="'+sx.toFixed(1)+'" cy="'+sy.toFixed(1)+'" rx="4.2" ry="2.4" fill="#c8641f" fill-opacity=".35" transform="rotate(-18 '+sx.toFixed(1)+' '+sy.toFixed(1)+')"/>';
+ // a pencil resting across the corner
+ s+='<path d="M50 18l18 -9 3 3 -18 9z" fill="#e3bd2c" stroke="#6f5a12" stroke-width=".9" stroke-linejoin="round"/><path d="M50 18l-5 5 8-2z" fill="#f1dcae" stroke="#6f5a12" stroke-width=".9" stroke-linejoin="round"/><path d="M68 9l3 3 2-1-3-3z" fill="#d8472a"/>';
+ return s;}
+let bdSheetHTML=null;
+export function bdSheet(){return bdSheetHTML??='<svg id="bd-sprite-sheet" class="sprite-sheet" width="0" height="0" aria-hidden="true" focusable="false"><defs><symbol id="bd-letterhead" viewBox="0 0 80 64">'+bdLetterheadArt()+'</symbol></defs></svg>';}
+export function bdMount(){if(typeof document==='undefined'||document.getElementById('bd-sprite-sheet'))return;document.body.insertAdjacentHTML('beforeend',bdSheet());}
