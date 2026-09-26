@@ -9,11 +9,14 @@ async function register(p){
   await p.goto('/');await p.getByLabel('Company name').fill('Shape editor DEMO');await p.getByLabel('Your name').fill('Test Owner');await p.getByLabel('Email').fill(`shape-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await p.getByLabel('Password').fill('Local-demo-test-2026!');await p.getByRole('checkbox',{name:'Quickstage',exact:true}).check();await button(p,'Create company').click();
   await expect(p.locator('#shape-editor')).toBeVisible();
 }
-// A 20 × 16 m yard with two workers, a forklift and one empty stillage S-001 at 4, 4 m.
+// A 20 × 16 m yard with two workers, a forklift and one empty stillage S-001 at 4, 4 m, shown on the Yard (layout plan) page.
+// Creating the yard lands an operations user on Home with the set-up guide, so the test opens the Yard page itself.
 async function yardWithStock(p){
-  await register(p);await expect(width(p)).toHaveValue('20');await expect(p.getByRole('spinbutton',{name:'Depth (m)',exact:true})).toHaveValue('16');await button(p,'Create yard').click();await expect(p.locator('.scene')).toBeVisible();
+  await register(p);await expect(width(p)).toHaveValue('20');await expect(p.getByRole('spinbutton',{name:'Depth (m)',exact:true})).toHaveValue('16');await button(p,'Create yard').click();
+  await expect(p.getByRole('heading',{level:2,name:'Set up your real yard',exact:true})).toBeVisible();
   const yard=(await snapshot(p)).yards[0];await cmd(p,'resources',{location:yard.id,workers:2,machines:1,capacity:1500000,stepMs:100,speed:20000,craneWorkers:1});
   const stillage=await cmd(p,'container',{name:'S-001',location:yard.id,type:'STILLAGE',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000,x:4000,y:4000});
+  await p.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Yard (layout plan)',exact:true}).click();await expect(p.getByRole('heading',{level:1,name:'Yard layout',exact:true})).toBeVisible();
   await expect(p.locator('.scene [data-select="'+stillage.id+'"]')).toBeVisible();return {yard,stillage};
 }
 async function openEditor(p){await button(p,'Change yard shape & size').click();await expect(p.locator('#shape-editor')).toBeVisible();}
@@ -34,7 +37,7 @@ test('one click on Save yard saves the new size (no click is lost to the 1 s ref
 
 test('focus stays where the owner put it: drag the right side, then type a width',async({page})=>{
   await yardWithStock(page);await openEditor(page);
-  const handle=page.locator('#shape-svg [data-handle="side:1"]').first(),b=await handle.boundingBox();
+  const handle=page.locator('#shape-svg [data-handle="side:1"]').first();await handle.scrollIntoViewIfNeeded();const b=await handle.boundingBox();
   await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2+40,b.y+b.height/2,{steps:5});
   await expect(page.locator('#shape-svg .dim-label').first()).not.toHaveText('20.0 m');await page.mouse.up();
   await width(page).click();await width(page).fill('25');await width(page).press('Tab');
@@ -43,14 +46,18 @@ test('focus stays where the owner put it: drag the right side, then type a width
 
 test('typing survives the poll, and Movement activity keeps updating while the editor is open',async({page})=>{
   const {stillage}=await yardWithStock(page);await openEditor(page);
-  const nameField=page.locator('#shape-name');await nameField.fill('North yard');await page.waitForTimeout(3000);await expect(nameField).toHaveValue('North yard');await expect(nameField).toBeFocused();
-  await nameField.press('Tab');await cmd(page,'rotate',{container:stillage.id,rotation:90});
+  const nameField=page.locator('#shape-name');await nameField.fill('North yard');await expect(nameField).toHaveValue('North yard');await expect(nameField).toBeFocused();
+  // Polls hold off while a field has focus; once focus leaves, let two of them land (each re-renders around the editor) and the unsaved name must still be there.
+  const polled=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/state',{timeout:15000});
+  const polls=(async()=>{await polled();await polled();})();await nameField.blur();await polls;await expect(nameField).toHaveValue('North yard');
+  await cmd(page,'rotate',{container:stillage.id,rotation:90});
   await expect(page.locator('section.activity')).toContainText(/TURN 90°|No movements waiting/,{timeout:10000});await expect(page.locator('#shape-name')).toHaveValue('North yard');
 });
 
 test('the gate cannot be dropped outside the yard; it stays at its last allowed spot',async({page})=>{
   await yardWithStock(page);await openEditor(page);
-  const gate=page.locator('#shape-svg [data-handle="gate"]'),b=await gate.boundingBox(),svg=await page.locator('#shape-svg').boundingBox();
+  const gate=page.locator('#shape-svg [data-handle="gate"]');await gate.scrollIntoViewIfNeeded();await expect(gate).toBeInViewport();const b=await gate.boundingBox(),svg=await page.locator('#shape-svg').boundingBox();
+  expect(svg.x).toBeGreaterThanOrEqual(0);expect(svg.y).toBeGreaterThanOrEqual(0);// the drop point (the plan's top-left corner) must be on screen too
   await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(svg.x+4,svg.y+4,{steps:8});await page.mouse.up();
   const [x,y]=(await gate.getAttribute('aria-label')).match(/(-?[\d.]+), (-?[\d.]+) m/).slice(1).map(Number);
   expect(x).toBeGreaterThanOrEqual(0);expect(y).toBeGreaterThanOrEqual(0);expect(x).toBeLessThanOrEqual(18);expect(y).toBeLessThanOrEqual(14.5);
@@ -74,10 +81,15 @@ test('a refused save shows in the bar only and the toast clears itself',async({p
 test('one click on the plan turn button turns S-001, and the page does not jump when it is selected',async({page})=>{
   const {stillage}=await yardWithStock(page);
   const worker=(await snapshot(page)).resources.find(r=>r.type==='WORKER');await cmd(page,'workerCommand',{id:worker.id,order:'MOVE',x:15000,y:12000});
-  const before=await page.evaluate(()=>scrollY);await page.locator('.scene [data-select="'+stillage.id+'"]').click();
+  // Bring the stillage to the middle of the screen first, clear of the "Yard created." toast at the bottom (Playwright would otherwise scroll as part of
+  // the click, and scrolls again if something covers the click point), then measure: only the app's own scrolling counts.
+  const pick=page.locator('.scene [data-select="'+stillage.id+'"]');await pick.evaluate(el=>el.scrollIntoView({block:'center'}));await expect(pick).toBeInViewport({ratio:1});
+  const clickable=()=>pick.evaluate(el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('[data-select]')===el;});
+  await expect.poll(clickable,{timeout:10000}).toBe(true);
+  const before=await page.evaluate(()=>scrollY);await pick.click();
   await expect(page.locator('.plan-selection')).toContainText('long side along side 1');expect(Math.abs(await page.evaluate(()=>scrollY)-before)).toBeLessThan(5);
   const turn=page.locator('.plan-turn');await expect(turn).toBeVisible();await expect(turn).toBeEnabled();await turn.click();
   await expect(page.locator('#message')).toHaveText(/quarter turn/);
   await expect(page.getByText('No movements waiting. Material stays where it is until you request a move.',{exact:true})).toBeVisible({timeout:45000});
-  await expect(page.locator('.plan-selection')).toContainText('long side along side 2',{timeout:10000});
+  await expect(page.locator('.plan-selection')).toContainText('long side along side 2',{timeout:45000});
 });

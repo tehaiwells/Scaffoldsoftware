@@ -201,17 +201,19 @@ test('typing while the save is in flight does not change the draft and the field
   assert.equal(r.ed.draft.name,'Yard');assert.equal(r.ed.draft.height,10000);assert.equal(name.value,'Yard');assert.equal(height.value,'10');
   release();await wait(10);assert.equal(r.closed.length,1);assert.equal(r.sent[0].name,'Yard');});
 
+// Waits for a condition instead of a fixed pause, so a busy machine cannot outrun the simulated server replies.
+const until=async(ok,ms=5000)=>{const end=Date.now()+ms;for(;;){try{if(ok())return;}catch{}if(Date.now()>end)return;await wait(10);}};
 test('Save mine anyway uses the latest saved shapeRev even when no poll has reached the editor',async t=>{
   const srv=server(),r=rig(t,srv);await wait(30);r.field('rect.w',18);await wait(400);
   srv.rev=3;srv.height=9000;// someone else saves; the poll is paused (a panel is open), so update() never runs
-  r.click('shape-save');await wait(30);assert.match(r.status(),/Someone else saved this yard while you were editing/);assert.equal(r.closed.length,0);
-  r.click('shape-save-anyway');await wait(60);
+  r.click('shape-save');await until(()=>/Someone else saved/.test(r.status()));assert.match(r.status(),/Someone else saved this yard while you were editing/);assert.equal(r.closed.length,0);
+  r.click('shape-save-anyway');await until(()=>r.closed.length===1);
   assert.equal(r.sent.at(-1).shapeRev,3);assert.equal(r.closed.length,1,'saved and closed');assert.ok(r.calls.some(c=>c.path==='state'));});
 
 test('Load their version loads the latest saved shape even when no poll has reached the editor',async t=>{
   const srv=server(),r=rig(t,srv);await wait(30);r.field('rect.w',18);await wait(400);
-  srv.rev=3;srv.height=9000;r.click('shape-save');await wait(30);assert.match(r.status(),/Someone else saved/);
-  r.click('shape-load-theirs');await wait(60);
+  srv.rev=3;srv.height=9000;r.click('shape-save');await until(()=>/Someone else saved/.test(r.status()));assert.match(r.status(),/Someone else saved/);
+  r.click('shape-load-theirs');await until(()=>r.ed.draft.target.shapeRev===3&&/Loaded their version/.test(r.status()));
   assert.equal(r.ed.draft.height,9000);assert.equal(r.ed.draft.target.shapeRev,3);assert.equal(r.ed.dirty(),false);assert.doesNotMatch(r.status(),/Someone else saved/);assert.match(r.status(),/Loaded their version\./);
   r.ed.update(server().state());assert.equal(r.ed.draft.target.shapeRev,3,'an older snapshot does not undo it');});
 
