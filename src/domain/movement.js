@@ -58,5 +58,6 @@ export const movementMethods={
       catch(error){this.db.exec('ROLLBACK TO movement_step');this.db.exec('RELEASE movement_step');task=this.repo.get(task.id,'task');task.resumeState=task.state;task.state='BLOCKED';task.reason=error.status?error.message:'Movement failed safely. Review the server log before retrying.';if(!error.status)console.error(JSON.stringify({event:'movement_error',task:task.id,message:error.message}));this.repo.save(task);}
     }
     this.tickJobs(elapsed);
+    this.alCheck({gate:true});// materials dropping below their minimum (only when the ledger or catalogue moved)
   }
 };

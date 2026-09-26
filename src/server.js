@@ -43,6 +43,7 @@ export function createApp(db,{backups=null}={}) {
       if(req.method==='GET'&&path==='/api/me') send(200,service.snapshot(user));
       else if(req.method==='GET'&&path==='/api/state') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.snapshot(Number(query.get('page')??0),{lean:true,catalogue:query.get('catalogue')}));}
       else if(req.method==='GET'&&path==='/api/history') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.history(Number(query.get('limit')??100),Number(query.get('after')??0)));}
+      else if(req.method==='GET'&&path==='/api/reports') {const days=new URL(req.url,'http://localhost').searchParams.get('days');send(200,simulation.reports(days===null?30:Number(days)));}
       else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${['stock','register','additions','removals','yardlist'].includes(kind)?kind:'history'}.csv"`});res.end(output);}
       else if(req.method==='POST'&&path==='/api/placement-preview') send(200,simulation.placementPreview(body));
       else if(req.method==='POST'&&path==='/api/layout-preview') send(200,simulation.layoutPreview(body));
