@@ -44,7 +44,8 @@ export function cached(db, sql) {
   return statement;
 }
 
-// Told when an atomic() transaction begins, commits or rolls back: in-memory state tied to stored rows (src/domain/live.js) follows a rollback.
+// Told when an atomic() transaction begins, commits or rolls back, and when a savepoint() starts, is released or rolled back to: in-memory
+// state tied to stored rows (src/domain/live.js) follows a rollback.
 const hooks=[];
 export function onAtomic(hook){hooks.push(hook);}
 const tell=(db,phase)=>{for(const hook of hooks)hook(db,phase);};
@@ -53,4 +54,12 @@ export function atomic(db, operation) {
   db.exec('BEGIN IMMEDIATE'); tell(db,'begin');
   try { const result=operation(); db.exec('COMMIT'); tell(db,'commit'); return result; }
   catch(error) { try { db.exec('ROLLBACK'); } finally { tell(db,'rollback'); } throw error; }
+}
+
+// SAVEPOINT name ... RELEASE, or ROLLBACK TO + RELEASE and rethrow, with the hooks told. Use it (not a raw db.exec('SAVEPOINT')) around
+// anything that holds live movement (live.js holdLive / settleLive).
+export function savepoint(db, name, operation) {
+  db.exec('SAVEPOINT '+name); tell(db,'savepoint');
+  try { const result=operation(); db.exec('RELEASE '+name); tell(db,'release'); return result; }
+  catch(error) { try { db.exec('ROLLBACK TO '+name); db.exec('RELEASE '+name); } finally { tell(db,'rollback-to'); } throw error; }
 }

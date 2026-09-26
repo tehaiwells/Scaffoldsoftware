@@ -1,6 +1,7 @@
 // Database writes while the yard moves: a busy synthetic yard (8 workers on automatic yard jobs, two forklift moves queued back to back,
 // one worker driving a forklift by hand) ticked like the scheduler for a while, with a lean snapshot every second like the browser poll.
-// Counts write statements, rows, bound bytes and WAL pages, plus tick and snapshot times. Temporary database only; DEMO data.
+// Counts write statements, rows, bound bytes and WAL pages (WAL is the disk figure: json_set sends only the moved fields but SQLite still
+// rewrites the whole row and page), plus tick and snapshot times. Temporary database only; DEMO data.
 //   node scripts/movement-writes.js [--seconds=60] [--warmup=20]      LIVE_OVERLAY=off: every position written each tick (reference)
 import { StatementSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
@@ -16,10 +17,10 @@ const SECONDS=arg('seconds',60),WARMUP=arg('warmup',20),TICK=250;
 let live=null;try{live=await import('../src/domain/live.js');if(process.env.LIVE_OVERLAY==='off')live.setLiveOverlay(false);}catch{}
 
 // Every INSERT/UPDATE/DELETE statement run (also through RETURNING), with its bound bytes and changed rows, per phase.
-const WRITE=/^\s*(INSERT|UPDATE|DELETE|REPLACE)/i;let phase='setup';const stats=new Map();
+const WRITE=/^\s*(INSERT|UPDATE|DELETE|REPLACE)/i;let phase='setup',flushes=0;const stats=new Map();
 const bucket=()=>{let s=stats.get(phase);if(!s)stats.set(phase,s={statements:0,rows:0,boundBytes:0,byStatement:new Map()});return s;};
 const bytesOf=args=>args.reduce((n,a)=>n+(typeof a==='string'?Buffer.byteLength(a):a==null?0:8),0);
-for(const m of ['run','get','all']){const orig=StatementSync.prototype[m];StatementSync.prototype[m]=function(...args){const r=orig.apply(this,args);const sql=this.sourceSQL;if(WRITE.test(sql)){const s=bucket();s.statements++;const rows=m==='run'?r.changes:m==='get'?(r?1:0):r.length;s.rows+=rows;const b=bytesOf(args);s.boundBytes+=b;const k=sql.replace(/\s+/g,' ').slice(0,70);const e=s.byStatement.get(k)??{n:0,bytes:0};e.n++;e.bytes+=b;s.byStatement.set(k,e);}return r;};}
+for(const m of ['run','get','all']){const orig=StatementSync.prototype[m];StatementSync.prototype[m]=function(...args){const r=orig.apply(this,args);const sql=this.sourceSQL;if(sql.includes('json_set(data'))flushes++;if(WRITE.test(sql)){const s=bucket();s.statements++;const rows=m==='run'?r.changes:m==='get'?(r?1:0):r.length;s.rows+=rows;const b=bytesOf(args);s.boundBytes+=b;const k=sql.replace(/\s+/g,' ').slice(0,70);const e=s.byStatement.get(k)??{n:0,bytes:0};e.n++;e.bytes+=b;s.byStatement.set(k,e);}return r;};}
 
 const path=join(tmpdir(),'sy-movement-'+randomUUID()+'.sqlite');
 const db=openDatabase(path);db.exec('PRAGMA wal_autocheckpoint=0');
@@ -41,9 +42,9 @@ try{
     for(const s of shuttles){if(sim.tasks().some(t=>t.container===s.c.id&&!['COMPLETE','CANCELLED','FAILED'].includes(t.state)))continue;s.at=1-s.at;try{cmd('queue',{container:s.c.id,destination:yard.id,position:{...s.spots[s.at],rotation:0,support:null}});}catch{}}
     const w=sim.repo.get(driver.id,'resource');if(w.mountedOn){const m=sim.repo.get(w.mountedOn,'resource');if(!m.drive){try{const p=drives[leg++%2];cmd('workerCommand',{id:w.id,order:'MOVE',x:p.x,y:p.y});}catch{}}}
   };
-  const row={company_id:user.company_id,id:user.id},tickMs=[],snapMs=[];let snapBytes=0;
+  const row={company_id:user.company_id,id:user.id},tickMs=[],snapMs=[],flushTickMs=[],plainTickMs=[];let snapBytes=0;
   const run=(seconds,measure)=>{for(let i=0;i<seconds*1000/TICK;i++){
-    phase=measure?'tick':'warmup';const t0=performance.now();atomic(db,()=>tickCompany(db,row,TICK));if(measure)tickMs.push(performance.now()-t0);
+    phase=measure?'tick':'warmup';const t0=performance.now();const f0=flushes;atomic(db,()=>tickCompany(db,row,TICK));if(measure){const ms=performance.now()-t0;tickMs.push(ms);(flushes>f0?flushTickMs:plainTickMs).push(ms);}
     phase=measure?'commands':'warmup';keepBusy();
     if(i%4===3){phase=measure?'snapshot':'warmup';const s0=performance.now();const s=sim.snapshot(0,{lean:true});if(measure){snapMs.push(performance.now()-s0);snapBytes+=Buffer.byteLength(JSON.stringify(s));}}
   }};
@@ -59,6 +60,8 @@ try{
   console.log(JSON.stringify({overlay:live?(process.env.LIVE_OVERLAY==='off'?'off':'on'):'absent',seconds:SECONDS,tickMs:TICK,avgPerTick:Object.fromEntries(Object.entries({walkingWorkers:walking,manualDrives:driving,taskCountdowns:carrying}).map(([k,v])=>[k,+(v/(SECONDS*1000/TICK)).toFixed(2)])),
     writes:{tick:per(stats.get('tick')),commands:per(stats.get('commands')),snapshot:per(stats.get('snapshot'))},versionBumpsPerSecByKind:bumps,
     walPagesPerSec:+(frames/SECONDS).toFixed(1),walKBPerSec:+(frames*4096/SECONDS/1024).toFixed(1),
-    tick:{meanMs:+(tickMs.reduce((a,b)=>a+b,0)/tickMs.length).toFixed(2),p50Ms:pct(tickMs,.5),p95Ms:pct(tickMs,.95)},
+    tick:{meanMs:+(tickMs.reduce((a,b)=>a+b,0)/tickMs.length).toFixed(2),p50Ms:pct(tickMs,.5),p95Ms:pct(tickMs,.95),p99Ms:pct(tickMs,.99),maxMs:+Math.max(...tickMs).toFixed(2)},
+    // Ticks that wrote held movement back (json_set) against the rest: whether flushes cluster into slow ticks.
+    ticksByFlush:Object.fromEntries([['withFlush',flushTickMs],['withoutFlush',plainTickMs]].map(([k,a])=>[k,a.length?{n:a.length,meanMs:+(a.reduce((x,y)=>x+y,0)/a.length).toFixed(2),p95Ms:pct(a,.95),maxMs:+Math.max(...a).toFixed(2)}:{n:0}])),
     snapshot:{meanMs:+(snapMs.reduce((a,b)=>a+b,0)/snapMs.length).toFixed(2),p50Ms:pct(snapMs,.5),p95Ms:pct(snapMs,.95),avgKB:+(snapBytes/snapMs.length/1024).toFixed(1)},liveEntries:liveNow},null,1));
 }finally{db.close();for(const s of ['','-wal','-shm'])rmSync(path+s,{force:true});}

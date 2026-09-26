@@ -14,7 +14,7 @@ import { materialsMethods } from './domain/materials.js';
 import { fleetMethods } from './domain/fleet.js';
 import { layoutMethods } from './domain/layout.js';
 import { jobMethods,flushJobTimers } from './domain/jobs.js';
-import { flushLive } from './domain/live.js';
+import { flushLive,settleLive } from './domain/live.js';
 import { turningMethods } from './domain/turning.js';
 import { scheduleMethods,runOrder } from './domain/schedule.js';
 import { alertMethods } from './domain/alerts.js';
@@ -37,7 +37,7 @@ export class Simulation {
     const fingerprint=createHash('sha256').update(JSON.stringify({actor:this.user.id,action,input})).digest('hex');this.key=key;
     return atomic(this.db,()=>{const previous=cached(this.db,'SELECT * FROM commands WHERE company_id=? AND key=?').get(this.user.company_id,key);if(previous){requireRule(previous.fingerprint===fingerprint,'This idempotency key was used for a different action.');return JSON.parse(previous.result);}const result=this[action](input);this.repo.event(this.user.id,'COMMAND',{reason:action,key});this.rtSync();this.alCheck();cached(this.db,'INSERT INTO commands VALUES(?,?,?,?)').run(this.user.company_id,key,fingerprint,JSON.stringify(result??{ok:true}));return result;});
   }
-  pause(input){let config=this.repo.all('config')[0];requireRule(config,'Configure yard resources first.');requireRule(typeof input.paused==='boolean','Choose pause or resume.');config.paused=input.paused;return this.repo.save(config);}
+  pause(input){let config=this.repo.all('config')[0];requireRule(config,'Configure yard resources first.');requireRule(typeof input.paused==='boolean','Choose pause or resume.');config.paused=input.paused;if(config.paused)settleLive(this.db,this.repo.company,true);return this.repo.save(config);}// pausing writes held movement (live.js)
   notify(title,body,site){return this.repo.add('notification',{title,body,site,createdAt:new Date().toISOString(),provider:'IN_APP_ONLY'});}
   tripOf(id,visible){if(!id)return null;try{const d=this.repo.get(id,'delivery');return {id:d.id,status:d.status,completedAt:d.completedAt??null,to:visible(d.to)?d.to:null,from:visible(d.from)?d.from:null};}catch{return null;}}
   supervisorName(id){return id?cached(this.db,'SELECT name FROM users WHERE id=?').get(id)?.name??null:null;}
@@ -100,7 +100,7 @@ const PROBE=`SELECT (SELECT data FROM objects WHERE company_id=?1 AND kind='conf
  OR EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='resource' AND ${SET('$.enabled')} AND (${SET('$.walk')} OR ${SET('$.drive')} OR (json_extract(data,'$.type') IN ('WORKER','FORKLIFT') AND NOT (${FINITE('$.x')} AND ${FINITE('$.y')})))) moving`;
 function tickCompany(db,row,elapsed){
   const probe=cached(db,PROBE).get(row.company_id),config=probe.config===null?null:JSON.parse(probe.config);if(!config||config.paused)return 'paused';
-  const sim=new Simulation(db,row);if(probe.moving){sim.tick(elapsed);return 'full';}sim.tickJobs(elapsed);return 'jobs';
+  const sim=new Simulation(db,row);if(probe.moving){sim.tick(elapsed);return 'full';}settleLive(db,row.company_id);sim.tickJobs(elapsed);return 'jobs';// tick() settles in advanceWorkers
 }
 export function startScheduler(db){
   const owner=randomUUID(),now=Date.now();

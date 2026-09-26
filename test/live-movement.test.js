@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { openDatabase,atomic,cached } from '../src/database.js';
+import { openDatabase,atomic,cached,savepoint } from '../src/database.js';
 import { Service } from '../src/service.js';
-import { Simulation,startScheduler } from '../src/simulation.js';
-import { setLiveOverlay,flushLive,liveStats,LIVE_FLUSH_MS } from '../src/domain/live.js';
+import { Simulation,startScheduler,tickCompany } from '../src/simulation.js';
+import { setLiveOverlay,flushLive,liveStats,holdLive,LIVE_FLUSH_MS } from '../src/domain/live.js';
 
 // Live movement overlay (src/domain/live.js): walking workers, manual forklift drives and forklift-move countdowns are held in memory
 // between row writes. Every check below runs the same yard twice, tick by tick: A with the overlay, B with it switched off (every
@@ -85,7 +85,7 @@ test('live overlay: a rolled-back tick puts the held positions back, exactly as 
   const before=A.byName('Worker 1');tickBoth(A,B,2,'after the rollback');assert.notDeepEqual([A.byName('Worker 1').x,A.byName('Worker 1').y],[before.x,before.y],'and the walk carries on');
 });
 
-test('live overlay: rows lag at most LIVE_FLUSH_MS, walk.path is written once per walk, and stop() writes everything held',t=>{
+test('live overlay: rows lag at most LIVE_FLUSH_MS, walk.path is not re-serialised, and stop() writes everything held',t=>{
   const A=build(t),id=A.byName('Worker 1').id;A.cmd('workerCommand',{id,order:'MOVE',x:25000,y:3000});
   const start=A.raw(id),history=[];let fullRows=0;const path=JSON.stringify(start.walk.path);
   for(let i=0;i<21&&A.byName('Worker 1').walk;i++){A.tick();const live=A.byName('Worker 1'),row=A.raw(id);history.push([live.x,live.y,live.walk?.next]);
@@ -117,4 +117,46 @@ test('live overlay: a lean snapshot a second apart shows a second of walking eve
   const pos=f=>{const r=f.sim.snapshot(0,{lean:true}).resources.find(r=>r.name==='Worker 2');return [r.x,r.y,r.walk?.next];};
   const first=pos(A);both(A,B,f=>f.tick(4));const [a,b]=[pos(A),pos(B)];assert.deepEqual(a,b,'same as the reference');assert.notDeepEqual(a,first,'it moved');
   const row=A.raw(A.byName('Worker 2').id);assert.notDeepEqual([row.x,row.y],[a[0],a[1]],'while the row still holds an older position');
+});
+
+// Review fixes: movement that ends without a full save (the driver of a STOPped drive) reaches its row on the next tick, pausing writes
+// what is held, and a rolled-back savepoint() puts back what holdLive held or wrote inside it.
+test('live overlay: a hand drive STOPped before the first flush leaves driver and forklift rows 600/350 apart within two ticks',t=>{
+  const A=build(t),B=build(t),owner=f=>({company_id:f.user.company_id,id:f.user.id}),tc=f=>{let mode;atomic(f.db,()=>{mode=tickCompany(f.db,owner(f),250);});return mode;};
+  both(A,B,f=>f.cmd('workerCommand',{id:f.byName('Worker 3').id,order:'MOUNT',forklift:f.byName('Forklift 3').id}));
+  let n=0;while(!A.byName('Worker 3').mountedOn&&n++<200)both(A,B,tc);assert.ok(A.byName('Worker 3').mountedOn,'Worker 3 mounted');
+  both(A,B,f=>f.cmd('workerCommand',{id:f.byName('Worker 3').id,order:'MOVE',x:2000,y:1000}));
+  for(let i=0;i<7;i++)both(A,B,tc);// 1.75 s: under LIVE_FLUSH_MS, nothing of the drive written yet
+  const w=A.byName('Worker 3'),m=A.byName('Forklift 3');assert.notDeepEqual([A.raw(w.id).x,A.raw(w.id).y],[w.x,w.y],'the driver is held');
+  both(A,B,f=>f.cmd('workerCommand',{id:f.byName('Worker 3').id,order:'STOP'}));
+  // The first tick after the stop does not hold the driver; the next one (start of tick, 250 ms later) writes it.
+  for(let i=0;i<2;i++){const [ma,mb]=both(A,B,tc);assert.deepEqual([ma,mb],['jobs','jobs'],'nothing else moves: the jobs-only tick settles too');}
+  for(const f of [A,B]){const dr=f.raw(f.byName('Worker 3').id),fl=f.raw(f.byName('Forklift 3').id);assert.deepEqual([dr.x-fl.x,dr.y-fl.y],[600,350],'driver row beside the forklift row');}
+  assert.deepEqual([A.raw(w.id).x,A.raw(w.id).y,A.raw(m.id).x,A.raw(m.id).y],[B.raw(B.byName('Worker 3').id).x,B.raw(B.byName('Worker 3').id).y,B.raw(B.byName('Forklift 3').id).x,B.raw(B.byName('Forklift 3').id).y],'rows as the reference wrote them');
+  assert.equal(liveStats(A.db).entries,0,'nothing left held');same(A,B,'after the stop');
+});
+
+test('live overlay: pausing writes every held position of the company',t=>{
+  const A=build(t),id=A.byName('Worker 1').id;A.cmd('workerCommand',{id,order:'MOVE',x:25000,y:3000});A.tick(3);
+  const live=A.byName('Worker 1');assert.notDeepEqual([A.raw(id).x,A.raw(id).y],[live.x,live.y]);
+  A.cmd('pause',{paused:true});const row=A.raw(id);assert.deepEqual([row.x,row.y,row.walk.next],[live.x,live.y,live.walk.next]);assert.equal(liveStats(A.db).entries,0);
+  A.cmd('pause',{paused:false});A.tick(2);const on=A.byName('Worker 1');assert.ok(on.x!==live.x||on.y!==live.y,'and walks on when resumed');
+});
+
+test('live overlay: ROLLBACK TO a savepoint() puts back what holdLive held or wrote inside it; RELEASE keeps it for the transaction',t=>{
+  const A=build(t),id=A.byName('Worker 1').id;A.cmd('workerCommand',{id,order:'MOVE',x:25000,y:3000});A.tick(3);
+  const repo=A.sim.repo,state=()=>{const l=A.byName('Worker 1'),r=A.raw(id);return {live:[l.x,l.y,l.walk.next,l.version],row:[r.x,r.y,r.walk.next,r.version],entries:liveStats(A.db).entries};};
+  const before=state();assert.notDeepEqual(before.live.slice(0,2),before.row.slice(0,2),'held');
+  const nudge=ms=>{const w=repo.get(id);w.x+=10;holdLive(repo,w,['x','y','walkNext'],ms);};
+  // A flush (acc past LIVE_FLUSH_MS: json_set write, entry retired) inside a savepoint that rolls back: row and entry both come back.
+  atomic(A.db,()=>{assert.throws(()=>savepoint(A.db,'sp_test',()=>{nudge(LIVE_FLUSH_MS);assert.equal(A.raw(id).version,before.row[3]+1);throw new Error('step failed');}),/step failed/);});
+  assert.deepEqual(state(),before,'flush rolled back to the savepoint');
+  atomic(A.db,()=>{assert.throws(()=>savepoint(A.db,'sp_test',()=>{nudge(0);throw new Error('step failed');}),/step failed/);});
+  assert.deepEqual(state(),before,'held change rolled back to the savepoint');
+  // Released inside a transaction that then rolls back: back to before as well.
+  assert.throws(()=>atomic(A.db,()=>{savepoint(A.db,'sp_test',()=>nudge(LIVE_FLUSH_MS));savepoint(A.db,'sp_two',()=>nudge(0));throw new Error('tick failed');}),/tick failed/);
+  assert.deepEqual(state(),before,'released savepoints undone by the outer rollback');
+  // Released and committed: the flush stands and the second hold is held over it.
+  atomic(A.db,()=>{savepoint(A.db,'sp_test',()=>nudge(LIVE_FLUSH_MS));savepoint(A.db,'sp_two',()=>nudge(0));});
+  const after=state();assert.deepEqual(after.row,[before.live[0]+10,before.live[1],before.live[2],before.row[3]+1]);assert.deepEqual(after.live,[before.live[0]+20,before.live[1],before.live[2],before.row[3]+1]);
 });

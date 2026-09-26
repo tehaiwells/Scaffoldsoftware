@@ -1,5 +1,5 @@
 import {integer,requireRule,route,rect,overlap,fitsPolygon,ObstacleIndex} from './geometry.js';
-import {holdLive,sweepLive} from './live.js';
+import {holdLive,settleLive} from './live.js';
 const size=500;
 export const workerMethods={
   forkliftPosition(machine){
@@ -43,7 +43,7 @@ export const workerMethods={
     return this.repo.save(worker);
   },
   advanceWorkers(elapsed){
-    sweepLive(this.db,this.repo.company);// first phase of a tick: held movement of rows that were saved since is forgotten
+    settleLive(this.db,this.repo.company);// first phase of a tick: held movement of rows saved since is forgotten, movement that ended is written
     for(const machine of this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&!Number.isFinite(r.x))){const p=this.forkliftPosition(machine);if(p){Object.assign(machine,p);this.repo.save(machine);}}
     this.passObstacles=new Map();try{
     for(const worker of this.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER')){

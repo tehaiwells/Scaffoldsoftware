@@ -1,5 +1,6 @@
 import {integer,requireRule,route,rect,overlap,fitsPolygon} from './geometry.js';
 import {holdLive} from './live.js';
+import {savepoint} from '../database.js';
 
 export const forkliftMethods={
   placementPlan(machine,input){
@@ -57,8 +58,8 @@ export const forkliftMethods={
   },
   advanceForklifts(elapsed){
     for(let machine of this.repo.all('resource').filter(r=>r.enabled&&r.drive)){
-      this.db.exec('SAVEPOINT manual_forklift_step');
-      try{
+      // savepoint() (not a raw SAVEPOINT): a rolled-back step also puts back what holdLive held or wrote in it (live.js)
+      try{savepoint(this.db,'manual_forklift_step',()=>{
         const driver=this.repo.get(machine.driver,'resource');requireRule(driver.mountedOn===machine.id&&!driver.task&&!machine.task,'The assigned driver changed.');
         const loc=this.repo.get(machine.location),shape=machine.drive.shape??this.forkliftShape(machine),obstacles=this.forkliftObstacles(machine);let remaining=2000*elapsed/1000;
         if(machine.cargo)this.assertCountFree(this.repo.get(machine.cargo,'container'));
@@ -67,8 +68,8 @@ export const forkliftMethods={
           requireRule(fitsPolygon({...next,...shape},loc.points)&&!obstacles.some(o=>overlap({...next,...shape},o)),'Forklift route blocked. Stop or choose another destination.');Object.assign(machine,next);remaining-=step;if(distance<=step+.001){Object.assign(machine,target);machine.drive.next++;}
         }
         driver.x=machine.x+600;driver.y=machine.y+350;// still driving: positions and drive.next held in memory (live.js); a finished drive is saved now
-        if(machine.drive){holdLive(this.repo,driver,['x','y'],elapsed);holdLive(this.repo,machine,['x','y','driveNext'],elapsed);}else{this.repo.save(driver);this.repo.save(machine);}this.db.exec('RELEASE manual_forklift_step');
-      }catch(error){this.db.exec('ROLLBACK TO manual_forklift_step');this.db.exec('RELEASE manual_forklift_step');machine=this.repo.get(machine.id,'resource');machine.drive=null;machine.manualReason=error.status?error.message:'Forklift stopped. Retry the command.';this.repo.save(machine);if(!error.status)console.error(error);}
+        if(machine.drive){holdLive(this.repo,driver,['x','y'],elapsed);holdLive(this.repo,machine,['x','y','driveNext'],elapsed);}else{this.repo.save(driver);this.repo.save(machine);}
+      });}catch(error){machine=this.repo.get(machine.id,'resource');machine.drive=null;machine.manualReason=error.status?error.message:'Forklift stopped. Retry the command.';this.repo.save(machine);if(!error.status)console.error(error);}
     }
   }
 };
