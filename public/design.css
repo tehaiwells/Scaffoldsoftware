@@ -2489,3 +2489,77 @@ tr.gs-flash>td{animation:gs-row 1.8s ease-out}
 .page-materials .ml-item:hover .al-min-chip.quiet,.page-materials .ml-item:focus-within .al-min-chip.quiet{opacity:1;pointer-events:auto}
 /* Reports: its hero starts at the same height as every other page hero. */
 .content .page-reports .hc-hero{margin-top:0}
+/* ===== Home world map: the yard and every site on one district (public/world.js). The stage is one persistent element the map moves into the
+   Home plan host after every render; the map svg's viewBox is its own pixel size, so tags and cards are drawn in plain screen pixels. ===== */
+.world-scene .plan-wrap{position:relative}
+.wm-host{display:block;min-height:360px}
+.wm-stage{display:grid;gap:10px}
+.wm-bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px;border-radius:12px;background:#f3f6ee;border:1px solid #e2e9d9}
+.wm-btn{min-height:34px;padding:6px 12px;border-radius:9px;background:#fff;border:1px solid #d9e1ce;box-shadow:0 1px 0 #dfe6d5;color:#1f3d2c;font-size:12.5px;font-weight:650;display:inline-flex;align-items:center;gap:7px}
+.wm-btn:hover{background:#f7faf1}
+.wm-btn.on,.wm-btn[aria-pressed="true"]{background:#d2ea83;border-color:#bcd86a}
+.wm-btn.wm-sq{min-width:34px;justify-content:center;padding:6px 0;font-size:16px}
+.wm-rec{width:9px;height:9px;border-radius:50%;background:#9aa996;box-shadow:0 0 0 3px #9aa99633}
+.wm-director.on .wm-rec{background:#d64a2e;box-shadow:0 0 0 3px #d64a2e33;animation:wm-rec 1.6s ease-in-out infinite}
+@keyframes wm-rec{50%{opacity:.35}}
+.wm-zoom{display:inline-flex;align-items:center;gap:4px}
+.wm-zl{min-width:48px;text-align:center;font-size:12px;color:#4f6249;font-variant-numeric:tabular-nums}
+.wm-arrange{margin-left:auto}
+.wm-hint{flex-basis:100%;font-size:11.5px;color:#6d7d66;padding:0 2px}
+.wm-view{position:relative;height:clamp(380px,64vh,660px);border-radius:12px;overflow:hidden;background:#a3b27a;box-shadow:inset 0 0 0 1px #c9d3bd}
+.wm-view svg.world-svg{position:absolute;left:0;top:0;display:block;width:100%;height:100%;min-height:0;max-height:none;transform-origin:50% 50%;will-change:transform;border:0;border-radius:0;background:#a3b27a;box-shadow:none;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.wm-view svg.world-svg:active{cursor:grabbing}
+.world-svg [data-wm-truck],.world-svg [data-wm-site]{cursor:pointer}
+.world-svg [data-wm-truck]:focus,.world-svg [data-wm-site]:focus{outline:none}
+.world-svg .wm-truck.followed{filter:drop-shadow(0 0 5px #e9ff8a)}
+.world-svg .wm-tag text{font-weight:750;letter-spacing:.01em}
+.world-svg .wm-tag-sub text{font-weight:600;letter-spacing:0}
+.world-svg .wm-tag-truck.on rect{fill:#d9f56b}.world-svg .wm-tag-truck.on text{fill:#17301f}
+/* Far out the yard's own labels step back: only the place names, the trucks and the stock stay. */
+.world-svg.wm-far #plan :is(.tag-layer,.actor-tags,.dim,.corner-number){display:none}
+.world-svg.wm-mid #plan .corner-number{display:none}
+.wm-stage.arranging .world-svg [data-wm-site]{cursor:move}
+.wm-stage.arranging .world-svg .wm-site-ground>polygon:last-of-type{stroke:#2f7353;stroke-width:320;stroke-dasharray:1400 900}
+.wm-note{position:absolute;top:10px;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px);padding:7px 14px;border-radius:20px;background:#1c3a2dE6;color:#f1f7e8;font-size:12px;font-weight:600;box-shadow:0 4px 14px #15361d40;pointer-events:none}
+.wm-mini{position:absolute;right:10px;bottom:10px;width:150px;height:100px;opacity:.94;border-radius:10px;background:#e9eddc;border:1px solid #ffffffb0;box-shadow:0 4px 14px #1f392533;cursor:pointer}
+.wm-card{position:absolute;top:10px;left:10px;width:min(300px,calc(100% - 20px));max-height:calc(100% - 20px);overflow:auto;padding:12px 14px 12px;border-radius:14px;background:#fbfcf7f2;border:1px solid #e1e7d9;box-shadow:0 10px 28px #14302438;font-size:13px;color:#24402f}
+.wm-card-head{display:flex;align-items:center;justify-content:space-between}
+.wm-card-kicker{font-size:10px;letter-spacing:1.4px;font-weight:700;color:#6d8a5f}
+.wm-x{min-height:28px;min-width:28px;padding:0;border-radius:50%;background:#eef3e6;color:#1f3d2c;border:0;font-size:17px;line-height:1}
+.wm-card h3{margin:2px 0 6px;font-size:18px;color:#17301f}
+.wm-route{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 6px;font-weight:650}
+.wm-route i{font-style:normal;color:#8a6412}
+.wm-addr,.wm-crewline{margin:0 0 6px;color:#5d6f57;font-size:12px}
+.wm-load{margin:6px 0 4px}
+.wm-lines{list-style:none;margin:0 0 6px;padding:0;display:grid;gap:2px}
+.wm-lines li{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:2px 0;border-bottom:1px dashed #e1e7d9}
+.wm-eta{margin:4px 0 6px;font-size:12px;color:#4f6249;font-variant-numeric:tabular-nums}
+.wm-warn{margin:6px 0;padding:6px 8px;border-radius:8px;background:#fff1e6;color:#8a3d12;font-size:12px}
+.wm-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.wm-acts button{min-height:34px;padding:6px 12px;font-size:12.5px}
+.wm-send{display:inline-flex;gap:6px;align-items:center}.wm-send select{min-height:34px;max-width:160px}
+.wm-move{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px}.wm-move button{min-height:32px;min-width:36px;padding:4px 0}
+.wm-bar-p{display:block;height:6px;border-radius:6px;background:#dfe7d3;overflow:hidden;margin:4px 0 0}.wm-bar-p.big{height:8px}
+.wm-bar-p b{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#f0a81c,#ffd36a)}
+.wm-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;scrollbar-width:thin}
+.wm-chip{flex:0 0 auto;display:grid;gap:2px;min-width:180px;max-width:260px;padding:8px 12px;border-radius:12px;text-align:left;background:linear-gradient(180deg,#fcfdf9,#f3f6ee);border:1px solid #e1e7d9;color:#1f3d2c;font-weight:400}
+.wm-chip.road{border-color:#f0c26a;background:linear-gradient(180deg,#fffaf0,#fbf1dc)}
+.wm-chip.busy{border-color:#bcd86a}
+.wm-chip.on{box-shadow:0 0 0 2px #98cc2e}
+.wm-chip-t{font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wm-chip-s{font-size:11.5px;color:#5d6f57;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wm-empty{margin:0;color:#6d7d66;font-size:12.5px}
+@media(max-width:750px){
+ .wm-view{height:clamp(320px,58vh,520px)}
+ .wm-hint{display:none}
+ .wm-mini{display:none}
+ .wm-card{top:auto;bottom:8px;left:8px;right:8px;width:auto;max-height:52%;padding:8px 12px}
+ .wm-card h3{font-size:16px;margin:0 0 4px}.wm-card .wm-lines,.wm-card .wm-addr{display:none}.wm-card .wm-load{margin:2px 0}.wm-card .wm-acts{margin-top:6px}
+ .world-svg .wm-tag-sub{display:none}
+ .wm-arrange{margin-left:0}
+ .wm-chip{min-width:160px}
+}
+@media print{.wm-stage{display:none}}
+.world-svg:not(.wm-near) .wm-tag-stock,.world-svg.wm-far .wm-tag-truck.parked:not(.on){display:none}
+.wm-plan-note{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 0;font-size:12.5px;color:#5d6f57}.wm-plan-note button{min-height:32px;padding:4px 12px;font-size:12px}
+.world-scene{margin-bottom:20px}

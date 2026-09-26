@@ -18,7 +18,9 @@ import { turningMethods } from './domain/turning.js';
 import { scheduleMethods,runOrder } from './domain/schedule.js';
 import { alertMethods } from './domain/alerts.js';
 import { reportsMethods } from './domain/reports.js';
+import { installWorld,WORLD_OPS,flushWorldClocks } from './domain/world.js';
 const operational=['rotate','loadTruck','workerSkills','createJob','assignJob','nextJob','takeOffJob','cancelJob','jobsMode','siteDetails','fixtures','commitLayout','cancelLayout','siteBoundary','retire','scrapContainer','quickAdjust','allocateLoadList','workerCommand','parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount','bookTruck'];
+operational.push(...WORLD_OPS);// Home world map: moving a site on the map (src/domain/world.js)
 export class Simulation {
   constructor(db,user){this.db=db;this.user=user;this.auth=new Service(db);this.repo=new Repository(db,user.company_id);}
   assertSite(id){if(this.auth.permissions(this.user).includes('operations.manage'))return;const object=this.repo.get(id);let site=object;if(object.kind==='container')site=this.repo.get(object.location);if(object.kind==='truck')site=this.repo.get(object.at);requireRule(site.kind==='site'&&site.supervisor===this.user.id,'You can only access your assigned sites.');}
@@ -80,6 +82,7 @@ export class Simulation {
   export(kind){const snapshot=this.snapshot();const name=id=>snapshot.products.find(p=>p.id===id)?.name??id;if(kind==='register'){return csv([['Product','System','Category','In yard','At sites','On trucks','Total','Reserved','Available','Containers'],...snapshot.register.map(r=>[r.name,r.system,r.category,r.yard,r.site,r.truck,r.quantity,r.reserved,r.available,r.containers])]);}if(kind==='additions'||kind==='removals'){return csv([['Sequence','Event','Product','Container','Quantity','Location','Reason','Time'],...this.stockLog(kind,1000).map(l=>[l.sequence,l.event,name(l.product_id),l.container_id,l.quantity,l.destination??l.source,l.reason,l.created_at])]);}if(kind==='yardlist'){return csv([['Yard list','Status','Needed on','Window','Site','Truck','Product','Requested','Reserved','Loaded','Delivered','Line status'],...snapshot.loadLists.flatMap(l=>l.lines.map(x=>[l.name,l.status,l.neededOn??'',l.slot??'ANY',l.site,l.truckName,x.name,x.quantity,x.reserved,x.loaded,x.delivered,x.status]))]);}if(kind==='stock'){for(let page=1;page*100<snapshot.containerCount;page++){const next=this.snapshot(page);snapshot.balances.push(...next.balances);snapshot.containers.push(...next.containers);}const rows=[['Product','Container','Location','Condition','Physical quantity','Reserved quantity'],...snapshot.balances.map(l=>[snapshot.products.find(p=>p.id===l.product_id)?.name,snapshot.containers.find(c=>c.id===l.container)?.name,l.location,l.condition,l.quantity,l.reserved])];return csv(rows);}return csv([['Sequence','Event','Product','Container','Quantity','From','To','Reason','Time'],...this.scopedHistory(10000,0).map(l=>[l.sequence,l.event,l.product_id,l.container_id,l.quantity,l.source,l.destination,l.reason,l.created_at])]);}
 }
 Object.assign(Simulation.prototype,catalogueMethods,inventoryMethods,logisticsMethods,movementMethods,workerMethods,forkliftMethods,materialsMethods,fleetMethods,layoutMethods,jobMethods,turningMethods,scheduleMethods,alertMethods,reportsMethods);
+installWorld(Simulation.prototype);// Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 function csv(rows){return rows.map(row=>row.map(value=>'"'+String(value??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(',')).join('\r\n');}
 
 // Everything a tick moves besides yard jobs (movement.js tick: advanceWorkers, advanceForklifts, trucks, tasks). With none of it those phases are
@@ -111,6 +114,6 @@ export function startScheduler(db){
     }catch(error){log(error);}
     finally{if(!stopped){timer=setTimeout(round,Math.max(0,started+250-Date.now()));timer.unref();}}};
   timer=setTimeout(round,250);timer.unref();
-  return ()=>{if(stopped)return;stopped=true;clearTimeout(timer);try{flushJobTimers(db);}catch(error){log(error);}cached(db,'DELETE FROM engine_lease WHERE owner=?').run(owner);};
+  return ()=>{if(stopped)return;stopped=true;clearTimeout(timer);try{flushJobTimers(db);}catch(error){log(error);}try{flushWorldClocks(db);}catch(error){log(error);}cached(db,'DELETE FROM engine_lease WHERE owner=?').run(owner);};
 }
 export { tickCompany };

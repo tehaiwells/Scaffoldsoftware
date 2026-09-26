@@ -84,7 +84,7 @@ test('allocate all idle leaves a worker who is walking on a move order alone; th
 
 test('sorting a mixed stillage still works for a product with no pack size or weight, and conserves stock',t=>{const f=fixture(t);const m=f.container('MIX',13000,4000);f.cmd('opening',{container:m.id,product:f.products[0].id,quantity:10,reason:'DEMO ONLY'});f.cmd('opening',{container:m.id,product:f.products[2].id,quantity:5,reason:'DEMO ONLY'});jobsOn(f);f.tick(1);const sort=f.sim.repo.all('job').find(j=>j.effect==='SORT');assert.ok(sort,'a mixed stillage derives a sort job');assert.notEqual(sort.state,'BLOCKED',sort.blocked??'');assert.ok(until(f,()=>f.sim.repo.get(sort.id).state==='DONE',120),'the sort completes');assert.equal(f.sim.repo.lines(m.id).length,1,'the mixed stillage now holds one product');assert.equal(f.total(),215);assert.ok(f.sim.repo.history(500).some(l=>l.event==='SORTED'));});
 
-test('the container detail panel offers a per-line stock correction that respects reservations, permission and location; the layout planner is available from Home',async t=>{const f=fixture(t);const {__test}=await import('../public/operations.js');f.sim.repo.add('reservation',{container:f.a.id,product:f.products[0].id,quantity:30,task:null,active:true});const snapshot=f.sim.snapshot();const account={permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}};
+test('the container detail panel offers a per-line stock correction that respects reservations, permission and location; the layout planner is available from the Yard page',async t=>{const f=fixture(t);const {__test}=await import('../public/operations.js');f.sim.repo.add('reservation',{container:f.a.id,product:f.products[0].id,quantity:30,task:null,active:true});const snapshot=f.sim.snapshot();const account={permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}};
   __test.setState(snapshot,account);__test.setSelected(f.a.id);
   const html=__test.detail();
   assert.ok(html.includes('id="remove-line-'+f.a.id+'-'+f.products[0].id+'"'),'a correction control exists for the held line');
@@ -94,10 +94,11 @@ test('the container detail panel offers a per-line stock correction that respect
   __test.setState(snapshot,account);__test.setSelected(f.empty.id);
   assert.ok(!__test.detail().includes('remove-line-'),'nothing to correct on an empty stillage');
   __test.setSelected(f.a.id);
-  __test.setLayoutDraft(null);__test.setView('HOME');
-  const home=__test.homeView();assert.ok(home.includes('id="planner-start"'),'Home offers the layout planner');assert.ok(!home.includes('LAYOUT PLANNER'),'the planner panel is not open yet');
-  __test.setLayoutDraft({moves:{}});
-  const homePlanning=__test.homeView();assert.ok(homePlanning.includes('LAYOUT PLANNER'),'Home renders the planner panel once a plan is started');assert.ok(!homePlanning.includes('id="planner-start"'),'the start button is gone while a plan is open');
+  __test.setLayoutDraft(null);__test.setView('YARD');
+  const yard=__test.yardView();assert.ok(yard.includes('id="planner-start"'),'the Yard page offers the layout planner');assert.ok(!yard.includes('LAYOUT PLANNER'),'the planner panel is not open yet');
+  __test.setView('HOME');assert.ok(!__test.homeView().includes('id="planner-start"'),'Home is the map of every place: the planner lives on the Yard page');
+  __test.setLayoutDraft({moves:{}});__test.setView('YARD');
+  const yardPlanning=__test.yardView();assert.ok(yardPlanning.includes('LAYOUT PLANNER'),'the Yard page renders the planner panel once a plan is started');assert.ok(!yardPlanning.includes('id="planner-start"'),'the start button is gone while a plan is open');__test.setView('HOME');
   __test.setLayoutDraft(null);});
 
 test('a removal corrects a wrongly listed material and the ledger records why',t=>{const f=fixture(t);const before=f.total();
