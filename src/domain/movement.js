@@ -2,6 +2,7 @@ import { requireRule } from './geometry.js';
 import { active,spotProblem } from './inventory.js';
 import { rect,contains } from './geometry.js';
 import { skillOn } from './jobs.js';
+import { holdLive } from './live.js';
 const states=['QUEUED','RESERVED','ASSIGNED','TRAVELLING_TO_PICKUP','PICKING','CARRYING','PLACING','COMPLETE'];
 export const movementMethods={
   advance(task){
@@ -53,7 +54,7 @@ export const movementMethods={
     // Priority order (the title-free part of taskInfo), with one id -> kind lookup per id for the sort.
     this.taskKinds=new Map();let order;try{order=this.tasks().filter(t=>active(t)&&t.state!=='BLOCKED').map((t,i)=>({t,i,p:this.taskPriority(t)})).sort((a,b)=>a.p-b.p||a.i-b.i).map(x=>x.t);}finally{this.taskKinds=null;}
     for(let task of order){
-      if(task.due>0){task.due=Math.max(0,task.due-elapsed);this.repo.save(task);continue;}
+      if(task.due>0){task.due=Math.max(0,task.due-elapsed);if(task.due>0)holdLive(this.repo,task,['due'],elapsed);else this.repo.save(task);continue;}// countdown held in memory (live.js)
       this.db.exec('SAVEPOINT movement_step');
       try{this.advance(task);this.db.exec('RELEASE movement_step');}
       catch(error){this.db.exec('ROLLBACK TO movement_step');this.db.exec('RELEASE movement_step');task=this.repo.get(task.id,'task');task.resumeState=task.state;task.state='BLOCKED';task.reason=error.status?error.message:'Movement failed safely. Review the server log before retrying.';if(!error.status)console.error(JSON.stringify({event:'movement_error',task:task.id,message:error.message}));this.repo.save(task);}

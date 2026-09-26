@@ -1,4 +1,5 @@
 import {integer,requireRule,route,rect,overlap,fitsPolygon} from './geometry.js';
+import {holdLive} from './live.js';
 
 export const forkliftMethods={
   placementPlan(machine,input){
@@ -65,7 +66,8 @@ export const forkliftMethods={
           const dx=target.x-machine.x,dy=target.y-machine.y,distance=Math.hypot(dx,dy),step=Math.min(remaining,distance,100),next=distance?{x:machine.x+dx*step/distance,y:machine.y+dy*step/distance}:{...target};
           requireRule(fitsPolygon({...next,...shape},loc.points)&&!obstacles.some(o=>overlap({...next,...shape},o)),'Forklift route blocked. Stop or choose another destination.');Object.assign(machine,next);remaining-=step;if(distance<=step+.001){Object.assign(machine,target);machine.drive.next++;}
         }
-        driver.x=machine.x+600;driver.y=machine.y+350;this.repo.save(driver);this.repo.save(machine);this.db.exec('RELEASE manual_forklift_step');
+        driver.x=machine.x+600;driver.y=machine.y+350;// still driving: positions and drive.next held in memory (live.js); a finished drive is saved now
+        if(machine.drive){holdLive(this.repo,driver,['x','y'],elapsed);holdLive(this.repo,machine,['x','y','driveNext'],elapsed);}else{this.repo.save(driver);this.repo.save(machine);}this.db.exec('RELEASE manual_forklift_step');
       }catch(error){this.db.exec('ROLLBACK TO manual_forklift_step');this.db.exec('RELEASE manual_forklift_step');machine=this.repo.get(machine.id,'resource');machine.drive=null;machine.manualReason=error.status?error.message:'Forklift stopped. Retry the command.';this.repo.save(machine);if(!error.status)console.error(error);}
     }
   }

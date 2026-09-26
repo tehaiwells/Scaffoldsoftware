@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AppError } from './service.js';
 import { cached } from './database.js';
+import { applyLive } from './domain/live.js';
 // Kinds effectiveProducts() reads: every add/save/remove of one bumps the company's catalogue revision in the same transaction.
 export const CATALOGUE_KINDS=new Set(['product','packaging','productSettings']);
 export function catalogueRevision(db,company){const row=cached(db,"SELECT n,token FROM revisions WHERE company_id=? AND name='catalogue'").get(company);return row?row.n+'-'+row.token:'0';}
@@ -10,8 +11,9 @@ export class Repository {
   constructor(db,company){this.db=db;this.company=company;this.cache=null;}
   // this.cache (set only while Simulation.snapshot runs): each kind parsed once, ids and contents indexed, callers get shallow copies; any write drops it.
   all(kind){const c=this.cache;if(!c)return this.fetch(kind);let list=c.kinds.get(kind);if(!list){list=this.fetch(kind);c.kinds.set(kind,list);for(const o of list)c.ids.set(o.id,o);}return list.map(o=>({...o}));}
-  fetch(kind){return cached(this.db,'SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind=? ORDER BY rowid').all(this.company,kind).map(this.decode);}
-  decode(row){return {...JSON.parse(row.data),id:row.id,kind:row.kind,version:row.version};}
+  fetch(kind){return cached(this.db,'SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind=? ORDER BY rowid').all(this.company,kind).map(row=>this.decode(row));}
+  // Live movement the engine holds in memory for this row's version (src/domain/live.js) is applied, so every reader sees current positions.
+  decode(row){return applyLive(this.db,{...JSON.parse(row.data),id:row.id,kind:row.kind,version:row.version});}
   get(id,kind){if(typeof id!=='string')throw new AppError(400,'Choose a valid record.');const c=this.cache;let obj=c?.ids.get(id);if(!obj){const row=cached(this.db,'SELECT id,kind,data,version FROM objects WHERE company_id=? AND id=?').get(this.company,id);if(!row)throw new AppError(404,'Record not found in your company.');obj=this.decode(row);if(c)c.ids.set(id,obj);}if(kind&&obj.kind!==kind)throw new AppError(404,'Record not found in your company.');return c?{...obj}:obj;}
   add(kind,data){this.cache=null;const id=randomUUID();cached(this.db,'INSERT INTO objects(id,company_id,kind,data) VALUES(?,?,?,?)').run(id,this.company,kind,JSON.stringify(data));if(CATALOGUE_KINDS.has(kind))bump(this.db,this.company);return this.get(id);}
   save(obj){this.cache=null;const {id,kind,version,...data}=obj;const row=cached(this.db,'UPDATE objects SET data=?,version=version+1 WHERE company_id=? AND id=? AND version=? RETURNING kind').get(JSON.stringify(data),this.company,id,version);if(!row)throw new AppError(409,'This record changed. Refresh and try again.');if(CATALOGUE_KINDS.has(row.kind))bump(this.db,this.company);obj.version++;return obj;}

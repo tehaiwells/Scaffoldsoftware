@@ -1,4 +1,5 @@
 import {integer,requireRule,route,rect,overlap,fitsPolygon,ObstacleIndex} from './geometry.js';
+import {holdLive,sweepLive} from './live.js';
 const size=500;
 export const workerMethods={
   forkliftPosition(machine){
@@ -42,6 +43,7 @@ export const workerMethods={
     return this.repo.save(worker);
   },
   advanceWorkers(elapsed){
+    sweepLive(this.db,this.repo.company);// first phase of a tick: held movement of rows that were saved since is forgotten
     for(const machine of this.repo.all('resource').filter(r=>r.enabled&&r.type==='FORKLIFT'&&!Number.isFinite(r.x))){const p=this.forkliftPosition(machine);if(p){Object.assign(machine,p);this.repo.save(machine);}}
     this.passObstacles=new Map();try{
     for(const worker of this.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER')){
@@ -53,7 +55,8 @@ export const workerMethods={
         const footprint={...next,w:size,h:size};if(!fitsPolygon(footprint,loc.points)||obstacles.hits(footprint)){const job=worker.walk?.job;worker.walk=null;this.releaseMount(worker);if(job){this.releaseJob(worker,'Walking route is blocked',5000);worker.jobSkipUntil=new Date(Date.now()+5000).toISOString();}else{worker.workerMode='HOLD';worker.workerReason='Walking route is blocked. Give a new move order.';}break;}
         Object.assign(worker,next);remaining-=step;if(distance<=step+.001)worker.walk.next++;
       }
-      this.repo.save(worker);
+      // Still walking: only x, y and walk.next changed, held in memory (live.js) and written every couple of seconds; anything else is saved now.
+      if(worker.walk)holdLive(this.repo,worker,['x','y','walkNext'],elapsed);else this.repo.save(worker);
     }
     }finally{this.passObstacles=null;}
   }

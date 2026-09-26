@@ -14,6 +14,7 @@ import { materialsMethods } from './domain/materials.js';
 import { fleetMethods } from './domain/fleet.js';
 import { layoutMethods } from './domain/layout.js';
 import { jobMethods,flushJobTimers } from './domain/jobs.js';
+import { flushLive } from './domain/live.js';
 import { turningMethods } from './domain/turning.js';
 import { scheduleMethods,runOrder } from './domain/schedule.js';
 import { alertMethods } from './domain/alerts.js';
@@ -117,6 +118,6 @@ export function startScheduler(db){
     }catch(error){log(error);}
     finally{if(!stopped){timer=setTimeout(round,Math.max(0,started+250-Date.now()));timer.unref();}}};
   timer=setTimeout(round,250);timer.unref();
-  return ()=>{if(stopped)return;stopped=true;clearTimeout(timer);try{flushJobTimers(db);}catch(error){log(error);}cached(db,'DELETE FROM engine_lease WHERE owner=?').run(owner);};
+  return ()=>{if(stopped)return;stopped=true;clearTimeout(timer);try{flushJobTimers(db);}catch(error){log(error);}try{flushLive(db);}catch(error){log(error);}cached(db,'DELETE FROM engine_lease WHERE owner=?').run(owner);};
 }
 export { tickCompany };

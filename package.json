@@ -13,7 +13,8 @@
     "backup": "node scripts/backup.js",
     "seed:demo": "node scripts/seed-demo.js",
     "benchmark": "node scripts/benchmark.js",
-    "check": "node scripts/check.js"
+    "check": "node scripts/check.js",
+    "benchmark:movement": "node scripts/movement-writes.js"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

@@ -31,7 +31,7 @@ Passwords use Node's established salted scrypt primitive and constant-time verif
 
 ## Simulation and notifications
 
-Only Simulation.tick advances physical activity. A database lease guards the scheduler; one machine route runs per handling area to avoid conflicting moving loads. Each callback advances 250 ms, never elapsed downtime. Pause state, remaining duration, resource assignments and custody survive restart. A crash may leave the lease occupied for five seconds.
+Only Simulation.tick advances physical activity. A database lease guards the scheduler; one machine route runs per handling area to avoid conflicting moving loads. Each callback advances 250 ms, never elapsed downtime. Pause state, remaining duration, resource assignments and custody survive restart. Live movement (walking and hand-driven positions, forklift-move countdowns) is held in memory per row version (src/domain/live.js) and applied on every read, written every 2 s of movement, on each state change and on stop; a crash can lose up to 2 s of travel. A crash may leave the lease occupied for five seconds.
 
 Future live operations require a separate authorized human/verified integration completion adapter. Timer or animation completion is never evidence of real handling. All present workspaces are simulation workspaces.
 
