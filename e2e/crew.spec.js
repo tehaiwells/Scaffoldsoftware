@@ -13,7 +13,11 @@ test('a worker opens on the crew phone view, takes orders there and the link ope
   const crew=(await api(page,'state')).resources.filter(r=>r.type==='WORKER'&&r.location===yard.id);
   await page.setViewportSize({width:375,height:812});
   await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Workers',exact:true}).click();
+  // The phone's own Back button returns to Workers; the card's Phone view button opens the crew page again.
   await page.getByRole('button',{name:`Open ${crew[0].name} on the crew phone view`}).click();
+  await expect(page.getByRole('heading',{level:1,name:crew[0].name,exact:true})).toBeVisible({timeout:15000});
+  await page.goBack();await expect(page.getByRole('heading',{level:1,name:'Crew HQ',exact:true})).toBeVisible({timeout:15000});
+  await page.getByRole('button',{name:`Phone view for ${crew[0].name}`}).click();
   await expect(page.getByRole('heading',{level:1,name:crew[0].name,exact:true})).toBeVisible({timeout:15000});
   await expect(page).toHaveURL(new RegExp('\\?view=CREW&worker='+crew[0].id+'$'));
   for(const name of ['Now','Orders','Likely next',/^Done today/])await expect(page.getByRole('heading',{level:2,name})).toBeVisible();

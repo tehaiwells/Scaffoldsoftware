@@ -32,7 +32,7 @@ test('likely next: top rung first, oldest first on a rung, nearest automatic wor
  const off={...s,resources:[W('A',9000,{skills:{YARD:false}}),W('B',10000)]};assert.deepEqual(cwTest.likelyNext(off,'A').items,[]);assert.deepEqual(cwTest.likelyNext(off,'B').items.map(x=>x.job.id),['near-B','early','late']);
  assert.equal(cwTest.likelyNext({...s,resources:[W('A',0,{mountedOn:'m'})]},'A').mode,'driving');assert.equal(cwTest.likelyNext({...s,resources:[W('A',0,{workerMode:'MOVING'})]},'A').mode,'moving');
  // Nothing open: the routine rotation the server lined up (board.idle), in its order.
- const idle=cwTest.likelyNext({jobs:[],resources:[W('A',0,{board:{idle:[{title:'Routine: sweep loading zones'},{title:'Routine: clean yard'}]}})]},'A');assert.deepEqual(idle.routine,['sweep loading zones','clean yard']);
+ const idle=cwTest.likelyNext({jobs:[],resources:[W('A',0,{board:{idle:[{title:'Routine: sweep loading zones'},{title:'Routine: clean yard'}]}})]},'A');assert.deepEqual(idle.routine,['Sweep loading zones','Clean yard'],'routine rounds read as sentences');
  assert.equal(cwTest.likelyNext({resources:[W('A',0)]},'A').mode,'unknown','no job list (a supervisor): nothing is guessed');assert.equal(cwTest.likelyNext(s,'nobody').mode,'gone');});
 
 test('likely next matches the engine board (NEXT and THEN) for every worker on a live snapshot',async t=>{const f=fixture(t),{cwTest}=await load();
@@ -102,8 +102,70 @@ test('every worker opens the crew view: Workers cards and rows, Today crew list,
  __test.setState(f.sim.snapshot(),acct(f));__test.setView('WORKERS');const wk=__test.workersView();for(const w of crew)assert.ok(wk.includes('data-cw-open="'+w.id+'"'),'Workers card for '+w.name);
  const site=f.sim.snapshot().resources.filter(r=>r.type==='WORKER'&&r.location===f.site.id);assert.ok(site.length&&site.every(w=>wk.includes('data-cw-open="'+w.id+'"')),'site crew rows');
  __test.setView('TODAY');const td=tdTest.view();for(const w of crew)assert.ok(td.includes('data-cw-open="'+w.id+'"'),'Today chip for '+w.name);
- const src=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(src.includes("<h2>'+esc(w.name)+' '+pill(crewState(w))+'</h2>'+cwPanelButton(w)"),'the selected-worker panel has the crew phone view button');});
+ const {cwTest}=await load();__test.setState(f.sim.snapshot(),acct(f));const yard=f.sim.snapshot().yards[0],panel=cwTest.panel(yard,crew[0].id);assert.ok(panel.includes('class="secondary cw-panel-btn" data-cw-open="'+crew[0].id+'"'),'the selected-worker panel has the crew phone view button');
+ assert.ok(!cwTest.panel(yard,null).includes('cw-panel-btn'),'no button without a selected worker');
+ const src=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(!/function workerPanel\(yard\)[^\n]*cwPanelButton/.test(src),'workerPanel itself is left as it is (the Home page is changed by another team)');
+ assert.ok(wk.includes('class="secondary cw-card-btn" data-cw-open="'+crew[0].id+'"'),'each Workers card has a Phone view button');});
 
 test('the crew page stylesheet is one block at the end of design.css, phone first',()=>{const at=css.lastIndexOf('/* ===== Crew phone view');assert.ok(at>0,'block present');assert.ok(css.indexOf('Crew phone view')===at+9,'one block');
  const block=css.slice(at);assert.ok(block.includes('max-width:640px'),'centred column on desktop');assert.ok(/@media\(max-width:650px\)/.test(block)&&/@media\(max-width:360px\)/.test(block),'phone rules down to 320 px');assert.ok(/min-height:(4[89]|[5-9]\d)px/.test(block),'big buttons');
  assert.ok(!css.slice(0,at).includes('.page-crew'),'nothing about the crew page before its block');});
+
+test('crew-day counts every job finished today, past the 100 closed jobs the yard keeps, and a count never drops on its own',async t=>{const f=fixture(t);const crew=crewOf(f);
+ f.cmd('jobsMode',{jobs:true,routineJobs:false});
+ const batch=(n,tag)=>{for(let i=0;i<n;i++)f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:tag+' '+i,where:{kind:'here'},priority:5,seconds:1});};
+ const openLeft=tag=>f.sim.repo.all('job').filter(j=>j.title.startsWith(tag)&&['OPEN','ASSIGNED','IN_PROGRESS'].includes(j.state)).length;
+ batch(140,'Quick');assert.ok(until(f,()=>openLeft('Quick')===0,900),'all 140 jobs finish');
+ assert.ok(f.sim.repo.all('job').filter(j=>j.state==='DONE').length<=100,'the engine keeps only the newest 100 closed jobs');
+ const sum=()=>crew.reduce((n,w)=>n+f.sim.crewDay(w.id).jobsDone,0);assert.equal(sum(),140,'every finished job is counted once');
+ const one=crew[2].id,before=f.sim.crewDay(one);assert.ok(before.jobsDone>0);assert.equal(before.partial,false,'counted as it happened, not from the kept list');
+ f.cmd('workerCommand',{id:one,order:'HOLD'});batch(60,'More');assert.ok(until(f,()=>openLeft('More')===0,900),'the others finish 60 more');
+ assert.equal(f.sim.crewDay(one).jobsDone,before.jobsDone,'a worker who did nothing keeps their count');
+ const extra=f.sim.repo.all('job').filter(j=>j.state==='DONE'&&j.worker&&j.origin!=='ROUTINE'&&!/^(Quick|More) /.test(j.title)).length;assert.equal(sum(),200+extra,'the yard’s own jobs count too');
+ assert.ok(f.sim.crewDay(one).jobs.length<=60&&f.sim.crewDay(crew[0].id).jobs.every(j=>j.title&&j.completedAt),'the newest finished jobs are listed');
+ assert.equal(f.sim.crewDay(one,new Date(Date.now()+36*3600000)).jobsDone,0,'a new day starts from nothing');});
+
+test('time on a job taken off part-way stays in the day, so the time on jobs never drops',async t=>{const f=fixture(t);const [w]=crewOf(f);
+ const job=f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'Long sweep',where:{kind:'here'},priority:5,seconds:60,worker:w.id});
+ assert.ok(until(f,()=>{const j=f.sim.repo.get(job.id);return j.state==='IN_PROGRESS'&&j.remainingMs<=j.durationMs-5000;},60),'part of the job is done');
+ const spent=(()=>{const j=f.sim.repo.get(job.id);return j.durationMs-j.remainingMs;})();
+ f.cmd('takeOffJob',{id:job.id});const day=f.sim.crewDay(w.id);assert.equal(day.jobsDone,0,'not finished');assert.equal(day.workMs,spent,'the time spent is kept');assert.equal(day.cutMs,spent);
+ const {__test,cwTest}=await load();__test.setState(f.sim.snapshot(),acct(f));assert.equal(cwTest.today(day,f.sim.snapshot(),w.id).workMs,spent);});
+
+test('the Assign menu is frozen while open: a job someone else takes stays in place, greyed, and a menu that cannot show is closed for good',async t=>{const f=fixture(t),{__test,cwTest}=await load();const [a,b,...rest]=crewOf(f);
+ for(const r of rest)f.cmd('workerCommand',{id:r.id,order:'HOLD'});
+ const ids=[1,2,3,4,5,6,7].map(i=>f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'Job '+i,where:{kind:'gate'},priority:5,seconds:120}).id);
+ __test.setState(f.sim.snapshot(),acct(f));cwTest.open(a.id);cwTest.setMenu('assign');
+ const rows=h=>[...h.matchAll(/data-cw-assign="([^"]+)"( disabled)?/g)].map(m=>[m[1],!!m[2]]);
+ let h=cwTest.controls();assert.deepEqual(rows(h),ids.slice(0,5).map(id=>[id,false]),'five rows first');assert.ok(h.includes('Show all 7 open jobs')&&h.includes('data-cw-close'),'show all and a close row');
+ f.cmd('assignJob',{id:ids[0],worker:b.id});f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'Job new',where:{kind:'gate'},priority:1,seconds:120});__test.setState(f.sim.snapshot(),acct(f));
+ h=cwTest.controls();assert.deepEqual(rows(h),[[ids[0],true],...ids.slice(1,5).map(id=>[id,false])],'the taken job keeps its row, greyed out; nothing moves up');
+ assert.ok(h.includes('Taken by '+b.name),'says who took it');assert.ok(h.includes('1 new job since you opened this list'),'a new job is only counted');
+ cwTest.menu().all=true;assert.equal(rows(cwTest.controls()).length,7,'show all lists every job it opened with');
+ const fork=f.sim.snapshot().resources.find(r=>r.type==='FORKLIFT'&&r.location===f.yard.id);f.cmd('workerCommand',{id:a.id,order:'MOUNT',forklift:fork.id});__test.setState(f.sim.snapshot(),acct(f));
+ assert.ok(!cwTest.controls().includes('id="cw-menu"'),'walking to a forklift: no menu');assert.equal(cwTest.menu(),null,'and it is closed for good');
+ f.cmd('workerCommand',{id:a.id,order:'HOLD'});__test.setState(f.sim.snapshot(),acct(f));assert.ok(!cwTest.controls().includes('id="cw-menu"'),'it does not come back by itself');});
+
+test('mini-map crop: a fixed zoom around the worker, a far spot shown by an edge arrow, and the crop kept while they walk its middle',async()=>{const {cwTest}=await load();
+ const vb=[-20000,-15000,40000,30000],bw=8000,bh=6000,yb={x0:-18000,y0:-12000,x1:18000,y1:12000};
+ const near=cwTest.crop({x:0,y:0},{x:2000,y:1000},bw,bh,vb,yb);assert.equal(near[2],bw,'a near spot: the base zoom');
+ const far=cwTest.crop({x:0,y:0},{x:17000,y:11000},bw,bh,vb,yb);assert.equal(far[2],bw,'a far spot never zooms out to the whole yard');assert.equal(far[3],bh);
+ for(const c of [near,far])assert.ok(0>=c[0]+c[2]*.19&&0<=c[0]+c[2]*.81&&0>=c[1]+c[3]*.19&&0<=c[1]+c[3]*.81,'the worker stays well inside: '+c);
+ assert.ok(far[0]+far[2]/2>0&&far[1]+far[3]/2>0,'the crop leans towards the far spot');
+ const edge=cwTest.crop({x:-15000,y:-9000},null,bw,bh,vb,yb);assert.ok(edge[0]>=vb[0]&&edge[1]>=vb[1],'kept inside the plan');assert.ok(edge[0]>=yb.x0-bw*.08-1&&edge[1]>=yb.y0-bh*.14-1,'not a third of road outside the fence: '+edge);
+ // Walking across the middle keeps the crop still; near an edge it re-crops.
+ const crop=far;let moves=0;for(let x=0;x<=2400;x+=400)if(!cwTest.keep(crop,{x,y:x*.6}))moves++;assert.equal(moves,0,'no re-crop on every poll');
+ assert.equal(cwTest.keep(crop,{x:crop[0]+crop[2]*.95,y:crop[1]+crop[3]/2}),false,'near the edge it re-crops');});
+
+test('plain words: priority, results, the supervisor who follows a link to someone else, and a site crew member',async t=>{const f=fixture(t),{__test,cwTest}=await load();const [w]=crewOf(f);
+ assert.equal(cwTest.priority({ladder:{y:[{priority:4,label:'Returned material'}]}},'y',{priority:4,origin:'MANUAL'}),'Priority 4 of 1 – set by the office');
+ assert.equal(cwTest.priority({ladder:{y:Array.from({length:8},(_,i)=>({priority:i+1,label:i===3?'Returned material':'x'}))}},'y',{priority:4,origin:'AUTO'}),'Priority 4 of 8 – returned material');
+ assert.equal(cwTest.result('Pre-start due recorded (no checklist captured)'),'Pre-start due marked done – no checklist filled in');
+ __test.setState(f.sim.snapshot(),acct(f,['requests.create','sites.assigned']));cwTest.open('someone-else');const h=cwTest.hero();assert.ok(h.includes('Not on your sites')&&!h.includes('another company'),'a supervisor is told the worker is not on their sites');
+ const site=f.sim.snapshot().resources.find(r=>r.type==='WORKER'&&r.location===f.site.id);cwTest.open(site.id);const now=cwTest.nowCard();assert.ok(now.includes('Standing by for crane moves at Site A')&&!now.includes('job board'),'site crew wait for crane moves');
+ __test.setState(f.sim.snapshot(),acct(f));cwTest.open(w.id);const card=cwTest.nowCard();assert.ok(/<svg aria-hidden="true" focusable="false"/.test(card),'the map picture is hidden from screen readers (the figure describes it)');assert.ok(card.includes('role="img"'));
+ assert.ok(!/top rung/.test(cwTest.view()),'no engine words');});
+
+test('crew page buttons: hover only where a mouse hovers, and never over the open or current button',()=>{const block=css.slice(css.lastIndexOf('/* ===== Crew phone view'));
+ const outside=block.split('\n').filter(l=>!l.startsWith('@media(hover:hover)')).join('\n');assert.ok(!/cw-big-btn:hover/.test(outside),'no big-button hover outside @media(hover:hover)');
+ assert.ok(block.includes('cw-big-btn:hover:not(:disabled):not(.is-open)')&&block.includes('cw-big-btn.is-open:hover{background:#cdea5c}'),'the open button keeps its light fill under the pointer');});
