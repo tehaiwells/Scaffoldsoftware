@@ -36,9 +36,11 @@ test('sign up, choose a yard size, load the parts, add stock, send it to a site,
   await expect(page.getByRole('radio',{name:'George St'})).toHaveAttribute('aria-checked','true',{timeout:20000});
   await page.locator(`[data-gm-slot="${std.id}"]`).click();await expect(page.locator(`[data-gm-slot="${std.id}"] .gm-n-pick`)).toBeVisible();
   await expect(page.getByText('On the next free truck, today. The crew loads it for you.')).toBeVisible();
+  // the amount box only moves whole stillages: a number typed in snaps to what will really go, never stays showing something else
+  const amount=page.getByRole('spinbutton',{name:/Amount of/});await amount.fill('3');await amount.press('Tab');await expect(amount).toHaveValue(String(added));
   await page.getByRole('button',{name:'Send to George St'}).click();
-  await expect(page.locator('.gm-pop').filter({hasText:'loading a truck for George St'})).toBeVisible({timeout:20000});
-  await expect(page.locator('.gm-trip').first()).toBeVisible();
+  // the trip card says what happens (no second message in a pop)
+  await expect(page.locator('.gm-trip').filter({hasText:'George St'}).first()).toBeVisible({timeout:20000});
   await expect(page.locator('.gm-pop').filter({hasText:'Delivered to George St!'})).toBeVisible({timeout:150000});
   const site=(await api(page,'state?page=0')).sites.find(x=>x.name==='George St');
   await expect.poll(async()=>(await api(page,'state?page=0')).stock?.[site.id]?.pieces??0,{timeout:30000}).toBe(added);
@@ -47,12 +49,12 @@ test('sign up, choose a yard size, load the parts, add stock, send it to a site,
   await bar.getByRole('button',{name:'Bring back',exact:true}).click();
   await expect(page.locator(`[data-gm-slot="${std.id}"] .gm-n`)).toHaveText(String(added));
   await page.getByRole('button',{name:'Bring everything back'}).click();
-  await expect(page.locator('.gm-pop').filter({hasText:'to bring everything back'})).toBeVisible({timeout:20000});
-  await expect(page.locator('.gm-pop').filter({hasText:'A truck is on its way to George St'}).filter({hasNotText:'bring'})).toHaveCount(0);
+  await expect(page.locator('.gm-trip').filter({hasText:'George St'}).first()).toBeVisible({timeout:20000});
+  await expect(page.locator('.gm-pop').filter({hasText:'A truck is on its way to George St'})).toHaveCount(0);
   await expect(page.locator('.gm-pop').filter({hasText:'Back at the yard from George St!'})).toBeVisible({timeout:180000});
   await expect.poll(async()=>(await api(page,'state?page=0')).register.find(r=>r.product===std.id)?.yard??0,{timeout:60000}).toBe(added);
   // the Office: a drawer of pages, each with a big way back to the game
-  await office(page,'Schedule').click();await expect(page.getByRole('heading',{level:1,name:'Load schedule',exact:true})).toBeVisible();
+  await office(page,'Schedule').click();await expect(page.getByRole('heading',{level:1,name:'Schedule',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Back to the yard',exact:true}).click();await expect(bar).toBeVisible();
   await office(page,'Control room').click();await expect(page.locator('.scene .yard-svg')).toBeVisible();await page.getByRole('button',{name:'Back to the yard',exact:true}).click();await expect(bar).toBeVisible();
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(0);

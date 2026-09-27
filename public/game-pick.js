@@ -36,3 +36,6 @@ export function gpChoose(items,lines){
 export function gpFill(frac){if(!(frac>0))return 'Empty';if(frac<.3)return 'A little';if(frac<.65)return 'Half full';if(frac<.95)return 'Nearly full';return 'Full';}
 // Short counts for the inventory slots: 200, 1.2k, 12k, 1.2M.
 export function gpCount(n){n=Math.max(0,Math.floor(Number(n)||0));if(n<1000)return String(n);if(n<1e4)return (Math.floor(n/100)/10)+'k';if(n<1e6)return Math.floor(n/1000)+'k';return (Math.floor(n/1e5)/10)+'M';}
+// How many of a part go in one stillage (Add stock): one pack, or as many as the yard forklift and the site crane can lift when a pack is heavier
+// than that (lift less the stillage's own 50 kg). 0 = the part cannot go in a stillage (no weight known, or one piece is already too heavy).
+export function gpPerStillage(p,lift=1500000,tare=50000){if(!(p?.unitWeight>0))return 0;const fit=Math.floor((lift-tare)/p.unitWeight);if(fit<1)return 0;return p.packQuantity>0?Math.min(p.packQuantity,fit):fit;}

@@ -142,7 +142,7 @@ test('backup endpoints are owner-only; Back up now is rate limited',async t=>{
   const made=await post(token);assert.equal(made.status,200);const body=await made.json();assert.equal(body.manual,1);assert.ok(existsSync(body.file));
   assert.equal((await post(token)).status,429);
   const plain=createApp(db);await new Promise(r=>plain.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>plain.close(r)));
-  assert.equal((await fetch(`http://127.0.0.1:${plain.address().port}/api/backups`,{headers:as(token)})).status,404);
+  const off=await fetch(`http://127.0.0.1:${plain.address().port}/api/backups`,{headers:as(token)});assert.equal(off.status,200,'no error in the console: the Account page is told quietly');assert.deepEqual(await off.json(),{configured:false});
 });
 
 // ---- Crash, race and late-writer safety of the one-time move (review fixes) ----

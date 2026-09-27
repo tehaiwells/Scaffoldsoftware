@@ -30,6 +30,7 @@ test('the Materials page keeps every control the page binds to, flags missing fi
   for(const sel of ['id="intake"','id="intake-search"','id="intake-kind"','value="PURCHASE"','value="ORIGINAL"','data-intake-qty="a"','data-intake="a"','data-intake-row','id="ml-search"','data-ml-gaps','data-live-search'])assert.ok(html.includes(sel),sel);
   assert.ok(!html.includes('<fitting>'),'names are escaped');assert.match(html,/Weight unknown/);assert.match(html,/No pack size/);assert.match(html,/Demo only/);assert.match(html,/Source verified/);
   assert.match(html,/class="hud-stat ml-warn"/,'missing figures are flagged in the hero');
+  const was=state.products;state.products=[P('a'),P('c',{packQuantity:null})];const packs=materialsView();assert.ok(!packs.includes('ml-warn'),'a missing pack size alone is a tip, not a warning');assert.match(packs,/Add pack sizes/);state.products=was;
   assert.ok(!/ style="/.test(html),'no inline style attributes (the CSP blocks them)');
   state.products=[];const empty=materialsView();assert.match(empty,/Your catalogue is empty/);assert.match(empty,/No materials in this system yet/);
 });

@@ -124,8 +124,9 @@ const SITE_H=2100;
 function craneOf(p,l){const e=p.ext,fs=p.fs??1,fy=fs>0?e.y1:e.y0,x=R((e.x0+e.x1)/2),y=R(fs>0?e.y0-2600:e.y1+2600),kerb=p.streetY-fs*WORLD.lane,reach=Math.max(Math.hypot(e.x0-x,fy-y),Math.hypot(e.x1-x,fy-y),Math.hypot(p.attachX-x,fy+fs*3000-y))+2500;return {x,y,H:24000,reach:clamp(reach,20000,48000)};}
 function buildingOf(p,l){const e=p.ext,n0=(p.fs??1)>0,top=n0?p.block.y0+3500:e.y1+5500,bot=n0?e.y0-5500:p.block.y1-3500,d=Math.min(15000,bot-top);if(d<8000)return null;const w=Math.min(e.x1-e.x0+6000,l.bw-16000,32000),x=R((e.x0+e.x1)/2-w/2),n=3+(strHash(p.id)%2);return {x,y:R(n0?bot-d:top),w,d,n,H:n*3200};}
 // A concrete-frame building going up: finished floors with glazing and slab edges, the top floor an open frame of columns with the formwork deck
-// for the next slab over the back of it and edge screens, and the scaffold on the two faces toward the street.
-function buildingSVG(b){const {x,y,w,d,n,H}=b,cs=box4(x,y,w,d),base=G,done=base+H-3200,top=done+3000;let s=shadowOf(E,cs,H+800,.25,LOW)+block(E,cs,base,done,'#d8d3c8',null,'#6d6a62',20);
+// for the next slab over the back of it and edge screens, and the scaffold toward the street: as much as there is on the site (scaf 0 none, 1 some,
+// 2 full), so the map itself shows whether a site has scaffolding yet.
+function buildingSVG(b,scaf=2){const {x,y,w,d,n,H}=b,cs=box4(x,y,w,d),base=G,done=base+H-3200,top=done+3000;let s=shadowOf(E,cs,H+800,.25,LOW)+block(E,cs,base,done,'#d8d3c8',null,'#6d6a62',20);
  for(const q of walls(E,cs)){const len=Math.hypot(q.q.x-q.p.x,q.q.y-q.p.y),bays=Math.max(2,Math.round(len/4200));for(let f=0;f<n-1;f++){const z=base+f*3200;s+=quad(E,q,0,1,z+2850,z+3200,'fill="'+shade('#b5afa2',q.f)+'"');for(let k=0;k<bays;k++)s+=quad(E,q,(k+.1)/bays,(k+.9)/bays,z+650,z+2650,'fill="'+(f===0?'#3a5566':'#46677a')+'" stroke="#e9e5dc" stroke-width="45"')+'<path d="M'+P(onWall(E,q,(k+.3)/bays,z+800))+'L'+P(onWall(E,q,(k+.45)/bays,z+2500))+'" stroke="#9fc3d6" stroke-opacity=".35" stroke-width="70"/>';}}
  s+=poly(cs.map(p=>at(p,done)),'fill="#bcb6a9" stroke="#6d6a62" stroke-width="20"');
  const gx=Math.max(2,Math.round(w/5000)),gy=Math.max(2,Math.round(d/5000)),deckY=y+d*.55,col=(px,py)=>block(E,box4(px-220,py-220,440,440),done,top,'#a7a194','#bdb7aa','#5f5b54',12);let back='',front='';
@@ -134,10 +135,11 @@ function buildingSVG(b){const {x,y,w,d,n,H}=b,cs=box4(x,y,w,d),base=G,done=base+
  s+=back+block(E,deck,top-200,top,'#9c7443','#cfa46a','#6e5230',16)+'<path d="'+joints+'" stroke="#a98150" stroke-width="40"/>';
  const screen=[{a:{x,y:deckY},b:{x:x+w,y:deckY}},{a:{x:x+w,y:deckY},b:{x:x+w,y}}];for(const e of screen)s+=poly([at(e.a,top),at(e.b,top),at(e.b,top+1900),at(e.a,top+1900)],'fill="#2f6aa6" fill-opacity=".55" stroke="#1f4a78" stroke-width="30"');
  s+=front;
- return s+scaffoldSVG(b);}
+ return s+(scaf>0?scaffoldSVG(b,scaf):'');}
 // Tube-and-fitting scaffold on the two faces toward the street: standards every 2.4 m, a lift every 2 m with timber decks, ledgers, guardrails and bracing.
-function scaffoldSVG(b){const {x,y,w,d,H}=b,top=H+1000;let std='',led='',brace='',guard='',decks='';
- const faces=[{a:{x,y:y+d},b:{x:x+w,y:y+d},n:{x:0,y:1}},{a:{x:x+w,y:y+d},b:{x:x+w,y},n:{x:1,y:0}}];
+// Some (1): two lifts up the front face only; full (2): both faces to the top.
+function scaffoldSVG(b,scaf=2){const {x,y,w,d,H}=b,top=scaf>1?H+1000:4000;let std='',led='',brace='',guard='',decks='';
+ const faces=[{a:{x,y:y+d},b:{x:x+w,y:y+d},n:{x:0,y:1}},{a:{x:x+w,y:y+d},b:{x:x+w,y},n:{x:1,y:0}}].slice(0,scaf>1?2:1);
  for(const f of faces){const len=Math.hypot(f.b.x-f.a.x,f.b.y-f.a.y),bays=Math.max(1,Math.round(len/2400)),o=(p,k)=>({x:p.x+f.n.x*k,y:p.y+f.n.y*k}),ins=u=>o(lerp(f.a,f.b,u),300),out=u=>o(lerp(f.a,f.b,u),1500),lifts=Math.floor(top/2000);
   for(let i=0;i<=bays;i++){const u=i/bays;for(const pt of [ins(u),out(u)])std+='M'+P(at(pt,G))+'L'+P(at(pt,G+top));}
   for(let k=1;k<=lifts;k++){const z=G+k*2000;decks+=poly([at(ins(0),z),at(ins(1),z),at(out(1),z),at(out(0),z)],'fill="#c9975a" stroke="#8a6a3e" stroke-width="24"');for(const pt of [ins,out])led+='M'+P(at(pt(0),z))+'L'+P(at(pt(1),z));guard+='M'+P(at(out(0),z+1000))+'L'+P(at(out(1),z+1000))+'M'+P(at(out(0),z+180))+'L'+P(at(out(1),z+180));}
@@ -173,8 +175,9 @@ export function wmSiteParts(p,l,state,ctx={},opts={}){
  if(src.loading){const z=placeRect(p,src.loading.x,src.loading.y,2000,1500);ground+='<rect x="'+R(z.x)+'" y="'+R(z.y)+'" width="2000" height="1500" fill="url(#hatch)" stroke="#e3bd2c" stroke-width="70"/>';}
  out.ground=ground;
  out.crane=craneKind(state,src.id).length>0;
+ const onSite=(state.world?itemsOf(state):state.containers??[]).filter(c=>c.location===src.id).length;out.scaf=onSite?onSite<4?1:2:0;
  if(opts.art!==false){const back=[],front=[];for(const it of hoardingItems(p,p.attachX))(it.front?front:back).push(it);
-  const b=buildingOf(p,l);if(b)back.push({dep:E.depth({x:b.x+b.w/2,y:b.y+b.d/2}),svg:buildingSVG(b)});
+  const b=buildingOf(p,l);if(b)back.push({dep:E.depth({x:b.x+b.w/2,y:b.y+b.d/2}),svg:buildingSVG(b,opts.scaf??out.scaf)});
   const shedX=e.x0-7400,shedY=(p.fs??1)>0?e.y1-4800:e.y0+2000;if(shedX>p.block.x0+800)back.push({dep:E.depth({x:shedX+3000,y:shedY+1400}),svg:shedSVG(shedX,shedY,6000,2800)});
   const sorted=a=>a.sort((x,y)=>x.dep-y.dep).map(o=>o.svg).join('');out.back=sorted(back);out.front=sorted(front);}
  if(opts.live===false)return out;
@@ -323,7 +326,7 @@ function buildStatic(l){const st=wmStatic(l);dropAllPics();W.cam.replaceChildren
 // or whether it has a crane changes.
 function syncSite(p,s){const g=W.placeG.get(p.id);if(!g||!s)return;let k=g.__wm;if(!k){g.replaceChildren();k=g.__wm={ground:el('g',{class:'wm-site-ground'}),back:el('g',{class:'wm-site-back'}),live:el('g',{class:'wm-site-live'}),front:el('g',{class:'wm-site-front'})};g.append(k.ground,k.back,k.live,k.front);}
  if(k.groundS!==s.ground){k.groundS=s.ground;setSVG(k.ground,s.ground);}
- const art=built.sig+'|'+(s.crane?1:0);if(k.artS!==art){k.artS=art;const a=wmSiteParts(p,built.layout,ctxNow.state,{},{live:false}),box=siteArtBox(p);setPic(k.back,a.back,box,DEFS_PIC());setPic(k.front,a.front,box,DEFS_PIC());W.picsDirty=true;}
+ const art=built.sig+'|'+(s.crane?1:0)+'|'+(s.scaf??2);if(k.artS!==art){k.artS=art;const a=wmSiteParts(p,built.layout,ctxNow.state,{},{live:false,scaf:s.scaf}),box=siteArtBox(p);setPic(k.back,a.back,box,DEFS_PIC());setPic(k.front,a.front,box,DEFS_PIC());W.picsDirty=true;}
  if(k.liveS!==s.live){k.liveS=s.live;setSVG(k.live,s.live);}}
 // Called after every Home render or patch (operations.js bindPage), before the page binds [data-select] and animates the crew.
 export function wmAttach(ctx){if(typeof document==='undefined')return;const host=document.querySelector('.scene [data-wm-host]');if(!host)return;ctxNow=ctx;const t0=performance.now();
@@ -332,7 +335,7 @@ export function wmAttach(ctx){if(typeof document==='undefined')return;const host
  wmSignal(ctx);const l=live.layout;if(!l){revokeAll(W.cam);W.cam.replaceChildren();built.sig=null;return;}
  const sig=VK+'#'+layoutSig(l);if(sig!==built.sig){built.sig=sig;built.layout=l;buildStatic(l);// First look: the owner's own camera if they left it somewhere; else Fit all (every name readable) for a moment, then the director takes over.
   if(!cam){const saved=loadCam();mode=MODES.includes(saved?.mode)?saved.mode:'director';if(mode==='free'&&saved)cam={cx:saved.cx,cy:saved.cy,s:saved.s};else{cam={cx:0,cy:0,s:.01};W.fitPending=true;}}}
- if(!W.sized)measureView();if(W.fitPending&&W.sized){W.fitPending=false;fitNow(restBox(l));holdUntil=performance.now()+3500;}
+ if(!W.sized)measureView();W.ins=typeof ctx.inset==='function'?ctx.inset():null;if(W.fitPending&&W.sized){W.fitPending=false;fitNow(restBox(l));holdUntil=performance.now()+3500;}
  // planning a yard layout or giving a worker a spot to go to happens on the yard: the camera goes there (and stays until the owner moves it)
  const yardWork=!!(ctx.layoutDraft||ctx.workerMoveMode);if(yardWork&&!W.yardWork){const yp=l.places.find(p=>p.kind==='yard');if(yp&&cam){userCam();if(cardFor)closeCard();animateTo(boxCam(yardBox(yp)));}
   // the order was given from the crew panel below the map: bring the whole map into view, as the next click goes on it
@@ -431,7 +434,9 @@ function pointOf(c,locId,item,isDest){const l=built.layout;if(!item)return null;
  if(p){const z=placeRect(p,item.x,item.y,rw,rh);return {x:z.x+rw/2,y:z.y+rh/2,z:0};}const tr=trips.get(locId);if(tr?.at){const t=tr.truck,D=truckDims(t),a=headingKey(tr.at.hx,tr.at.hy)*HEAD_STEP,hx=Math.cos(a),hy=Math.sin(a),total=truckTotal(t),tw=t.width??2050,X=item.x+rw/2,Y=item.y+rh/2;return {x:tr.at.x+(X-total/2)*hx+(Y-tw/2)*hy,y:tr.at.y+(X-total/2)*hy-(Y-tw/2)*hx,z:G+D.DK};}return null;}
 function stepCrane(c,now,dt){const w=craneWant(c,now),k=dt==null?1:1-Math.exp(-dt/260);let da=w.a-c.cur.a;while(da>Math.PI)da-=2*Math.PI;while(da<-Math.PI)da+=2*Math.PI;const maxA=dt==null?Math.PI:dt/1000*1.6;c.cur.a+=clamp(da*k*2,-maxA,maxA);c.cur.r+=(w.r-c.cur.r)*k;c.cur.z+=(w.z-c.cur.z)*k;
  c.load=w.load;c.moving=Math.abs(da)>0.002||Math.abs(w.r-c.cur.r)>20||Math.abs(w.z-c.cur.z)>20||(!!c.task&&!c.paused&&w.phase!=='COMPLETE');// redrawn only when the hook has moved about a pixel on screen (far out, a crane at work costs almost nothing)
- const px=1.2/Math.max(1e-6,cam?.s??1),key=[VK,R(c.cur.a*c.geo.reach/px),R(c.cur.r/px),R(c.cur.z/px),c.load?.id??''].join('|');if(key!==c.key){c.key=key;c.jib.innerHTML=craneSVG(c);}return c.load?.id??null;}
+ const px=1.2/Math.max(1e-6,cam?.s??1),key=[VK,R(c.cur.a*c.geo.reach/px),R(c.cur.r/px),R(c.cur.z/px),c.load?.id??''].join('|');if(key!==c.key&&craneInView(c)){c.key=key;c.jib.innerHTML=craneSVG(c);}return c.load?.id??null;}
+// A crane off the screen keeps swinging in the numbers but is not drawn again until it is back in view.
+function craneInView(c){if(!W?.w||!cam)return true;const g=c.geo,q=proj({x:g.x,y:g.y}),C=proj({x:cam.cx,y:cam.cy}),x=cam.s*(q.x-C.x),y=cam.s*(q.y-C.y),r=(g.reach+g.H)*cam.s*1.2;return Math.abs(x)<W.w/2+r&&Math.abs(y)<W.h/2+r;}
 function craneSVG(c){const g=c.geo,a=c.cur.a,dx=Math.cos(a),dy=Math.sin(a),nx=-dy,ny=dx,base={x:g.x,y:g.y},Z=G+g.H,J=g.reach,cj=J*.3,pt=(r,side=0)=>({x:base.x+dx*r+nx*side,y:base.y+dy*r+ny*side});
  let lace='';for(let r=-cj,k=0;r<J-900;r+=1800,k++)lace+='M'+P(at(pt(r,k%2?-550:550),Z))+'L'+P(at(pt(r+900,0),Z+1300));
  const chord='M'+P(at(pt(-cj,-550),Z))+'L'+P(at(pt(J,-200),Z))+'M'+P(at(pt(-cj,550),Z))+'L'+P(at(pt(J,200),Z))+'M'+P(at(pt(-cj,0),Z+1300))+'L'+P(at(pt(J,0),Z+400));
@@ -487,9 +492,12 @@ function placeBox(p,m=6000){const e=p.ext,b=p.kind==='site'?buildingOf(p,built.l
 const siteBox=p=>placeBox(p,8000);
 function boxProj(b){const cs=[{x:b.x0,y:b.y0},{x:b.x1,y:b.y0},{x:b.x1,y:b.y1},{x:b.x0,y:b.y1}].map(proj),top=proj(up(b.tall??6000));const xs=cs.map(p=>p.x),ys=cs.map(p=>p.y);return {x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys)+top.y,y1:Math.max(...ys)};}
 // A shot fills the view but for a 7% margin (the hold test below allows 6%, so a framed shot holds still).
-function fitScale(b){if(!b||!W)return .01;const q=boxProj(b);return Math.min(W.w*.86/(q.x1-q.x0),W.h*.86/(q.y1-q.y0));}
-function boxCam(b){const q=boxProj(b),C={x:(q.x0+q.x1)/2,y:(q.y0+q.y1)/2},inv=E.inverse;return {cx:inv[0]*C.x+inv[2]*C.y,cy:inv[1]*C.x+inv[3]*C.y,s:clamp(fitScale(b),W?sMin():0,W?sMax():1)};}
-function fitNow(b){if(!W)return;cancelPlan();const t=boxCam(b);cam={...t};camTarget=null;applyCam(true);}
+// The part of the view a shot is framed in: the game board keeps its trip cards (top) and its big buttons and tip (bottom) over the map, so a
+// shot is framed in the open map between them (ctx.inset, read once per poll), never under them.
+const insT=()=>W?.ins?.t??0,insB=()=>W?.ins?.b??0;
+function fitScale(b){if(!b||!W)return .01;const q=boxProj(b);return Math.min(W.w*.86/(q.x1-q.x0),Math.max(60,W.h-insT()-insB())*.86/(q.y1-q.y0));}
+function boxCam(b){const q=boxProj(b),s=clamp(fitScale(b),W?sMin():0,W?sMax():1),C={x:(q.x0+q.x1)/2,y:(q.y0+q.y1)/2+(insB()-insT())/2/s},inv=E.inverse;return {cx:inv[0]*C.x+inv[2]*C.y,cy:inv[1]*C.x+inv[3]*C.y,s};}
+function fitNow(b){if(!W)return;W.camMovedT=performance.now();cancelPlan();const t=boxCam(b);cam={...t};camTarget=null;applyCam(true);}
 const boxAround=(p,r,tall=6000)=>({x0:p.x-r,y0:p.y-r,x1:p.x+r,y1:p.y+r,tall});
 // The director: frames the drive (the truck and where it is going), the unloading (the site, its crane and the truck at the gate), the loading yard,
 // or everything. On a phone it frames only a drive or an unloading; otherwise the whole district stays in view with every name readable.
@@ -498,27 +506,33 @@ const phone=()=>!!W&&W.w<560;
 // A drive is framed once for the whole trip (the road from where the truck is to where it stops, and the place it is going), so the camera holds
 // still while the truck drives across the shot.
 let driveFocus=null;
-function tripBox(tr){const P=tr.geom.P,i0=Math.max(0,tr.geom.cum.findIndex(c=>c>=distanceAt(tr.geom,tr.u??0,tr.D))-1);let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(let i=i0;i<P.length;i++){x0=Math.min(x0,P[i][0]);y0=Math.min(y0,P[i][1]);x1=Math.max(x1,P[i][0]);y1=Math.max(y1,P[i][1]);}
+const driveBoxes=new WeakMap();
+function tripBox(tr){if(!tr.geom)return tripBoxNow(tr);let b=driveBoxes.get(tr.geom);if(!b){b=tripBoxNow(tr);driveBoxes.set(tr.geom,b);}return b;}
+function tripBoxNow(tr){const P=tr.geom.P,i0=Math.max(0,tr.geom.cum.findIndex(c=>c>=distanceAt(tr.geom,tr.u??0,tr.D))-1);let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(let i=i0;i<P.length;i++){x0=Math.min(x0,P[i][0]);y0=Math.min(y0,P[i][1]);x1=Math.max(x1,P[i][0]);y1=Math.max(y1,P[i][1]);}
  const p=tr.at;x0=Math.min(x0,p.x);y0=Math.min(y0,p.y);x1=Math.max(x1,p.x);y1=Math.max(y1,p.y);const dest=built.layout?.byId.get(tr.to);if(dest?.kind==='site'){const b=placeBox(dest,4000);x0=Math.min(x0,b.x0);y0=Math.min(y0,b.y0);x1=Math.max(x1,b.x1);y1=Math.max(y1,b.y1);}else if(dest?.bay){x0=Math.min(x0,dest.bay.x-4000);y0=Math.min(y0,dest.bay.y-4000);x1=Math.max(x1,dest.bay.x+dest.bay.width+4000);y1=Math.max(y1,dest.bay.y+dest.bay.length+4000);}// back to the yard: its bay
- const cx=(x0+x1)/2,cy=(y0+y1)/2,hw=Math.max(34000,(x1-x0)/2+12000),hh=Math.max(30000,(y1-y0)/2+12000);return {x0:cx-hw,y0:cy-hh,x1:cx+hw,y1:cy+hh,tall:dest?.kind==='site'?20000:8000};}
+ const cx=(x0+x1)/2,cy=(y0+y1)/2,hw=Math.max(24000,(x1-x0)/2+9000),hh=Math.max(20000,(y1-y0)/2+9000);return {x0:cx-hw,y0:cy-hh,x1:cx+hw,y1:cy+hh,tall:dest?.kind==='site'?20000:8000};}
 const unloadBox=p=>{const e=p.ext,c=craneOf(p,built.layout),ys=[e.y0,e.y1,c.y-3000,c.y+3000,p.streetY-3000,p.streetY+3000];return {x0:Math.min(e.x0,c.x-3000)-3000,y0:Math.min(...ys)-2000,x1:Math.max(e.x1,c.x+3000)+3000,y1:Math.max(...ys)+2000,tall:c.H+7000};};
 const yardBox=yp=>({x0:yp.ext.x0-3000,y0:yp.ext.y0-3000,x1:yp.ext.x1+3000,y1:yp.streetY,tall:4000});
 const unloadingAt=(st,t)=>(st?.tasks??[]).some(k=>k.from===t.id||(t.status==='AT_SITE'&&k.to===t.id))?t.at:null;// the crane lifting off or on
-// Nothing happening: hold the last shot a few seconds (the loaded truck, the unloaded site) before pulling back to the whole district.
-function directorBox(now){const l=built.layout;if(!l)return null;const f=directorFocus(now,l);if(f){lastFocus=f;lastFocusT=now;return f;}return lastFocus&&now-lastFocusT<7000?lastFocus:restBox(l);}
+// One shot per stage of a trip: the yard while the crew loads, the whole drive, the site while its crane works, the yard again for a load that came
+// back. Between stages, and while an empty truck drives home, the last shot holds until the trip is over; then the rest shot, straight away (a
+// truck from an Office page: a few seconds). Nothing else moves the camera, so a tap lands where the owner is looking.
+function directorBox(now){const l=built.layout;if(!l)return null;const f=directorFocus(now,l);if(f){lastFocus=f;lastFocusT=now;return f;}
+ const onTrip=(ctxNow?.state?.trucks??[]).some(t=>t.game&&!t.retired);return lastFocus&&(onTrip?now-lastFocusT<180000:now-lastFocusT<7000)?lastFocus:(lastFocus=null,restBox(l));}
+// A truck driving back to the yard with nothing on board (after a delivery): nothing to watch.
+const emptyHome=tr=>tr.driving&&!tr.cargo?.length&&built.layout?.byId.get(tr.to)?.kind==='yard';
 // Who gets the shot: the truck the owner last sent, unloaded or loaded (while it is doing something); then a truck that has just arrived and waits
 // to be unloaded; then a site crane at work; then the trucks on the road (two in one shot while both still read as trucks, about 30 px long).
 function directorFocus(now,l){const st=ctxNow?.state;
  if(followId){const tr=trips.get(followId),t=st?.trucks?.find(x=>x.id===followId),yp=l.places.find(p=>p.kind==='yard');const u=t&&unloadingAt(st,t),site=u&&l.byId.get(u);if(site?.kind==='site')return unloadBox(site);
   if(tr?.at)return boxAround(tr.at,26000);if(t&&yp&&t.at===yp.id)return boxAround({x:yp.bay.x+yp.bay.width/2,y:yp.bay.y+yp.bay.length/2},24000);return null;}
- const trk=st?.trucks??[],focusOf=id=>{const t=trk.find(x=>x.id===id),tr=trips.get(id);if(!t)return null;const u=unloadingAt(st,t),site=u&&l.byId.get(u);if(site?.kind==='site')return unloadBox(site);if(tr?.driving&&tr.at&&(tr.u??0)<1)return tripBox(tr);
+ const trk=st?.trucks??[],focusOf=id=>{const t=trk.find(x=>x.id===id),tr=trips.get(id);if(!t)return null;const u=unloadingAt(st,t),site=u&&l.byId.get(u);if(site?.kind==='site')return unloadBox(site);if(tr?.driving&&tr.at&&(tr.u??0)<1)return emptyHome(tr)?null:tripBox(tr);
   if(t.status==='AT_SITE'&&itemsOf(st).some(c=>c.location===t.id)){const p=l.byId.get(t.at);if(p?.kind==='site')return unloadBox(p);}const yp=l.places.find(p=>p.kind==='yard');if(yp&&t.at===yp.id&&(st.tasks??[]).some(k=>k.to===t.id||k.from===t.id))return yardBox(yp);return null;};
  if(W.acted&&now-W.acted.t<180000){const f=focusOf(W.acted.id);if(f)return f;}
  const waiting=[...trips.values()].filter(tr=>tr.arrivedT&&now-tr.arrivedT<20000&&tr.truck?.status==='AT_SITE'&&tr.cargo?.length&&!openTasks(st,tr.truck).length).sort((a,b)=>b.arrivedT-a.arrivedT)[0];if(waiting){const p=l.byId.get(waiting.truck.at);if(p?.kind==='site')return unloadBox(p);}
  const busySite=l.places.find(p=>p.kind==='site'&&(st?.tasks??[]).some(t=>t.handling===p.id&&t.state!=='BLOCKED'));if(busySite)return unloadBox(busySite);
- const drives=[...trips.values()].filter(t=>t.driving&&t.at&&(t.u??0)<1);if(drives.length){const pick=drives.find(t=>t.truck?.id===driveFocus)??drives.sort((a,b)=>(b.u??0)-(a.u??0))[0];driveFocus=pick.truck?.id;
+ const drives=[...trips.values()].filter(t=>t.driving&&t.at&&(t.u??0)<1&&!emptyHome(t));if(drives.length){const pick=drives.find(t=>t.truck?.id===driveFocus)??drives.sort((a,b)=>(b.u??0)-(a.u??0))[0];driveFocus=pick.truck?.id;
   if(drives.length>1){const u=drives.map(tripBox).reduce((a,b)=>({x0:Math.min(a.x0,b.x0),y0:Math.min(a.y0,b.y0),x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1),tall:Math.max(a.tall,b.tall)}));if(fitScale(u)*8000>=30)return u;}return tripBox(pick);}
- if(phone())return null;
  const yp=l.places.find(p=>p.kind==='yard');if(yp&&(st?.tasks??[]).some(t=>t.handling===yp.id&&(st.trucks??[]).some(k=>k.id===t.to||k.id===t.from)))return yardBox(yp);
  return null;}
 // The rest shot (the first look, and the director with nothing to show): the whole district, except on a phone, where the whole district is too
@@ -537,7 +551,7 @@ function fitBox(){const b={...fitAllBox(built.layout)};for(const tr of trips.val
 // The director and the follow camera hold still while the shot still works (everything wanted is in view, the zoom not far off) and only then
 // glide to a new framing: the picture stays put most of the time, which is what keeps a drive smooth, and the moves read as deliberate cuts.
 let camGoal=null;
-function shotFits(b,follow){if(!W?.mat)return false;const q=boxProj(b),C=proj({x:cam.cx,y:cam.cy}),toV=(x,y)=>({x:cam.s*(x-C.x)+W.w/2,y:cam.s*(y-C.y)+W.h/2}),a=toV(q.x0,q.y0),z=toV(q.x1,q.y1),mx=W.w*.06,my=W.h*.06,ideal=fitScale(b);return a.x>=mx-1&&a.y>=my-1&&z.x<=W.w-mx+1&&z.y<=W.h-my+1&&cam.s>=ideal*.72&&(follow||cam.s<=ideal*1.02);}
+function shotFits(b,follow){if(!W?.mat)return false;const q=boxProj(b),C=proj({x:cam.cx,y:cam.cy}),toV=(x,y)=>({x:cam.s*(x-C.x)+W.w/2,y:cam.s*(y-C.y)+W.h/2}),a=toV(q.x0,q.y0),z=toV(q.x1,q.y1),mx=W.w*.06,my=(W.h-insT()-insB())*.06,ideal=fitScale(b);return a.x>=mx-1&&a.y>=insT()+my-1&&z.x<=W.w-mx+1&&z.y<=W.h-insB()-my+1&&cam.s>=ideal*.72&&(follow||cam.s<=ideal*1.02);}
 function stepCam(now,dt){if(!cam||!W)return false;if(!camGoal&&camPlan?.kind==='goal')cancelPlan();if(mode==='free'&&!followId){if(camPlan?.kind==='goal')cancelPlan();camGoal=null;return false;}if(mode==='director'&&!followId&&now<holdUntil)return false;
  const b=mode==='fit'&&!followId?fitBox():directorBox(now);if(!b)return false;
  if(followId){const tr=trips.get(followId);W.lead=tr?.at&&tr.driving?{x:tr.at.hx,y:tr.at.hy}:null;}
@@ -567,7 +581,7 @@ function syncTags(l,ctx){const st=ctx.state,out=[],places=[],items=itemsOf(st),b
 // director and the overview map always know where the camera is. A stretch ends early where the picture would no longer cover the view or would be
 // blown up more than about twice: the picture is drawn again there and the next stretch planned (a long glide never looks blurred).
 const PLAN_DT=16;let camPlan=null;
-function makePlan(kind,goal,now){const cams=[{...cam}],tau=kind==='goal'?420:220,k=1-Math.exp(-PLAN_DT/tau),lt=Math.log(goal.s);let c={...cam},done=false;
+function makePlan(kind,goal,now){if(W)W.camMovedT=now;const cams=[{...cam}],tau=kind==='goal'?420:220,k=1-Math.exp(-PLAN_DT/tau),lt=Math.log(goal.s);let c={...cam},done=false;
  for(let i=0;i<400;i++){const ls=Math.log(c.s);let n={cx:c.cx+(goal.cx-c.cx)*k,cy:c.cy+(goal.cy-c.cy)*k,s:Math.exp(ls+(lt-ls)*k)};
   // a director or follow move is never faster than about 1.6 px per ms on screen: it reads as a camera move, never as a cut
   if(kind==='goal'){const a=proj({x:c.cx,y:c.cy}),b=proj({x:n.cx,y:n.cy}),d=Math.hypot(b.x-a.x,b.y-a.y)*n.s,cap=Math.max(20,PLAN_DT*1.6);if(d>cap){const f=cap/d;n={...n,cx:c.cx+(n.cx-c.cx)*f,cy:c.cy+(n.cy-c.cy)*f};}}
@@ -590,7 +604,7 @@ function runPlan(kind,now){const goal=kind==='goal'?camGoal:camTarget;if(!goal){
  const p=camPlan,i=Math.min(p.cams.length-1,Math.max(0,Math.floor((now-p.t0)/PLAN_DT)));cam={...p.cams[i]};
  // while it plays, no frame loop runs for the camera (the page stays idle; the compositor moves the picture): one timer wakes it at the end
  if(i<p.cams.length-1){if(!p.timer)p.timer=setTimeout(()=>{p.timer=0;kick();},Math.max(0,p.t0+(p.cams.length-1)*PLAN_DT-performance.now())+4);return false;}
- endPlan();
+ endPlan();W.camMovedT=performance.now();
  if(p.done){if(kind==='goal')camGoal=null;else{camTarget=null;saveCam();}W.glide=!!(camGoal||camTarget);applyCam();return false;}
  prepareGlide(goal,true);return true;}
 // The plan stops (played to the end, or cut short by the owner): the picture is left exactly where the camera is.
@@ -605,7 +619,8 @@ function liveMat(){const VW=W.w*OVER,VH=W.h*OVER,C=proj({x:cam.cx,y:cam.cy}),s=c
 // Every tag for the live camera. A place's tag stays inside the view while its place is (at least partly) in view. Place tags never overlap: the
 // most wanted first (the yard, then the sites a truck is on its way to, from or parked at), a tag that would overlap drops its stock line, and
 // if it still overlaps it waits hidden until there is room. Far out, "No stock yet" lines step back.
-function placeTags(){if(!W?.mat||!cam||!W.tagEls)return;W.tagCam={...cam};if(W.tagT){W.tagT='';W.tagSvg.style.transform='';}const m=liveMat(),vx0=(W.w*OVER-W.w)/2,vy0=(W.h*OVER-W.h)/2,vx1=vx0+W.w,vy1=vy0+W.h,data=W.tagData??[],boxes=[],noSub=phone(),hit=r=>boxes.some(b=>r[0]<b[2]+3&&r[2]>b[0]-3&&r[1]<b[3]+2&&r[3]>b[1]-2);
+let camNoteT=0;const camNote=()=>{if(!ctxNow?.onCamera)return;clearTimeout(camNoteT);camNoteT=setTimeout(()=>{if(W?.stage?.isConnected)ctxNow.onCamera?.();},160);};
+function placeTags(){if(!W?.mat||!cam||!W.tagEls)return;camNote();W.tagCam={...cam};if(W.tagT){W.tagT='';W.tagSvg.style.transform='';}const m=liveMat(),vx0=(W.w*OVER-W.w)/2,vy0=(W.h*OVER-W.h)/2,vx1=vx0+W.w,vy1=vy0+W.h,data=W.tagData??[],boxes=[],noSub=phone(),hit=r=>boxes.some(b=>r[0]<b[2]+3&&r[2]>b[0]-3&&r[1]<b[3]+2&&r[3]>b[1]-2);
  for(let i=data.length-1;i>=0;i--){const t=data[i],n=W.tagEls[i];if(!n)continue;const p=at(t.world,t.z);let x=m.a*p.x+m.c*p.y+m.e,y=m.b*p.x+m.d*p.y+m.f,vis=true,sub=!!t.sub;
   if(t.kind!=='stock'&&t.w){const hw=t.w/2+5;if(x>vx0-hw*2&&x<vx1+hw*2&&y>vy0-40&&y<vy1+t.h+60){x=clamp(x,vx0+hw,Math.max(vx0+hw,vx1-hw));y=clamp(y,vy0+t.h+4,Math.max(vy0+t.h+4,vy1-4));}
    // without its stock line the name drops down onto the pointer; a name that still overlaps is lifted up to three rows on a leader line
@@ -734,6 +749,8 @@ function bindStage(){const svg=W.view,pts=new Map(),onMap=e=>!!e.target?.closest
  // Capture phase on the map's box (both svgs): the plan's own wheel and drag handlers (Yard page view) never see these events.
  svg.addEventListener('wheel',e=>{if(!onMap(e))return;e.preventDefault();e.stopPropagation();W.rect=W.view.getBoundingClientRect();const p=local(e);userCam();zoomAt(p.x,p.y,e.deltaY<0?1.15:1/1.15);},{passive:false,capture:true});
  svg.addEventListener('pointerdown',e=>{if(!onMap(e)||(e.button!==0&&e.pointerType==='mouse'))return;const special=ctxNow&&(ctxNow.layoutDraft||ctxNow.workerMoveMode==='PLACE');if(special)return;W.rect=W.view.getBoundingClientRect();pts.set(e.pointerId,local(e));W.gesture=true;
+  // on the game board a touch stops the camera for good (until the next Send or Bring back): it never moves under the owner's finger again
+  if(ctxNow?.onPick&&!arrange&&pts.size===1){W.moveTap=!!camPlan||!!camTarget||performance.now()-(W.camMovedT??0)<1000;if(mode!=='free'||camPlan||camTarget)userCam();}
   const siteG=arrange&&(e.target.closest?.('[data-wm-site]')||siteUnder(local(e)));if(siteG&&pts.size===1){gesture={kind:'site',id:siteG.dataset.wmSite,start:local(e),moved:false};}
   else if(pts.size===1)gesture={kind:'pan',start:local(e),cam:{...cam},moved:false,onItem:!!e.target.closest?.('[data-select],[data-worker],[data-forklift]')};
   else if(pts.size===2){const [a,b]=[...pts.values()];gesture={kind:'pinch',d:Math.hypot(a.x-b.x,a.y-b.y),mid:{x:(a.x+b.x)/2,y:(a.y+b.y)/2},cam:{...cam},moved:true};}
@@ -784,11 +801,13 @@ async function placeSite(id,col,row){const p=built.layout?.byId.get(id);if(!p||!
 
 // ---- the frame loop: only while something moves, never while the tab is hidden or the stage is off the page
 // kick() starts the loop unless one is scheduled or running (frame() itself decides whether it goes on): never two loops at once.
-let inFrame=false;
-function kick(){if(typeof requestAnimationFrame!=='function'||raf||inFrame||!W)return;lastT=0;raf=requestAnimationFrame(frame);}
+// A frame that only has site cranes to move comes back about 25 times a second, not 60: a crane swings slowly, and each redraw of its jib costs a
+// style pass and a paint. Anything else that moves (the camera, a finger on the map) runs every frame.
+let inFrame=false,slowT=0;const SLOW_MS=40;
+function kick(){if(typeof requestAnimationFrame!=='function'||raf||inFrame||!W)return;if(slowT){clearTimeout(slowT);slowT=0;}else lastT=0;raf=requestAnimationFrame(frame);}
 function frame(t){raf=0;if(!W||!W.stage.isConnected||document.hidden||W.onScreen===false)return;inFrame=true;try{frameBody(t);}finally{inFrame=false;}}
-function frameBody(t){W.glide=!!(camGoal||camTarget);const t0=performance.now();const dt=lastT?Math.min(100,t-lastT):16;lastT=t;const now=performance.now();let busy=false;
- const lifted=new Set();for(const c of cranes.values()){const id=stepCrane(c,now,dt);if(id)lifted.add(id);if(c.moving)busy=true;}
+function frameBody(t){W.glide=!!(camGoal||camTarget);const t0=performance.now();const dt=lastT?Math.min(100,t-lastT):16;lastT=t;const now=performance.now();let busy=false,cranesBusy=false;
+ const lifted=new Set();for(const c of cranes.values()){const id=stepCrane(c,now,dt);if(id)lifted.add(id);if(c.moving)cranesBusy=true;}
  const lk=[...lifted].sort().join(',');if(lk!==W.liftKey){W.liftKey=lk;for(const tr of trips.values())if(tr.truck&&tr.hk!=null&&tr.cargo?.length)truckArt(tr,tr.hk,lifted);}
  if(followId){const tr=trips.get(followId);if(tr?.driving)tr.at=poseNow(tr,now);}
  if(camTarget){if(camPlan?.kind==='goal')cancelPlan();if(runPlan('target',now))busy=true;}
@@ -797,7 +816,7 @@ function frameBody(t){W.glide=!!(camGoal||camTarget);const t0=performance.now();
  if(now-(W.tickT??0)>200)tick(now);
  if(!busy&&!camPlan&&W.slideOn&&!W.gesture&&camC){const q=slideOf(cam);if(!q.ok||Math.abs(q.k-1)>.02)commitCam();}
  measure('wm-frame',t0);
- if(busy)raf=requestAnimationFrame(frame);}
+ if(busy)raf=requestAnimationFrame(frame);else if(cranesBusy&&!slowT)slowT=setTimeout(()=>{slowT=0;if(!raf&&!inFrame&&W)raf=requestAnimationFrame(frame);},SLOW_MS);}
 // Five times a second while a truck drives or a card is open: where each truck is now (for the overview map, the trip strip, the card and the
 // director's shot), without touching the map itself.
 const camMoving=()=>!!(camGoal||camTarget||W?.gesture||W?.glide||(followId&&trips.get(followId)?.driving&&!trips.get(followId)?.paused));
@@ -819,9 +838,11 @@ function gamePick(e){const pick=ctxNow?.onPick;if(!pick||arrange||ctxNow.layoutD
  const s=e.target.closest?.('[data-wm-site]');if(s)return pick('site',s.dataset.wmSite)?done():false;
  const l=built.layout,yp=l.places.find(p=>p.kind==='yard');if(yp&&e.target.closest?.('.wm-yard,[data-select],[data-worker],[data-forklift]'))return pick('yard',yp.id)?done():false;
  if(e.type!=='click'||!W.view)return false;const r=W.view.getBoundingClientRect(),w=toWorld(e.clientX-r.left,e.clientY-r.top),lot=lotOf(l,w.x,w.y),place=l.places.find(p=>p.col===lot.c&&p.row===lot.r);
- if(place)return pick(place.kind==='yard'?'yard':'site',place.id)?done():false;return pick('lot',{col:lot.c,row:lot.r})?done():false;}
+ if(place)return pick(place.kind==='yard'?'yard':'site',place.id)?done():false;
+ // an empty block tapped while the picture was moving (or just after): most likely meant for a place that slid away, so it opens nothing
+ if(W.moveTap){W.moveTap=false;return done();}return pick('lot',{col:lot.c,row:lot.r})?done():false;}
 // operations.js applyView on Home: the world camera, not the yard view; a selected yard stillage off screen brings the camera to the yard.
 export function wmApplyView(selectedId){if(!W||!W.stage.isConnected)return false;if(selectedId){const el=W.svg.querySelector('[data-select="'+CSS.escape(selectedId)+'"]');const yp=built.layout?.places.find(p=>p.kind==='yard');if(el&&yp){const r=el.getBoundingClientRect(),v=W.view.getBoundingClientRect();if(r.right<v.left||r.left>v.right||r.bottom<v.top||r.top>v.bottom){userCam();fitNow({x0:yp.ext.x0-2000,y0:yp.ext.y0-2000,x1:yp.ext.x1+2000,y1:yp.ext.y1+2000,tall:4000});}}}applyCam();return true;}
-export function wmStop(){if(raf&&typeof cancelAnimationFrame==='function')cancelAnimationFrame(raf);raf=0;if(W?.ticker){clearInterval(W.ticker);W.ticker=null;}clearTimeout(lodT);lodT=0;for(const tr of trips.values()){clearTimeout(tr.swapT);clearTimeout(tr.replanT);}}
+export function wmStop(){if(raf&&typeof cancelAnimationFrame==='function')cancelAnimationFrame(raf);raf=0;clearTimeout(slowT);slowT=0;if(W?.ticker){clearInterval(W.ticker);W.ticker=null;}clearTimeout(lodT);lodT=0;for(const tr of trips.values()){clearTimeout(tr.swapT);clearTimeout(tr.replanT);}}
 // Tests and measurements.
 export const __wm={commit:()=>{if(W&&cam){camC=null;commitCam();}},setCam:c=>{cam={...cam,...c};camGoal=null;camTarget=null;mode='free';followId=null;},layout:wmLayout,signal:wmSignal,staticSVG:wmStatic,siteSVG:wmSiteSVG,siteParts:wmSiteParts,headingKey,truckArtAt,truckLine,rtOf,sendTo,siteKit,short,state:()=>({cam,mode,followId,arrange,trips,cranes,W,live}),restBox:()=>restBox(built.layout),fitScale:b=>fitScale(b),placeBox:p=>placeBox(p),built:()=>built,reset(){yardCache.key=null;W=null;cam=null;mode='director';followId=null;arrange=false;trips.clear();cranes.clear();built.sig=null;built.yard=null;built.sites=new Map();live={key:null,v:0,yard:'',sites:new Map(),sig:''};stateSeen=null;cardFor=null;}};

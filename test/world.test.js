@@ -138,6 +138,10 @@ test('the map builders are plain strings in Node: static scenery, a site with it
   const l=wmLayout(state),st=__wm.staticSVG(l);assert.ok(st.grounds.length>=16&&st.grounds.some(g=>g.svg.includes('url(#asphalt)')),'the ground, one picture per lot, with streets');assert.ok(st.cells.length>=9&&st.cells.every((c,i)=>!i||st.cells[i-1].dep<=c.dep),'blocks back to front');assert.ok([...st.blocks.values()].some(b=>b.svg.includes('<circle')),'trees and houses');
   const svg=__wm.siteSVG(l.byId.get('S'),l,state,{});assert.ok(svg.includes('data-select="X"'),'site stillages select like yard ones');assert.ok(svg.includes('40 x Standard'),'their contents are in the tooltip');assert.ok(svg.includes('Worker 1'));assert.ok(svg.includes('wm-shadecloth')||svg.includes('url(#mesh)'),'the site fence');
   assert.equal(__wm.siteParts(l.byId.get('S'),l,state,{},{art:false}).crane,true,'the site has a crane to draw');
+  // the building's scaffolding follows what is on the site: none before the first delivery, some for a little, full for a lot
+  const S=l.byId.get('S'),art=scaf=>__wm.siteParts(S,l,state,{},{live:false,scaf}).back,pipes=h=>(h.match(/stroke="#aab3b6"/g)??[]).length;
+  assert.equal(__wm.siteParts(S,l,state,{},{art:false}).scaf,1,'one stillage on site: some scaffolding');assert.equal(__wm.siteParts(S,l,{...state,world:{items:[]}},{},{art:false}).scaf,0,'an empty site: none');
+  assert.equal(pipes(art(0)),0,'no scaffold on an empty site');assert.ok(pipes(art(1))>0&&art(1).length<art(2).length,'some, then full');
   const ops=wmTools({ops:true,view:{rotate:0,tilt:true}}),sup=wmTools({ops:false});for(const w of ['Director','Fit all','Turn view','3D view','data-wm="in"','data-wm="out"'])assert.ok(ops.includes(w),w);assert.ok(ops.includes('Arrange map'));assert.ok(!sup.includes('Arrange map'),'arranging is for operations only');
   assert.match(__wm.signal({state,selected:null}),/^<i class="wm-sig" hidden data-v="\d+"><\/i>$/);
 });

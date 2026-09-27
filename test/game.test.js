@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase,atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
-import { gpStops,gpChoose,gpSnap,gpFill,gpCount } from '../public/game-pick.js';
+import { gpStops,gpChoose,gpSnap,gpFill,gpCount,gpPerStillage } from '../public/game-pick.js';
 
 // The game board's one-tap commands and the truck autopilot (src/domain/game.js), on a small yard made the way the board makes it.
 function game(t,{systems=['quickstage']}={}){
@@ -94,9 +94,10 @@ test('Send spreads a big order over free trucks; when every truck is out it wait
   // every truck out: the next Send waits (even while the stillages it wants are still busy) and goes on the first truck back
   for(const t of f.sim.repo.all('truck').filter(t=>!t.game))f.cmd('quickAdjust',{kind:'TRUCK',delta:-1,location:f.yard.id});assert.ok(f.sim.repo.all('truck').filter(t=>!t.retired).every(t=>t.game));
   const w=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.ok(w.queued,'waits instead of refusing');assert.match(w.message,/next truck back/);
-  const orders=f.sim.snapshot().gameOrders;assert.equal(orders.length,1);assert.equal(orders[0].type,'SEND');assert.equal(orders[0].site,site.id);
+  // (what did not fit on the two trucks is already waiting: one order more when it had to)
+  const orders=f.sim.snapshot().gameOrders,rest=/The rest goes/.test(r.message)?1:0;assert.equal(orders.length,1+rest);assert.equal(orders.at(-1).type,'SEND');assert.equal(orders.at(-1).site,site.id);
   // a second one waits too, and can be taken off the list
-  const w2=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.ok(w2.queued);assert.match(f.cmd('gameCancel',{id:w2.queued}).message,/waiting list/);assert.equal(f.sim.snapshot().gameOrders.length,1);
+  const w2=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.ok(w2.queued);assert.match(f.cmd('gameCancel',{id:w2.queued}).message,/waiting list/);assert.equal(f.sim.snapshot().gameOrders.length,1+rest);
   // the first truck home takes the waiting Send by itself
   assert.ok(f.until(()=>!f.sim.repo.all('gameOrder').length,1200),'the order went');assert.ok(f.sim.repo.all('truck').some(t=>t.game?.kind==='SEND'&&t.game.site===site.id),'on its way');
 });
@@ -160,4 +161,52 @@ test('added stock stands in tidy rows with aisles, three high at most, and every
     f.until(()=>f.sim.tasks().some(x=>x.state==='BLOCKED')||!f.sim.repo.all('truck').some(x=>x.game?.stage==='LOADING'),600);
     assert.deepEqual(f.sim.tasks().filter(x=>x.state==='BLOCKED').map(x=>x.reason),[],'nothing gets stuck');}
   assert.ok(sent>=6,'sent '+sent);
+});
+
+test('Add stock never makes a stillage the crew cannot lift: a heavy pack is split, a part with no weight is refused, and neither is ever offered',t=>{
+  const f=game(t,{systems:['quickstage','at-pac','tube-clip']});f.cmd('gameCatalogue');const all=f.sim.repo.all('product').map(p=>f.sim.effective(p.id));
+  // every reviewed supplier part with a weight: a stillage of it is at most what the 1.5 t forklift and site crane lift
+  for(const p of all.filter(p=>p.unitWeight>0)){const per=gpPerStillage(p);assert.ok(per>=1&&per*p.unitWeight+50000<=1500000,p.name);if(p.packQuantity>0)assert.ok(per<=p.packQuantity,p.name);}
+  const heavy=all.find(p=>p.packQuantity>0&&p.unitWeight>0&&p.packQuantity*p.unitWeight+50000>1500000);assert.ok(heavy,'a supplier pack heavier than the forklift');
+  f.cmd('gameAddStock',{lines:[{product:heavy.id,quantity:heavy.packQuantity*2}]});const mine=f.sim.containers().filter(c=>f.sim.repo.quantity(c.id,heavy.id)>0);
+  assert.ok(mine.length>2,'the packs are split');for(const c of mine)assert.ok(f.sim.weight(c)<=1500000,c.name+' can be lifted');
+  const {site}=f.cmd('gameSite',{name:'Heavy St'});const r=f.cmd('gameSend',{site:site.id,lines:[{product:heavy.id,quantity:heavy.packQuantity}]});
+  assert.ok(f.until(()=>!f.sim.repo.all('truck').some(t=>t.game),900),'delivered and home');assert.ok(f.at(site.id,heavy.id)>=heavy.packQuantity);assert.equal(f.sim.tasks().filter(x=>x.state==='BLOCKED').length,0,'the crew was never stuck');assert.ok(r.trucks.length);
+  const none=f.sim.repo.all('product').find(p=>!(f.sim.effective(p.id).unitWeight>0));if(none)assert.throws(()=>f.cmd('gameAddStock',{lines:[{product:none.id,quantity:10}]}),/no weight in your parts list/);
+  // a stillage made too heavy by hand (the Office) is never offered by the slider or picked by Send
+  const c=f.sim.containers().find(x=>x.location===f.yard.id&&f.sim.repo.quantity(x.id,heavy.id)>0);atomic(f.db,()=>f.sim.purchase({container:c.id,product:heavy.id,quantity:heavy.packQuantity*2,reason:'test'}));
+  assert.equal(f.sim.gameItemsFor(f.yard.id).items.find(x=>x.id===c.id).busy,true);
+});
+
+test('Bring everything back with more than a truckload: the next truck goes back for the rest, the owner is told, and a second Bring back is not taken twice',t=>{
+  const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:1300}]});
+  const {site}=f.cmd('gameSite',{name:'Tower'});const s=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:1300}]});
+  // what did not fit on the two trucks waits for the next truck back instead of being dropped
+  assert.match(s.message,/The rest goes on the next truck back/);assert.equal(f.sim.repo.all('gameOrder').length,1);
+  assert.ok(f.until(()=>!f.sim.repo.all('truck').some(t=>t.game)&&!f.sim.repo.all('gameOrder').length,4000),'every stillage delivered');assert.equal(f.at(site.id,ledger.id),1300);
+  const r=f.cmd('gameCollect',{site:site.id,all:true});
+  assert.throws(()=>f.cmd('gameCollect',{site:site.id,all:true}),/already on its way to bring everything back from Tower/);
+  assert.equal(f.sim.gameItemsFor(site.id).items.filter(x=>!x.busy).length,0,'the whole site is on its way back: nothing offered twice');
+  assert.ok(f.until(()=>f.truck(r.truck.id).game?.stage==='RETURNING',900));assert.ok(f.sim.repo.all('notification').some(n=>n.title==='More to bring back'&&/Tower/.test(n.body)),'the owner is told');
+  assert.ok(f.until(()=>f.at(site.id,ledger.id)===0&&!f.sim.repo.all('truck').some(t=>t.game)&&!f.sim.repo.all('gameOrder').length,5000),'everything comes back');assert.equal(f.at(f.yard.id,ledger.id),1300);
+  assert.ok(f.sim.repo.all('notification').some(n=>n.title==='Back at the yard'&&/full load/.test(n.body)));
+});
+
+test('a stillage on a Bring back is not offered again, and the board never adds a second crane to a site whose crane is switched off',t=>{
+  const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:300}]});
+  const {site}=f.cmd('gameSite',{name:'Kent St'});const s=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:300}]});assert.ok(f.until(()=>!f.truck(s.trucks[0].id).game));
+  const r=f.cmd('gameCollect',{site:site.id,lines:[{product:ledger.id,quantity:100}]});const o=f.sim.repo.get(r.collection,'collection');
+  const items=f.sim.gameItemsFor(site.id).items;assert.equal(items.find(x=>x.id===o.containers[0]).busy,true);assert.equal(items.filter(x=>!x.busy).length,2);
+  const r2=f.cmd('gameCollect',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.notDeepEqual(f.sim.repo.get(r2.collection,'collection').containers,o.containers,'a second Bring back takes another stillage');
+  const office=f.cmd('site',{name:'Office site'});f.sim.repo.add('resource',{name:'Crane A',type:'CRANE',location:office.id,enabled:false,task:null,capacity:1500000,reach:10000});
+  assert.equal(f.sim.gameCrew(office),false);assert.equal(f.sim.repo.all('resource').filter(x=>x.location===office.id&&x.type==='CRANE').length,1);
+});
+
+test('a board Send is on Today and the Schedule: loading, on the road and delivered today, on the truck that ran it',async t=>{
+  const {tdDay,boardRuns}=await import('../public/operations.js');
+  const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:200}]});
+  const {site}=f.cmd('gameSite',{name:'George St'});const r=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:200}]});const id=r.trucks[0].id;
+  let s=f.sim.snapshot(0,{lean:true});let run=tdDay(s).due.find(x=>x.kind==='trip');assert.ok(run,'on Today while the crew loads');assert.equal(run.status,'LOADING');assert.equal(run.siteName,'George St');assert.equal(run.runTruck,id);
+  assert.ok(f.until(()=>f.truck(id).status==='IN_TRANSIT'));s=f.sim.snapshot(0,{lean:true});run=boardRuns(s)[0];assert.equal(run.status,'IN_TRANSIT');assert.equal(run.pieces,200);assert.equal(run.neededOn,s.calendar.today);
+  assert.ok(f.until(()=>!f.truck(id).game));s=f.sim.snapshot(0,{lean:true});const done=tdDay(s).due.filter(x=>x.kind==='trip');assert.equal(done.length,1,'one record for the run, not one per stage');assert.equal(done[0].status,'DELIVERED');assert.equal(done[0].urgency,'DONE');
 });

@@ -7,7 +7,7 @@
 import {esc,num} from './visual.js';
 import {ovImg} from './art.js';
 import {gaItem,gaTab,GA_TABS,GA_ROW_ORDER,GA_BUTTONS,gaImg,gaKind,gaLook,gaFamily,gaLength,gaLenTag,gaSprite,gaYardPad,gaSystemPic} from './game-art.js';
-import {gpStops,gpSnap,gpFill,gpCount,gpChoose} from './game-pick.js';
+import {gpStops,gpSnap,gpFill,gpCount,gpChoose,gpPerStillage} from './game-pick.js';
 import {wmShell,wmFocus} from './world.js';
 const byName=new Intl.Collator(undefined,{numeric:true}).compare;
 const SYS_CLASS={quickstage:'qs','at-pac':'at','tube-clip':'tc'},SYS_NAME={quickstage:'Quickstage','at-pac':'AT-PAC','tube-clip':'Tube & Clip'};
@@ -17,7 +17,7 @@ const TARE=50000,HEAVY=10000000,PICKING=['send','back','add'];
 const truckKind=t=>(t?.payload??0)>=HEAVY?'Big truck':'Truck';
 // ---------------------------------------------------------------- state of the board (per browser tab)
 const G={mode:'yard',site:null,truck:null,tab:null,picks:new Map(),sel:null,showAll:false,busy:false,office:false,ctx:null,seen:null,counts:new Map(),bumps:new Set(),cols:10,rows:4,who:null,hintOff:new Set(),
- hoverId:null,hoverT:0,pressT:0,items:{loc:null,list:null,at:0,busy:false},pending:null,win:null,systems:new Set(),lastSite:null,quiet:new Map(),aimT:0};
+ hoverId:null,hoverT:0,pressT:0,items:{loc:null,list:null,at:0,busy:false},pending:null,win:null,systems:new Set(),lastSite:null,sys:null};
 const store={get(k){try{return localStorage.getItem(k);}catch{return null;}},set(k,v){try{localStorage.setItem(k,v);}catch{}}};
 const hintKey=()=>'gm-hints:'+(G.ctx?.account?.company?.id??'')+':'+(G.ctx?.account?.user?.id??'');
 function resetFor(ctx){const who=(ctx.account?.company?.id??'')+'|'+(ctx.account?.user?.id??'');if(who===G.who)return;G.who=who;G.mode='yard';G.site=null;G.truck=null;G.tab=null;G.picks=new Map();G.sel=null;G.office=false;G.seen=null;G.counts=new Map();G.ctx=ctx;
@@ -31,18 +31,22 @@ const rowsAt=(s,loc)=>{const m=new Map();for(const r of s?.stock?.[loc]?.rows??[
 const activeSites=s=>(s?.sites??[]).filter(x=>x.status==='ACTIVE').sort((a,b)=>byName(a.name,b.name));
 const siteName=(s,id)=>(s?.sites??[]).find(x=>x.id===id)?.name??(s?.yards??[]).find(y=>y.id===id)?.name??'the site';
 const hasStock=(s,loc)=>(s?.stock?.[loc]?.pieces??0)>0;
-const perStillage=p=>p?.packQuantity>0?p.packQuantity:p?.unitWeight>0?Math.max(1,Math.floor((1500000-TARE)/p.unitWeight)):null;
+const perStillage=p=>gpPerStillage(p)||null;
 // Where the slider's stillages come from: the yard for Send, the site for Bring back.
 const pickLoc=s=>G.mode==='send'?yardOf(s)?.id??null:G.mode==='back'?G.site:null;
 const itemsFor=loc=>G.items.loc===loc&&G.items.list?G.items.list:null;
 // What the grid shows in each mode: [{p, count, dim}] (count = the corner number; quiet = no number).
 function gridItems(s){const all=products(s),yard=yardOf(s),mode=G.mode;
- if(mode==='add')return all.map(p=>({p,count:0,quiet:true}));
+ if(mode==='add'){const ok=all.filter(p=>perStillage(p)),sys=addSystems(ok);if(sys.length>1&&!sys.includes(G.sys))G.sys=sys[0];return ok.filter(p=>sys.length<2||p.system===G.sys).map(p=>({p,count:0,quiet:true}));}
  if(mode==='send'){const at=rowsAt(s,yard?.id);return all.map(p=>({p,count:at.get(p.id)?.free??0})).filter(x=>x.count>0||G.picks.has(x.p.id));}
  if(mode==='back'||mode==='site'){const at=rowsAt(s,G.site);return all.map(p=>({p,count:at.get(p.id)?.quantity??0})).filter(x=>x.count>0||G.picks.has(x.p.id));}
  if(mode==='truck'){const at=rowsAt(s,G.truck);return all.map(p=>({p,count:at.get(p.id)?.quantity??0})).filter(x=>x.count>0);}
  if(mode==='parts')return [];
  const at=rowsAt(s,yard?.id);return all.map(p=>{const q=at.get(p.id)?.quantity??0;return {p,count:q,dim:!q};}).filter(x=>G.showAll||x.count>0);}
+// The scaffold systems in Add stock, in the order they are offered (Quickstage, AT-PAC, Tube & Clip): one at a time, picked above the tabs.
+const addSystems=list=>SYSTEMS.map(x=>x[0]).filter(id=>list.some(p=>p.system===id)).concat([...new Set(list.map(p=>p.system))].filter(id=>!SYS_NAME[id]));
+function sysbarHTML(s){if(G.mode!=='add')return '';const sys=addSystems(products(s).filter(p=>perStillage(p)));if(sys.length<2)return '';
+ return sys.map(id=>'<button type="button" role="radio" class="gm-sysopt'+(id===G.sys?' on':'')+'" data-gm-sys="'+esc(id)+'" aria-checked="'+(id===G.sys)+'"><s class="gm-sys '+(SYS_CLASS[id]??'')+'"></s>'+esc(SYS_NAME[id]??id)+'</button>').join('');}
 // The slider's stops for one product: whole stillages at the place (Send: the yard; Bring back: the site); Add stock: whole packs, or stillages a
 // forklift lifts.
 function stopsFor(s,p){if(!p)return [];if(G.mode==='add'){const step=perStillage(p)??10,out=[];for(let k=1;k<=40;k++)out.push({qty:k*step,n:k});return out;}
@@ -60,7 +64,7 @@ export function gmShell(ctx){resetFor(ctx);G.ctx=ctx;const s=ctx.state,company=e
   +'<div class="gm-view-btns"><button type="button" class="gm-round" data-gm-cam="fit" title="See everything" aria-label="See the whole map">'+viewIcon()+'</button></div>'
   +'<div class="gm-win2" data-gm-win2 hidden></div>'
   +'<nav class="gm-bar" aria-label="What do you want to do?">'+bigBtn('send','Send','Send scaffolding to a site')+bigBtn('back','Bring back','Bring scaffolding back from a site')+bigBtn('add','Add stock','Add stock arriving at the yard')+bigBtn('stock','Stock','See the yard stock',' gm-phone-only')+'</nav></section>'
-  +'<aside class="gm-dock" data-gm-dock aria-label="Inventory"><div class="gm-win" data-gm-win><div data-gm-head></div><div class="gm-tabs" data-gm-tabs role="tablist" aria-label="Kinds of material"></div><div class="gm-grid-wrap" data-gm-grid></div><div data-gm-amt></div><div data-gm-acts></div></div></aside></div>'
+  +'<aside class="gm-dock" data-gm-dock aria-label="Inventory"><div class="gm-win" data-gm-win><div data-gm-head></div><div class="gm-sysbar" data-gm-sysbar role="radiogroup" aria-label="Scaffold system"></div><div class="gm-tabs" data-gm-tabs role="tablist" aria-label="Kinds of material"></div><div class="gm-grid-wrap" data-gm-grid></div><div data-gm-amt></div><div data-gm-acts></div></div></aside></div>'
   +'<div class="gm-card" data-gm-card hidden></div>'+officeHTML(ctx)+'</div>';}
 const bigBtn=(k,label,title,cls='')=>'<button type="button" class="gm-big gm-big-'+k+cls+'" data-gm-go="'+k+'" title="'+title+'"><span class="gm-big-pic">'+gaImg(GA_BUTTONS[k](),'gm-big-img')+'</span><span class="gm-big-label">'+label+'</span></button>';
 const viewIcon=()=>'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -72,8 +76,8 @@ function startHTML(ctx){const can=ctx.account?.permissions?.includes('operations
 // ---------------------------------------------------------------- the Office: a drawer of picture tiles for every other page, in three groups
 export const OFFICE_TILES=[
  ['TODAY','Today','Loads due today, on a phone too','sg-list','day'],['SCHEDULE','Schedule','Every load and collection by day','hr-board','day'],['SITES','Client sites','Sites, their plans and dockets','si-site','day'],['STOCK','Stock ledger','Every piece in and out, counts','spr-stillage','day'],['MATERIALS','Materials catalogue','Your parts, weights and packs','spr-bundle','day'],
- ['WORKERS','Workers','Your crew and their jobs','spr-worker','yard'],['EQUIPMENT','Equipment','Forklifts and cranes','spr-forklift','yard'],['TRUCK12','Big trucks','12.5 t trucks, decks and dockets','spr-truck12','yard'],['TRUCK2','Small trucks','2 t trucks for quick runs','spr-truck2','yard'],['YARD','Yard layout','Yard shape, stillages, planner','sg-yard','yard'],['CONTROL','Control room','Crew orders, fleet, full stock grids','spr-worker-busy','yard'],
- ['HIRE','Hire','What is out on hire, and rates','hr-tag','biz'],['REPORTS','Reports','History charts','hc-board','biz'],['OVERVIEW','Overview','The whole business at a glance','spr-forklift-load','biz']];
+ ['WORKERS','Workers','Your crew and their jobs','spr-worker','yard'],['EQUIPMENT','Equipment','Forklifts and cranes','spr-forklift','yard'],['TRUCK12','Big trucks','12.5 t trucks, decks and dockets','spr-truck12','yard'],['TRUCK2','Small trucks','2 t trucks for quick runs','spr-truck2','yard'],['YARD','Yard layout','Yard shape, stillages, planner','sg-yard','yard'],['CONTROL','Control room','Run the crew and trucks by hand','spr-worker-busy','yard'],
+ ['HIRE','Hire','What is out on hire, and rates','hr-tag','biz'],['REPORTS','Reports','History charts','hc-board','biz'],['OVERVIEW','Overview','Numbers for the whole business','spr-forklift-load','biz']];
 const OFFICE_GROUPS=[['day','Every day'],['yard','Yard and fleet'],['biz','Business']];
 export function officeHTML(ctx){const hire=ctx.hire!==false,s=ctx.state,can=ctx.account?.permissions?.includes('operations.manage');
  const tile=([v,label,sub,art])=>'<button type="button" class="gm-tile'+(ctx.view===v?' current':'')+'" data-view="'+v+'"'+(ctx.view===v?' aria-current="page"':'')+' aria-label="'+esc(label)+'" title="'+esc(sub)+'"><span class="gm-tile-pic">'+gaSprite(art,'gm-tile-img')+'</span><b>'+esc(label)+'</b></button>';
@@ -85,12 +89,13 @@ export function officeHTML(ctx){const hire=ctx.hire!==false,s=ctx.state,can=ctx.
 export function gmOfficeToggle(open){const panel=document.querySelector('[data-gm-office-panel]');if(!panel)return;G.office=open??panel.hidden;panel.hidden=!G.office;for(const b of document.querySelectorAll('[data-gm-office]'))b.setAttribute('aria-expanded',String(G.office));if(G.office)panel.querySelector('.gm-tile')?.focus({preventScroll:true});}
 // ---------------------------------------------------------------- the inventory window
 function headHTML(s){const sites=activeSites(s),site=sites.find(x=>x.id===G.site);let title='Yard stock',sub='',extra='';
+ if(G.mode==='send'&&!hasStock(s,yardOf(s)?.id))return '<div class="gm-win-head"><div><h2>Send to a site</h2><p>Your yard is empty</p></div><button type="button" class="gm-x" data-gm-close aria-label="Close">&times;</button></div>';
  if(G.mode==='send'){title=site?'Send to '+site.name:'Send to a site';sub='Tap what goes, then how much';}
  else if(G.mode==='back'){title=site?'Bring back from '+site.name:'Bring back';sub=site?'Tap what comes back, or bring everything':'From which site?';}
  else if(G.mode==='add'){title='Add stock to the yard';sub='Tap what arrived, then how much';}
  else if(G.mode==='parts'){title='Your scaffold parts';sub='Which scaffold do you use? Tap one or more.';}
  else if(G.mode==='site'){title=site?.name??'Site';sub='On site now';}
- else if(G.mode==='truck'){const t=(s.trucks??[]).find(x=>x.id===G.truck);const w=t?truckWords(s,t):null;title=w?.word??'Truck';sub=t?truckKind(t)+(w.fill>0?' · '+w.load.toLowerCase():' · empty'):'';}
+ else if(G.mode==='truck'){const t=(s.trucks??[]).find(x=>x.id===G.truck);title=t?truckWords(s,t).word:'Truck';sub=t?truckKind(t):'';}
  else if(!products(s).length){title='Your scaffold parts';sub='Which scaffold do you use? Tap one or more.';}
  const x=G.mode==='yard'?'':'<button type="button" class="gm-x" data-gm-close aria-label="Close">&times;</button>';
  if(G.mode==='yard'&&products(s).length&&hasStock(s,yardOf(s)?.id))extra='<button type="button" class="gm-chip'+(G.showAll?' on':'')+'" data-gm-all aria-pressed="'+G.showAll+'">'+(G.showAll?'Only what I have':'Show every part')+'</button>';
@@ -108,7 +113,7 @@ function tabsHTML(s,list){if(!list.length)return '';const has=new Map();for(cons
 function gridHTML(s,list){const cols=G.cols,many=new Set(list.map(x=>x.p.system)).size>1;
  if(G.mode==='parts'||(G.mode==='yard'&&!products(s).length))return partsHTML(s);
  const tabs=GA_TABS.filter(t=>list.some(x=>gaTab(x.p)===t.id)).length>1,here=!tabs||G.tab==='all'?list:list.filter(x=>gaTab(x.p)===G.tab);
- if(!here.length){const words=G.mode==='send'?'Nothing to send from the yard yet. Tap <b>Add stock</b> first.':G.mode==='back'||G.mode==='site'?(G.site?'Nothing is on this site.':'Pick a site.'):G.mode==='truck'?'Nothing on board.':'Your yard is empty. Tap <b>Add stock</b>.';
+ if(!here.length){const words=G.mode==='send'?'Nothing in the yard to send yet.':G.mode==='back'||G.mode==='site'?(G.site?'Nothing is on this site.':'Pick a site.'):G.mode==='truck'?'Nothing on board.':'Your yard is empty. Tap <b>Add stock</b>.';
   return '<div class="gm-grid" data-cols="'+cols+'">'+voids(cols*G.rows)+'</div><p class="gm-empty-line gm-empty-over">'+words+'</p>';}
  const sorted=[...here].sort((a,b)=>GA_TABS.findIndex(t=>t.id===gaTab(a.p))-GA_TABS.findIndex(t=>t.id===gaTab(b.p))||sortKey(a,b));let html='',rows=0;
  // Add stock on one kind's tab: a row per kind of part, like Factorio's request window; everything else: one packed grid, like its inventory
@@ -137,6 +142,7 @@ function extrasHTML(s){if(!['send','back'].includes(G.mode)||!G.picks.size)retur
  const r=gpChoose(list,[...G.picks].map(([product,quantity])=>({product,quantity})));if(!r.extra.size)return '';const ps=new Map(products(s).map(p=>[p.id,p]));
  return '<div class="gm-extra"><span>Also on those stillages:</span><div class="gm-extra-row">'+[...r.extra].slice(0,8).map(([id,q])=>{const p=ps.get(id);return p?'<span class="gm-slot gm-mini" title="'+esc(p.name)+'">'+gaItem(p)+'<b class="gm-n">'+gpCount(q)+'</b></span>':'';}).join('')+'</div></div>';}
 function actsHTML(s){const site=activeSites(s).find(x=>x.id===G.site),picks=[...G.picks].filter(([,q])=>q>0);
+ if(G.mode==='send'&&!hasStock(s,yardOf(s)?.id))return '<div class="gm-acts"><button type="button" class="gm-go gm-go-big" data-gm-go="add">'+gaImg(GA_BUTTONS.add(),'gm-go-img')+'Add stock first</button></div>';
  if(G.mode==='send'){const ok=!!site&&picks.length>0&&!G.busy;
   return '<div class="gm-acts">'+extrasHTML(s)+(picks.length?'<p class="gm-est">'+esc(loadWords(s,picks))+'</p>':'')+'<button type="button" class="gm-go gm-go-big" data-gm-do="send"'+(ok?'':' disabled')+'>'+gaImg(GA_BUTTONS.send(),'gm-go-img')+(site?'Send to '+esc(site.name):'Send')+'</button><p class="gm-foot">On the next free truck, today. The crew loads it for you.</p></div>';}
  if(G.mode==='back'){const has=site&&hasStock(s,site.id);return '<div class="gm-acts">'+extrasHTML(s)+(picks.length?'<button type="button" class="gm-go gm-go-big" data-gm-do="back"'+(G.busy?' disabled':'')+'>'+gaImg(GA_BUTTONS.back(),'gm-go-img')+'Bring these back</button>':'')+'<button type="button" class="gm-go'+(picks.length?' gm-go-alt':' gm-go-big')+'" data-gm-do="backall"'+(has&&!G.busy?'':' disabled')+'>'+(picks.length?'':gaImg(GA_BUTTONS.back(),'gm-go-img'))+'Bring everything back</button><p class="gm-foot">The next free truck goes there, the site crane loads it.</p></div>';}
@@ -147,7 +153,7 @@ function actsHTML(s){const site=activeSites(s).find(x=>x.id===G.site),picks=[...
  return '';}
 // Words for how full the trucks will be: the picked pieces' weight plus a stillage each, against a 12.5 t truck.
 function loadWords(s,picks){const ps=new Map(products(s).map(p=>[p.id,p]));let g=0,known=true,n=0;for(const [id,q] of picks){const p=ps.get(id);if(!(p?.unitWeight>0)){known=false;continue;}g+=p.unitWeight*q;const per=perStillage(p);n+=per?Math.ceil(q/per):1;}g+=n*TARE;
- if(!known&&!g)return 'Weight not known for this part';const t=g/12500000;if(t>1)return 'About '+Math.ceil(t)+' truckloads';return 'Fills a truck: '+gpFill(t).toLowerCase();}
+ if(!known&&!g)return 'Weight not known for this part';const t=g/12500000;if(t>1)return 'About '+Math.ceil(t)+' truckloads';return 'Fits on one truck';}
 // ---------------------------------------------------------------- trucks on a trip, in words, top left (nothing when all are parked)
 function truckWords(s,t){const tasks=s.tasks??[],to=tasks.some(x=>x.to===t.id),from=tasks.some(x=>x.from===t.id),g=t.game,dest=t.destination??g?.site;
  const fill=Math.min(1,Math.max(0,(t.loadedWeight??0)/(t.payload||1))),load=gpFill(fill);let word;
@@ -157,7 +163,6 @@ function truckWords(s,t){const tasks=s.tasks??[],to=tasks.some(x=>x.to===t.id),f
  else if(from)word='Unloading'+(t.status==='AT_SITE'?' at '+siteName(s,t.at):'');
  else if(t.status==='AT_SITE')word='At '+siteName(s,t.at);
  else word=fill>0?'Loaded, waiting':'Ready at the yard';
- if(fill>0&&!g?.problem)word+=' · '+load.toLowerCase();
  return {word,fill,load,state:g?.problem?'warn':t.status==='IN_TRANSIT'?'road':to||from?'busy':'idle'};}
 function tripsHTML(s){const list=(s.trucks??[]).filter(t=>!t.retired&&(t.game||t.status==='IN_TRANSIT')).sort((a,b)=>byName(a.name,b.name));
  const orders=(s.gameOrders??[]).map(o=>'<div class="gm-trip wait"><span class="gm-trip-wait" aria-hidden="true"></span><span class="gm-trip-t"><b>Waiting for a truck</b><small>'+(o.type==='SEND'?'To ':'Back from ')+esc(siteName(s,o.site))+'</small></span><button type="button" class="gm-x gm-x-sm" data-gm-cancel="'+esc(o.id)+'" aria-label="Do not send this">&times;</button></div>').join('');
@@ -172,25 +177,33 @@ function hintOf(s){const stuck=(s.trucks??[]).find(t=>t.game?.problem);if(stuck)
  if(!products(s).length)h=phone()?{id:'parts',text:'Welcome! First, load your scaffold parts.',act:['Load my parts','parts'],point:'add'}:null;
  else if(!stockHere)h={id:'add',text:'Tap Add stock to fill your yard with scaffolding.',act:['Add stock','add'],point:'add'};
  else if(!sites.length)h={id:'site',text:'Now open your first client site: tap an empty block on the map.',act:['Open a site','newsite']};
- else if(moving&&!delivered)h={id:'watch',text:'Sit back and watch: the crew loads the truck, it drives there and the site crane unloads it.'};
+ else if(moving&&!delivered)h={id:'watch',text:'Sit back and watch. The crew does it all.'};
  else if(!delivered)h={id:'send',text:'Tap Send to send scaffolding to '+sites[0].name+'. The crew does the rest.',act:['Send','send'],point:'send'};
  else h={id:'tapsite',text:'Tap a site on the map to see what is there.',target:sites.find(x=>hasStock(s,x.id))?.id??sites[0].id};
  return h&&!G.hintOff.has(h.id)?h:null;}
 function hintHTML(s){const h=(G.mode==='yard'||G.mode==='site'||G.mode==='truck')&&!G.win?hintOf(s):hintOf(s)?.warn?hintOf(s):null;if(!h)return '';
  return '<div class="gm-bubble'+(h.warn?' warn':'')+(h.point?' point-'+h.point:'')+(h.target?' aimed':'')+'" data-hint="'+esc(h.id)+'"'+(h.target?' data-aim="'+esc(h.target)+'"':'')+'>'+ovImg('spr-worker','gm-boss')+'<p>'+esc(h.text)+'</p>'+(h.act?'<button type="button" class="gm-go gm-hint-go" data-gm-hint-act="'+h.act[1]+'">'+esc(h.act[0])+'</button>':'')+(h.id?'<button type="button" class="gm-x" data-gm-hint-x aria-label="Hide this tip">&times;</button>':'')+'</div>';}
-// A hint about a place points at it on the map (the camera moves, so it is re-aimed now and then; CSS glides it).
-function aimHint(){const box=document.querySelector('[data-gm-hint]'),b=box?.querySelector('.gm-bubble[data-aim]'),board=document.querySelector('.gm-board');if(!b||!board){box?.classList.remove('aimed');return;}
- const B=board.getBoundingClientRect(),ground=document.querySelector('[data-wm-site="'+CSS.escape(b.dataset.aim)+'"] .wm-site-ground'),g=ground?.getBoundingClientRect();
- // aimed only while the site's ground is well inside the map; otherwise the bubble waits above the buttons
- const r=g&&g.width&&g.right>B.left+40&&g.left<B.right-40&&g.bottom>B.top+40&&g.top<B.bottom-160?g:null;
- if(!r||phone()){box.classList.remove('aimed','below');box.style.left='';box.style.top='';return;}
- const w=box.offsetWidth,h=box.offsetHeight;let x=r.left-B.left+r.width/2-w/2,y=r.top-B.top-h-14;const below=y<64;if(below)y=r.bottom-B.top+14;y=Math.max(10,Math.min(y,B.height-h-120));x=Math.max(10,Math.min(x,B.width-w-10));
- box.classList.add('aimed');box.classList.toggle('below',below);box.style.left=Math.round(x)+'px';box.style.top=Math.round(y)+'px';}
+// A hint about a place points at it on the map: under the site's ground (its building and crane stand behind it, up the screen), with its arrow
+// at it, never over it; beside it when there is no room below. Re-aimed after the camera moves (the camera tells the board, world.js ctx.onCamera); CSS glides it. A phone keeps
+// every hint in one place above the buttons.
+const AIM_SIDES=['aimed','side-l','side-r','below'];
+function aimHint(){const box=document.querySelector('[data-gm-hint]'),b=box?.querySelector('.gm-bubble[data-aim]'),board=document.querySelector('.gm-board');
+ const off=()=>{if(!box)return;box.classList.remove(...AIM_SIDES);box.style.left='';box.style.top='';};if(!b||!board||phone())return off();
+ const B=board.getBoundingClientRect(),g=document.querySelector('[data-wm-site="'+CSS.escape(b.dataset.aim)+'"] .wm-site-ground')?.getBoundingClientRect(),top=B.top+60,bottom=B.bottom-130;
+ // aimed only while the site is well inside the map (clear of the trip cards and the big buttons); otherwise the bubble waits above the buttons
+ const r=g&&g.width&&g.right>B.left+40&&g.left<B.right-40&&g.bottom>top&&g.top<bottom?g:null;if(!r)return off();
+ const w=box.offsetWidth,h=box.offsetHeight,gap=16;let x,y,side;
+ if(r.bottom-B.top+gap+h<=B.height-130){side='below';x=r.left-B.left+r.width/2-w/2;}else if(r.left-B.left-gap-w>=10){side='side-l';x=r.left-B.left-gap-w;}else{side='side-r';x=r.right-B.left+gap;}
+ y=side==='below'?r.bottom-B.top+gap:r.top-B.top+r.height/2-h/2;y=Math.max(64,Math.min(y,B.height-h-130));x=Math.max(10,Math.min(x,B.width-w-10));
+ box.classList.remove(...AIM_SIDES);box.classList.add('aimed',side);box.style.left=Math.round(x)+'px';box.style.top=Math.round(y)+'px';}
+// The open map between the board's own things over it (world.js frames every shot there): the trip cards at the top, the big buttons and room
+// for a tip at the bottom. The same every time on one screen size, so a tip coming or going never moves the camera.
+export function gmInset(){const B=document.querySelector('.gm-board')?.getBoundingClientRect(),bar=document.querySelector('.gm-bar')?.getBoundingClientRect();if(!B?.height||!bar?.height)return null;return {t:60,b:Math.max(0,B.bottom-bar.top)+(phone()?64:76)};}
+export const gmCamera=()=>{if(document.querySelector('.gm-bubble[data-aim]'))aimHint();};
 // ---------------------------------------------------------------- pops: a truck sets off, a delivery lands, a collection is home
-const POPS={'Delivered':'tick','Back at the yard':'tick','Truck departed':'go','Not sent':'warn'};
+const POPS={'Delivered':'tick','Back at the yard':'tick','Not sent':'warn','More to bring back':'go'};
 function pops(s){const list=s.notifications??[],ids=list.map(n=>n.id);if(G.seen===null){G.seen=new Set(ids);return;}for(const n of list){if(G.seen.has(n.id))continue;G.seen.add(n.id);const kind=POPS[n.title];if(!kind)continue;
-  let text=n.body;if(n.title==='Delivered')text=n.body.split('!')[0]+'!';else if(n.title==='Back at the yard'){const m=n.body.match(/is back from (.*?) and/);text=m?'Back at the yard from '+m[1]+'!':'Back at the yard!';}
-  else if(n.title==='Truck departed'){const m=n.body.match(/^(.*) is travelling to (.*)\.$/);if(m&&(s.yards??[]).some(y=>y.name===m[2]))continue;if(m&&G.quiet.get(m[1])>Date.now())continue;text=m?'A truck is on its way to '+m[2]:n.body;}
+  let text=n.body;if(n.title==='Delivered')text=n.body.split('!')[0]+'!';else if(n.title==='Back at the yard'){const m=n.body.match(/is back from (.*?)(?: and| with)/);text=m?'Back at the yard from '+m[1]+'!':'Back at the yard!';}
   pop(text,kind);}}
 export function pop(text,kind='tick'){const box=document.querySelector('[data-gm-pops]');if(!box)return;const el=document.createElement('div');el.className='gm-pop '+kind;el.innerHTML=(kind==='tick'?'<span class="gm-tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>':kind==='go'?'<span class="gm-go-dot" aria-hidden="true"></span>':kind==='warn'?'<span class="gm-warn-dot" aria-hidden="true">!</span>':'')+'<span>'+esc(text)+'</span>';
  box.append(el);while(box.children.length>2)box.firstElementChild.remove();document.querySelector('.gm-board')?.classList.add('popping');setTimeout(()=>{el.classList.add('out');setTimeout(()=>{el.remove();if(!box.children.length)document.querySelector('.gm-board')?.classList.remove('popping');},600);},kind==='warn'?7000:kind==='tick'?4200:3200);}
@@ -205,7 +218,7 @@ const setHTML=(el,html)=>{if(!el)return false;if(el.__h===html)return false;el._
 function measure(){const p=phone();G.cols=p?Math.max(5,Math.min(9,Math.floor(((typeof innerWidth==='number'?innerWidth:375)-24+4)/46))):10;
  const wrap=document.querySelector('[data-gm-grid]');let rows=p?2:4;if(!p&&wrap&&wrap.clientHeight>0){const cell=(G.cols===10&&innerWidth>=1600?40:36)+3;rows=Math.max(3,Math.floor((wrap.clientHeight-10)/cell));}G.rows=rows;}
 export function gmUpdate(ctx){G.ctx=ctx;resetFor(ctx);const root=document.querySelector('[data-gm]');if(!root)return;const s=ctx.state;if(root.dataset.gm==='start'){bindOnce(root);return;}
- ctx.wm?.();
+ ctx.wm?.();learn(s);
  // keep the picks honest: what is no longer there cannot stay picked
  if(G.site&&!activeSites(s).some(x=>x.id===G.site)){G.site=null;if(['site','back'].includes(G.mode))G.mode='yard';}
  if(G.mode==='truck'&&!(s.trucks??[]).some(t=>t.id===G.truck&&!t.retired))G.mode='yard';
@@ -214,7 +227,7 @@ export function gmUpdate(ctx){G.ctx=ctx;resetFor(ctx);const root=document.queryS
  const list=gridItems(s),counts=new Map(list.map(x=>[x.p.id,x.count]));if(G.mode==='yard'){for(const [id,n] of counts){const was=G.counts.get(id);if(was!=null&&n>was)bumpSoon(id);}G.counts=counts;}
  const body=root.querySelector('.gm-body'),win=root.querySelector('[data-gm-win]');if(win)win.className='gm-win mode-'+G.mode;
  body?.classList.toggle('dock-open',G.mode!=='yard');body?.classList.toggle('picking',PICKING.includes(G.mode)&&!!G.sel);
- setHTML(root.querySelector('[data-gm-head]'),headHTML(s));setHTML(root.querySelector('[data-gm-tabs]'),tabsHTML(s,list));
+ setHTML(root.querySelector('[data-gm-head]'),headHTML(s));setHTML(root.querySelector('[data-gm-sysbar]'),sysbarHTML(s));setHTML(root.querySelector('[data-gm-tabs]'),tabsHTML(s,list));
  const amt=root.querySelector('[data-gm-amt]');if(!amt?.contains(document.activeElement)||!document.activeElement?.matches('input'))setHTML(amt,amountHTML(s));
  setHTML(root.querySelector('[data-gm-acts]'),actsHTML(s));
  measure();const grid=root.querySelector('[data-gm-grid]');const top=grid?.scrollTop??0;if(setHTML(grid,gridHTML(s,list))&&grid)grid.scrollTop=top;
@@ -223,8 +236,12 @@ export function gmUpdate(ctx){G.ctx=ctx;resetFor(ctx);const root=document.queryS
  const w2=root.querySelector('[data-gm-win2]');if(w2){setHTML(w2,win2HTML());w2.hidden=!G.win;}
  const hp=G.mode==='yard'&&!G.win?hintOf(s)?.point:null;
  for(const b of root.querySelectorAll('.gm-bar [data-gm-go]')){b.classList.toggle('hinted',b.dataset.gmGo===hp);b.classList.toggle('on',b.dataset.gmGo===G.mode||(b.dataset.gmGo==='stock'&&G.mode==='yard'&&!!body?.classList.contains('sheet')));}
- pops(s);bindOnce(root);syncCard();
- if(!G.aimT)G.aimT=setInterval(()=>{if(!document.querySelector('[data-gm="board"]')){clearInterval(G.aimT);G.aimT=0;return;}aimHint();},700);}
+ pops(s);bindOnce(root);syncCard();}
+// A first-day tip is retired for good once its step has been done (stock was added, a site opened, a delivery made), so it never comes back just
+// because the yard is empty again.
+function learn(s){if(!yardOf(s))return;const done=[];if(products(s).length)done.push('parts');
+ if(hasStock(s,yardOf(s)?.id)||(s.sites??[]).some(x=>hasStock(s,x.id))||(s.trucks??[]).some(t=>t.game))done.push('add');if(activeSites(s).length)done.push('site');if((s.sites??[]).some(x=>x.lastDeliveryAt))done.push('send','watch');
+ const fresh=done.filter(id=>!G.hintOff.has(id));if(!fresh.length)return;for(const id of fresh)G.hintOff.add(id);store.set(hintKey(),[...G.hintOff].join(','));}
 function bumpSoon(id){G.bumps.add(id);setTimeout(()=>{G.bumps.delete(id);document.querySelector('[data-gm-slot="'+CSS.escape(id)+'"]')?.classList.remove('bump');},900);}
 // The stillages behind the slider (Send: the yard, Bring back: the site), fetched when Send or Bring back opens and kept fresh while it stays open.
 function ensureItems(s){const loc=pickLoc(s);if(!loc||G.items.busy||!G.ctx?.get)return;if(G.items.loc===loc&&Date.now()-G.items.at<3000)return;
@@ -251,7 +268,7 @@ function setMode(mode,site){hideCard();G.mode=mode;G.picks=new Map();G.sel=null;
  if(mode==='yard')document.querySelector('.gm-body')?.classList.remove('sheet');else openSheet();
  G.tab=null;refreshNow();if(G.site&&(mode==='send'||mode==='back'))wmFocus('site',G.site);
  // the first Send with no site yet: name one first
- if(mode==='send'&&!site&&!sites.length&&ops())openWin({kind:'newsite',then:'send'});}
+ if(mode==='send'&&!site&&!sites.length&&ops()&&hasStock(s,yardOf(s)?.id))openWin({kind:'newsite',then:'send'});}
 // ---------------------------------------------------------------- events (one delegated set per board)
 function bindOnce(root){if(root.__gmBound)return;root.__gmBound=true;
  root.addEventListener('click',onClick);root.addEventListener('input',onInput);root.addEventListener('change',onChange);root.addEventListener('submit',onSubmit);
@@ -259,7 +276,7 @@ function bindOnce(root){if(root.__gmBound)return;root.__gmBound=true;
  root.addEventListener('focusin',e=>{const b=e.target.closest?.('[data-gm-slot]');if(b&&b.matches(':focus-visible'))showCard(b);});root.addEventListener('focusout',()=>hideCard());
  if(!G.keys){G.keys=true;document.addEventListener('keydown',e=>{if(e.key!=='Escape'||!document.querySelector('[data-gm]'))return;if(G.office){gmOfficeToggle(false);return;}if(G.win){closeWin();return;}if(!document.querySelector('[data-gm-card]')?.hidden){hideCard();return;}if(G.mode!=='yard')setMode('yard');});
   addEventListener('resize',()=>{if(document.querySelector('[data-gm="board"]'))refreshNow();});}}
-async function run(action,data,ok){const ctx=G.ctx;if(G.busy)return null;G.busy=true;refreshNow();try{const r=await ctx.cmd(action,data);if(r?.truck?.name)G.quiet.set(r.truck.name,Date.now()+20000);await ctx.refresh();G.busy=false;if(ok)ok(r);return r;}catch(e){ctx.notify(e.message);return null;}finally{G.busy=false;refreshNow();}}
+async function run(action,data,ok){const ctx=G.ctx;if(G.busy)return null;G.busy=true;refreshNow();try{const r=await ctx.cmd(action,data);await ctx.refresh();G.busy=false;if(ok)ok(r);return r;}catch(e){ctx.notify(e.message);return null;}finally{G.busy=false;refreshNow();}}
 function onClick(e){const ctx=G.ctx,s=ctx?.state;if(!ctx)return;const t=e.target;const b=t.closest('button');if(!b)return;
  if(b.dataset.view){e.preventDefault();gmOfficeToggle(false);ctx.go(b.dataset.view);return;}
  if(b.id==='settings'){gmOfficeToggle(false);ctx.settings?.();return;}
@@ -273,6 +290,7 @@ function onClick(e){const ctx=G.ctx,s=ctx?.state;if(!ctx)return;const t=e.target
  if(b.dataset.gmCam){if(b.dataset.gmCam==='truck')wmFocus('truck',b.dataset.gmFor);else wmFocus('fit');return;}
  if(b.hasAttribute('data-gm-all')){G.showAll=!G.showAll;refreshNow();return;}
  if(b.dataset.gmTab){G.tab=b.dataset.gmTab;refreshNow();const g=document.querySelector('[data-gm-grid]');if(g)g.scrollTop=0;return;}
+ if(b.dataset.gmSys){G.sys=b.dataset.gmSys;G.tab=null;G.sel=null;refreshNow();const g=document.querySelector('[data-gm-grid]');if(g)g.scrollTop=0;return;}
  if(b.dataset.gmSite){if(G.mode==='back'&&G.site!==b.dataset.gmSite){G.picks=new Map();G.sel=null;}G.site=b.dataset.gmSite;G.lastSite=G.site;refreshNow();wmFocus('site',G.site);return;}
  if(b.hasAttribute('data-gm-newsite')){openWin({kind:'newsite',then:'send'});return;}
  if(b.dataset.gmSystem){const id=b.dataset.gmSystem;if(G.systems.has(id))G.systems.delete(id);else G.systems.add(id);refreshNow();return;}
@@ -285,8 +303,8 @@ function onClick(e){const ctx=G.ctx,s=ctx?.state;if(!ctx)return;const t=e.target
  if(b.dataset.gmHintAct){const a=b.dataset.gmHintAct;if(a==='newsite')openWin({kind:'newsite',then:'send'});else if(a==='parts')setMode('parts');else setMode(a);return;}
  if(b.hasAttribute('data-gm-hint-x')){const id=b.closest('[data-hint]')?.dataset.hint;if(id){G.hintOff.add(id);store.set(hintKey(),[...G.hintOff].join(','));}refreshNow();return;}
  if(b.dataset.gmDo){const lines=[...G.picks].filter(([,q])=>q>0).map(([product,quantity])=>({product,quantity}));const site=G.site,name=siteName(s,site),done=()=>{setMode('yard');wmFocus('director');};
-  if(b.dataset.gmDo==='send')run('gameSend',{site,lines},r=>{G.lastSite=site;pop(r.queued?r.message:'The crew is loading a truck for '+name,'go');if(r.left?.length)ctx.notify(r.message);done();});
-  else if(b.dataset.gmDo==='back'||b.dataset.gmDo==='backall')run('gameCollect',b.dataset.gmDo==='back'?{site,lines}:{site,all:true},r=>{if(r.truck)G.quiet.set(r.truck.name,Date.now()+20000);pop(r.queued?r.message:'A truck is on its way to '+name+' to bring '+(b.dataset.gmDo==='back'?'it':'everything')+' back','go');done();});
+  if(b.dataset.gmDo==='send')run('gameSend',{site,lines},r=>{G.lastSite=site;if(r.queued)pop(r.message,'go');else if(/The rest goes/.test(r.message))pop('Not all of it fits on one truck. The rest goes on the next truck back.','go');done();});
+  else if(b.dataset.gmDo==='back'||b.dataset.gmDo==='backall')run('gameCollect',b.dataset.gmDo==='back'?{site,lines}:{site,all:true},r=>{if(r.queued)pop(r.message,'go');done();});
   else if(b.dataset.gmDo==='add')run('gameAddStock',{lines},()=>{pop('Added to the yard!','tick');setMode('yard');});
   else if(b.dataset.gmDo==='parts')run('gameCatalogue',{systems:[...G.systems]},r=>{pop(r.message,'tick');G.mode='add';G.tab=null;});
   return;}}
@@ -297,7 +315,8 @@ function onInput(e){if(e.target.matches('[data-gm-range]'))setPickFromIndex(Numb
 function onChange(e){const t=e.target;if(t.matches('[data-gm-range]')){setPickFromIndex(Number(t.value));t.blur();refreshNow();return;}
  if(t.matches('[data-gm-num]')){const s=G.ctx.state,p=products(s).find(x=>x.id===G.sel);if(!p)return;const want=Math.max(0,Math.floor(Number(t.value)||0));let q=want;
   if(G.mode==='add'){const step=p.packQuantity>0?p.packQuantity:null;if(step&&want)q=Math.ceil(want/step)*step;}else q=gpSnap(stopsFor(s,p),want);
-  if(q)G.picks.set(p.id,q);else G.picks.delete(p.id);t.blur();refreshNow();}}
+  // whole stillages only on Send and Bring back: the box snaps to what will really go, never a number that will not
+  if(q)G.picks.set(p.id,q);else G.picks.delete(p.id);t.value=String(q);const amt=document.querySelector('[data-gm-amt]');if(amt)amt.__h=null;t.blur();refreshNow();}}
 function onSubmit(e){const f=e.target.closest('[data-gm-newsite-form]');if(!f)return;e.preventDefault();const d=Object.fromEntries(new FormData(f));if(!String(d.name??'').trim())return;const w=G.win??{};
  run('gameSite',{name:d.name,...(Number.isInteger(w.col)&&Number.isInteger(w.row)?{col:w.col,row:w.row}:{})},r=>{G.win=null;G.lastSite=r.site.id;pop(r.site.name+' is on the map!','tick');setMode('send',r.site.id);setTimeout(()=>wmFocus('site',r.site.id),700);});}
 // ---------------------------------------------------------------- the hover card (mouse hover, keyboard focus, or a long press / a tap outside the picking modes)
@@ -325,4 +344,4 @@ export function cardHTML(s,p){const yard=yardOf(s),yr=rowsAt(s,yard?.id).get(p.i
  return '<div class="gm-card-head">'+gaItem(p,'gm-card-pic')+'<div><b>'+esc(p.name)+'</b><small>'+esc([SYS_NAME[p.system]??p.system,p.category].filter(Boolean).join(' · '))+'</small></div></div><ul>'
   +line('In the yard',yr?.quantity??0,'yard')+(yr&&yr.free!==yr.quantity?line('free to send',yr.free??0,'sub'):'')+sites.map(x=>line(x.name,x.q)).join('')+(trucks.length>1?line('On the trucks',trucks.reduce((n,x)=>n+x.q,0)):trucks.map(x=>line('On a '+x.name,x.q)).join(''))+'</ul>'
   +'<p>'+[len&&gaLenTag(p)?'Length '+(Math.round(len*100)/100)+' m':'',p.packQuantity>0?'1 pack = '+num(p.packQuantity)+' pieces':'',p.unitWeight>0?(Math.round(p.unitWeight/100)/10)+' kg each':''].filter(Boolean).join(' · ')+'</p></div>';}
-export const __gm={state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setTruck:id=>{G.mode='truck';G.truck=id;},head:s=>headHTML(s),setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;}};
+export const __gm={learn:s=>learn(s),sysbar:s=>sysbarHTML(s),state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setTruck:id=>{G.mode='truck';G.truck=id;},head:s=>headHTML(s),setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;}};

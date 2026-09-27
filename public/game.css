@@ -59,7 +59,7 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 .gm-fill-big{height:10px;border-radius:5px;margin:2px 0 4px}
 /* ---------- one hint at a time: the yard boss's speech bubble, over the map, pointing at what it talks about ---------- */
 .gm-hint{position:absolute;left:50%;bottom:128px;transform:translateX(-50%);z-index:7;width:min(460px,calc(100% - 24px));pointer-events:none}
-.gm-hint.aimed{transform:none;bottom:auto;transition:left .6s ease,top .6s ease}
+.gm-hint.aimed{transform:none;bottom:auto;width:300px;transition:left .6s ease,top .6s ease}
 .gm-board.popping .gm-hint:not(.aimed){bottom:128px}
 .gm-bubble{pointer-events:auto;position:relative;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 8px;border-radius:16px;background:#fffdf5;color:#1f3a2c;border:2px solid #16382c;box-shadow:0 10px 28px #0005;animation:gm-in .35s ease both}
 .gm-bubble::after{content:"";position:absolute;bottom:-11px;left:50%;width:18px;height:18px;background:#fffdf5;border-right:2px solid #16382c;border-bottom:2px solid #16382c;transform:translateX(-50%) rotate(45deg)}
@@ -69,6 +69,8 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 .gm-bubble:not([class*="point-"])::after{display:none}
 .gm-hint.aimed .gm-bubble::after{display:block;left:50%}
 .gm-hint.aimed.below .gm-bubble::after{bottom:auto;top:-11px;transform:translateX(-50%) rotate(225deg)}
+.gm-hint.aimed.side-r .gm-bubble::after{bottom:auto;top:50%;left:-11px;transform:translateY(-50%) rotate(135deg)}
+.gm-hint.aimed.side-l .gm-bubble::after{bottom:auto;top:50%;left:auto;right:-11px;transform:translateY(-50%) rotate(-45deg)}
 .gm-bubble.warn{background:#fff4e2;border-color:#a3550f}
 .gm-bubble.warn::after{background:#fff4e2;border-color:#a3550f}
 .gm-bubble p{margin:0;font-size:14.5px;line-height:1.35;font-weight:600;flex:1}
@@ -115,6 +117,12 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 .gm-chip{flex:none;height:28px;padding:0 10px;border-radius:8px;border:1px solid #ffffff2a;background:#ffffff0d;color:#dfeae3;font-size:12px;font-weight:700;cursor:pointer}
 .gm-chip:hover,.gm-chip.on{border-color:var(--gm-lime);color:#fff}
 .gm-tabs{display:flex;gap:4px}
+.gm-sysbar{display:flex;gap:4px}
+.gm-sysbar:empty{display:none}
+.gm-sysopt{flex:1;min-width:0;height:34px;display:flex;align-items:center;justify-content:center;gap:7px;border-radius:7px;border:1px solid #ffffff2a;background:#ffffff0d;color:#dfeae3;font:inherit;font-size:13px;font-weight:800;cursor:pointer}
+.gm-sysopt:hover{border-color:#86a894}
+.gm-sysopt.on{background:linear-gradient(#4b6f58,#3a5a48);border-color:#86a894;color:#fff;box-shadow:inset 0 -3px 0 var(--gm-lime)}
+.gm-sysopt .gm-sys{position:static;width:9px;height:9px;flex:none}
 .gm-tabs:empty{display:none}
 .gm-tab{flex:1;min-width:0;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border-radius:7px;border:1px solid;border-color:var(--gm-hi) var(--gm-lo) var(--gm-lo) var(--gm-hi);background:linear-gradient(#34503f,#2a4236);color:#e3ede7;font-size:10.5px;font-weight:750;cursor:pointer;padding:2px;max-width:66px}
 .gm-tab-pic{width:36px;height:36px}
@@ -278,14 +286,17 @@ body.in-game #app{padding:0;margin:0;max-width:none}
  .gm-trip{flex:none;max-width:230px}
  .gm-hint{bottom:12px}
  .gm-body.sheet .gm-hint{display:none}
- .gm-bubble{flex-wrap:wrap}
- .gm-bubble p{flex:1 1 180px;font-size:14px}
- .gm-bubble .gm-go{margin-left:44px}
+ .gm-bubble{flex-wrap:wrap;gap:8px;padding:6px 8px 6px 6px;border-radius:14px}
+ .gm-bubble p{flex:1 1 180px;font-size:13.5px;line-height:1.3}
+ .gm-bubble .gm-boss{width:22px;height:40px}
+ .gm-bubble .gm-go{margin-left:30px;height:34px}
+ .gm-bubble .gm-x{width:30px;height:30px}
  .gm-bubble.point-send::after{left:12%}.gm-bubble.point-add::after{left:63%}.gm-bubble.point-back::after{left:37%}
  .gm-view-btns{top:auto;bottom:12px;right:10px}
  .gm-body:has(.gm-bubble) .gm-view-btns{display:none}
  .gm-win2{position:fixed;left:8px;right:8px;top:58px;width:auto;transform:none;z-index:45}
  .gm-pops{top:52px}
+ .gm-board:has(.gm-trip) .gm-pops{top:66px}
  .gm-pop{font-size:14px}
  .gm-sizes{grid-template-columns:1fr;gap:10px}
  .gm-size{flex-direction:row;text-align:left;padding:10px 14px;gap:12px}

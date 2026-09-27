@@ -61,7 +61,7 @@ export function createApp(db,{backups=null}={}) {
       else if(req.method==='POST'&&path==='/api/turn-preview') send(200,simulation.turnPreview(body));
       else if(req.method==='POST'&&path==='/api/boundary-preview') send(200,simulation.boundaryPreview(body));
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
-      else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');send(200,backups.status());}
+      else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups){send(200,{configured:false});return;}send(200,backups.status());}
       else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),file:result.file});}
       else if(path==='/api/company-details'||path==='/api/company-logo') await bdRoute(req,res,simulation,path,body,send);
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}

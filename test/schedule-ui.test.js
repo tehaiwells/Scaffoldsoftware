@@ -12,7 +12,7 @@ const list=(f,extra={})=>f.cmd('createLoadList',{site:f.site.id,lines:[{product:
 test('the Schedule page puts each yard list on its day and truck, with the hero counters and strips',async t=>{const f=setup(t),T=await load();
  const a=list(f,{name:'Due today',neededOn:'2026-09-23'}),b=list(f,{name:'Tomorrow AM',neededOn:'2026-09-24',slot:'AM'}),c=list(f,{name:'No date'});f.cmd('bookTruck',{id:a.id,truck:f.truck.id});
  T.setState(f.sim.snapshot(),acct(f));T.setView('SCHEDULE');T.schedWeek(null);const html=T.scheduleView();
- assert.ok(html.includes('<h1>Load schedule</h1>'));assert.ok(html.includes('Mon 21 Sep – Sun 27 Sep 2026'));
+ assert.ok(html.includes('<h1>Schedule</h1>'));assert.ok(html.includes('Mon 21 Sep – Sun 27 Sep 2026'));
  for(const l of [a,b,c])assert.ok(html.includes('data-sch-card="'+l.id+'"'),'card for '+l.name);
  assert.ok(html.includes('sch-dayhead today'),'today column is marked');assert.ok(html.includes('No date yet'),'undated strip');
  assert.ok(/Due today<\/span><b class="hud-num">1</.test(html),'one load due today');assert.ok(html.includes('<span class="sch-slot"'),'the AM slot tag shows');

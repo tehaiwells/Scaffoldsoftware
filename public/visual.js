@@ -270,7 +270,10 @@ export function yardSVG(location,containers=[],tasks=[],selected=null,trucks=[],
 }
 
 // Truck page: the same daylight kit in a fixed three-quarter view, cab to the right; each stillage on the deck is selectable.
-export function deckSVG(truck,containers,opts={}){
+// Every truck card on the Big trucks page draws its own deck: its pattern ids get the truck's own suffix, so no id is on the page twice.
+const DECK_IDS=/(\bid="|url\(#|href="#)(grass|concrete|joints|asphalt|hatch|mesh|cagebadd|cagebad|caged|cagetop|cage)(?=["\)])/g;
+export function deckSVG(truck,containers,opts={}){const k='-'+String(truck?.id??'t').replace(/[^A-Za-z0-9]/g,'').slice(0,16);return deckSVGOf(truck,containers,opts).replace(DECK_IDS,'$1$2'+k);}
+function deckSVGOf(truck,containers,opts={}){
  const l=truck.length??6000,w=truck.width??2050,E=projection([.95,.17,-.5,.36],.82),D=truckDims(truck),front=l+120+D.cab,M=E.L,S=p=>mul(M,p);
  const load=containers.filter(c=>c.location===truck.id),byId=new Map(load.map(c=>[c.id,c])),names=new Map((opts.products??[]).map(p=>[p.id,p.name])),linesOf=c=>(opts.balances??[]).filter(l=>l.container===c.id&&l.quantity>0).map(l=>({name:names.get(l.product_id)??'Material',quantity:l.quantity,reserved:l.reserved||0}));
  const carries=new Set(load.map(c=>c.support).filter(Boolean)),tags=[];let zTop=D.HB;

@@ -69,9 +69,9 @@ test('the inventory: the yard at a glance, the whole catalogue to add, free stoc
 
 test('Send shows what rides along on a mixed stillage before the button is pressed, and says how full the truck will be in words',t=>{
   const f=board(t);f.cmd('gameStart',{size:'S'});f.cmd('gameCatalogue');const ps=f.sim.repo.all('product'),a=ps.find(p=>p.name==='Kwikstage standard 3.0 m'),b=ps.find(p=>p.name==='Kwikstage ledger 2.4 m');
-  const {site}=f.cmd('gameSite',{name:'Kent St'});const s=f.snap();__gm.reset();__gm.shell(ctxOf(f,s));__gm.setMode('send',site.id);
+  f.cmd('gameAddStock',{lines:[{product:a.id,quantity:40}]});const {site}=f.cmd('gameSite',{name:'Kent St'});const s=f.snap();__gm.reset();__gm.shell(ctxOf(f,s));__gm.setMode('send',site.id);
   __gm.setItems(s.yards[0].id,[{id:'C1',name:'S-001',support:null,lines:[[a.id,40],[b.id,12]],busy:false}]);__gm.pick(a.id,40);
-  const acts=__gm.acts(s);assert.match(acts,/Also on those stillages/);assert.match(acts,/<b class="gm-n">12<\/b>/,'the ledgers riding along');assert.match(acts,/Fills a truck: a little/);assert.match(acts,/On the next free truck, today/);
+  const acts=__gm.acts(s);assert.match(acts,/Also on those stillages/);assert.match(acts,/<b class="gm-n">12<\/b>/,'the ledgers riding along');assert.match(acts,/Fits on one truck/);assert.ok(!/a little/.test(acts));assert.match(acts,/On the next free truck, today/);
   assert.match(__gm.amount(s),/1 stillage · all of it/);
 });
 
@@ -88,7 +88,7 @@ test('trucks in words, only while something is happening: loading, on the way, a
   const f=board(t);f.cmd('gameStart',{size:'S'});const s=f.snap(),truck=s.trucks[0];
   assert.equal(__gm.trips(s),'','nothing in the corner while every truck is parked');assert.equal(__gm.truckWords(s,truck).word,'Ready at the yard');
   const site={id:'S1',name:'George St',status:'ACTIVE'};const st={...s,sites:[site]};
-  assert.match(__gm.truckWords(st,{...truck,status:'IN_TRANSIT',destination:'S1',remainingMs:20000,loadedWeight:6250000}).word,/^On the way to George St · half full$/);
+  assert.match(__gm.truckWords(st,{...truck,status:'IN_TRANSIT',destination:'S1',remainingMs:20000,loadedWeight:6250000}).word,/^On the way to George St$/,'the stage line is clean: the fill bar says how full');
   assert.match(__gm.truckWords(st,{...truck,status:'IN_TRANSIT',destination:'S1',remainingMs:3000}).word,/arriving soon/);
   assert.match(__gm.truckWords({...st,tasks:[{to:truck.id}]},{...truck,destination:'S1'}).word,/^Loading for George St/);
   assert.equal(__gm.truckWords(st,{...truck,game:{problem:'No crane here.'}}).word,'Waiting: No crane here.');
@@ -125,14 +125,48 @@ test('no truck codes on the board: a truck is a Big truck or a Truck in its wind
   const {site}=f.cmd('gameSite',{name:'George St'});f.cmd('gameSend',{site:site.id,lines:[{product:std.id,quantity:40}]});
   let s=f.snap();for(let i=0;i<400&&!s.trucks.some(t=>t.status==='IN_TRANSIT');i++){f.tick(1);s=f.snap();}
   const truck=s.trucks.find(t=>t.status==='IN_TRANSIT');assert.ok(truck,'a truck is on the road');assert.match(truck.name,/^T-\d+/);
-  __gm.reset();__gm.shell(ctxOf(f,s));__gm.setTruck(truck.id);const head=__gm.head(s);assert.match(head,/Big truck · /);assert.ok(!head.includes(truck.name),'no code in the truck window');
+  __gm.reset();__gm.shell(ctxOf(f,s));__gm.setTruck(truck.id);const head=__gm.head(s);assert.match(head,/<p>Big truck<\/p>/);assert.ok(!head.includes(truck.name),'no code in the truck window');
   assert.ok(!__gm.trips(s).includes(truck.name),'no code on the trip card, not even in its tooltip');
   const card=cardHTML(s,std);assert.match(card,/On a big truck/);assert.ok(!card.includes(truck.name),'no code in the hover card');
   assert.match(cardTight(s,std),/Kwikstage standard 3\.0 m<\/b><span>\d+ in the yard<\/span>/,'the one-line card for a short strip of map on a phone');
   const world=readFileSync(new URL('../public/world.js',import.meta.url),'utf8'),ops=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8'),css=readFileSync(new URL('../public/game.css',import.meta.url),'utf8');
-  assert.ok(ops.includes('onPick:gmPick,glow:gmGlow(),plain:true'),'the board asks the map for plain words');assert.match(world,/who=plain\(\)\?truckWord\(t\):t\.name/,'the map names trucks by kind on the board');
+  assert.ok(ops.includes('onPick:gmPick,onCamera:gmCamera,inset:gmInset,glow:gmGlow(),plain:true'),'the board asks the map for plain words');assert.match(world,/who=plain\(\)\?truckWord\(t\):t\.name/,'the map names trucks by kind on the board');
   assert.match(css,/\.gm-board \.wm-truck\.parked:not\(\.followed\) \.wm-ttag\{display:none\}/,'parked trucks carry no tag on the board');
   // the board is view HOME, so its poll is the one that carries the map block (?world=, grouped with revisions)
   assert.ok(ops.includes("wmParam=()=>view==='HOME'&&typeof document!=='undefined'"),'the poll of the board asks for the map block');
   assert.ok(ops.includes("wm:()=>wmAttach({...wmCtx(),"),'the board draws with the Home map context (the last map block stands in until the next poll)');
+});
+
+test('Send with an empty yard says one thing (Add stock first) and opens no site naming box; the words for a load are plain',t=>{
+  const f=board(t);f.cmd('gameStart',{size:'S'});f.cmd('gameCatalogue');const s=f.snap();__gm.reset();__gm.shell(ctxOf(f,s));__gm.setMode('send');
+  const head=__gm.head(s),acts=__gm.acts(s),grid=__gm.grid(s);
+  assert.match(head,/Your yard is empty/);assert.ok(!head.includes('data-gm-newsite')&&!head.includes('No sites yet'),'no site chooser, no second instruction');
+  assert.match(acts,/data-gm-go="add"[^>]*>.*Add stock first/);assert.ok(!acts.includes('data-gm-do="send"'),'no Send button to press');
+  assert.match(grid,/Nothing in the yard to send yet\./);assert.ok(!/Tap <b>Add stock<\/b>/.test(grid),'the button says it, not the grid too');
+  const src=readFileSync(new URL('../public/game.js',import.meta.url),'utf8');assert.match(src,/if\(mode==='send'&&!site&&!sites\.length&&ops\(\)&&hasStock\(s,yardOf\(s\)\?\.id\)\)openWin/,'the naming box waits until there is something to send');
+  // the amount box snaps to what will really go (whole stillages): it is set from the pick, never left showing a typed number
+  assert.match(src,/if\(q\)G\.picks\.set\(p\.id,q\);else G\.picks\.delete\(p\.id\);t\.value=String\(q\);/);
+});
+
+test('Add stock with two scaffold systems: one system at a time (Quickstage first), a switch above the kinds, and no part the crew could not lift',t=>{
+  const f=board(t,{systems:['quickstage','at-pac']});f.cmd('gameStart',{size:'S'});f.cmd('gameCatalogue');const s=f.snap();__gm.reset();__gm.shell(ctxOf(f,s));__gm.setMode('add');
+  const list=__gm.gridItems(s);assert.ok(list.length>0);assert.ok(list.every(x=>x.p.system==='quickstage'),'Quickstage first');assert.ok(list.every(x=>x.p.unitWeight>0),'only parts with a weight');
+  const bar=__gm.sysbar(s);assert.match(bar,/data-gm-sys="quickstage"[^>]*aria-checked="true"/);assert.match(bar,/data-gm-sys="at-pac"/);assert.match(bar,/AT-PAC/);
+  __gm.state().sys='at-pac';const at=__gm.gridItems(s);assert.ok(at.length&&at.every(x=>x.p.system==='at-pac'),'AT-PAC on its own');
+  const weightless=s.products.filter(p=>p.system==='at-pac'&&!(p.unitWeight>0));if(weightless.length)assert.ok(!at.some(x=>weightless.includes(x.p)),'a part with no weight is not offered');
+  const one=board(t);one.cmd('gameStart',{size:'S'});one.cmd('gameCatalogue');const s1=one.snap();__gm.reset();__gm.shell(ctxOf(one,s1));__gm.setMode('add');assert.equal(__gm.sysbar(s1),'','one system: no switch');
+});
+
+test('a first-day tip is retired for good once its step is done: an empty yard later does not bring "Tap Add stock" back',t=>{
+  const f=board(t);f.cmd('gameStart',{size:'S'});fast(f);f.cmd('gameCatalogue');const std=f.sim.repo.all('product').find(p=>p.name==='Kwikstage standard 3.0 m');__gm.reset();__gm.shell(ctxOf(f,f.snap()));
+  assert.equal(__gm.hint(f.snap()).id,'add');f.cmd('gameAddStock',{lines:[{product:std.id,quantity:std.packQuantity||40}]});__gm.learn(f.snap());
+  const {site}=f.cmd('gameSite',{name:'George St'});f.cmd('gameSend',{site:site.id,lines:[{product:std.id,quantity:std.packQuantity||40}]});for(let i=0;i<400&&!f.snap().trucks.some(t=>t.status==='IN_TRANSIT');i++)f.tick(1);__gm.learn(f.snap());
+  const s=f.snap();assert.equal((s.stock?.[s.yards[0].id]?.pieces??0),0,'the yard is empty again');assert.notEqual(__gm.hint(s)?.id,'add','no "Tap Add stock" mid-delivery');
+  assert.ok(__gm.state().hintOff.has('add')&&__gm.state().hintOff.has('site'));
+});
+
+test('the Big trucks page never has the same SVG id twice: each truck deck suffixes its own patterns',async()=>{
+  const {deckSVG}=await import('../public/visual.js');const a=deckSVG({id:'t-1',name:'T-01',length:6000,width:2050,payload:12500000,height:3000},[],{}),b=deckSVG({id:'t-2',name:'T-02',length:6000,width:2050,payload:12500000,height:3000},[],{});
+  const ids=s=>[...s.matchAll(/\bid="([^"]+)"/g)].map(x=>x[1]);assert.equal(new Set([...ids(a),...ids(b)]).size,ids(a).length+ids(b).length,'no id twice');
+  for(const s of [a,b])for(const [,u] of s.matchAll(/url\(#([^)]+)\)/g))assert.ok(ids(s).includes(u),u+' points at its own pattern');
 });

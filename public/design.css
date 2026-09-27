@@ -868,6 +868,7 @@ body:has(.shape-savebar) #message:not(:empty){bottom:calc(var(--savebar-h,80px) 
 .page-trucks .trk-garage>.panel{margin:14px 0 0;padding:16px 18px;border-radius:13px;background:#fbfcf8;box-shadow:none}
 .page-trucks .trk-actions{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(250px,1fr);gap:12px;margin-top:14px;padding:12px;border-radius:15px;background:#eff3e8;border:1px solid #e1e7d9}
 .page-trucks .trk-actions.one{grid-template-columns:minmax(0,1fr)}
+.page-trucks .trk-auto{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}.page-trucks .trk-auto p{margin:0;flex:1 1 260px;font-size:14px;line-height:1.4}
 .page-trucks .trk-load{min-width:0}
 .page-trucks .trk-load .load-picker,.page-trucks .trk-dispatch{height:100%;margin:0;padding:14px 16px;border:1px solid #e1e7d9;border-radius:12px;background:#fff;box-shadow:0 1px 0 #e3e9da}
 .page-trucks .trk-load .load-picker h3,.page-trucks .trk-dispatch h3{margin:0 0 10px;font-size:14px;color:#1f3d2c}

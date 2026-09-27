@@ -17,7 +17,7 @@ test('a worker opens on the crew phone view, takes orders there and the link ope
   // The phone's own Back button returns to Workers; the card's Phone view button opens the crew page again.
   await page.getByRole('button',{name:`Open ${crew[0].name} on the crew phone view`}).click();
   await expect(page.getByRole('heading',{level:1,name:crew[0].name,exact:true})).toBeVisible({timeout:15000});
-  await page.goBack();await expect(page.getByRole('heading',{level:1,name:'Crew HQ',exact:true})).toBeVisible({timeout:15000});
+  await page.goBack();await expect(page.getByRole('heading',{level:1,name:'Workers',exact:true})).toBeVisible({timeout:15000});
   await page.getByRole('button',{name:`Phone view for ${crew[0].name}`}).click();
   await expect(page.getByRole('heading',{level:1,name:crew[0].name,exact:true})).toBeVisible({timeout:15000});
   await expect(page).toHaveURL(new RegExp('\\?view=CREW&worker='+crew[0].id+'$'));
@@ -34,5 +34,5 @@ test('a worker opens on the crew phone view, takes orders there and the link ope
   // Next worker, then the link opens the first worker again after a reload.
   await page.getByRole('button',{name:`Next worker: ${crew[1].name}`}).click();await expect(page.getByRole('heading',{level:1,name:crew[1].name,exact:true})).toBeVisible();
   await page.goto('/?view=CREW&worker='+crew[0].id);await expect(page.getByRole('heading',{level:1,name:crew[0].name,exact:true})).toBeVisible({timeout:45000});
-  await office(page,'Workers').click();await expect(page.getByRole('heading',{level:1,name:'Crew HQ',exact:true})).toBeVisible();await expect(page).toHaveURL(/\/$/);
+  await office(page,'Workers').click();await expect(page.getByRole('heading',{level:1,name:'Workers',exact:true})).toBeVisible();await expect(page).toHaveURL(/\/$/);
 });
