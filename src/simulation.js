@@ -23,9 +23,11 @@ import { installWorld,WORLD_OPS } from './domain/world.js';
 import { hireMethods } from './domain/hire.js';
 import { collectionMethods } from './domain/collections.js';
 import { brandMethods } from './domain/brand.js';
+import { installGame,GAME_OPS } from './domain/game.js';
 import { crewMethods } from './domain/crew.js';
 const operational=['rotate','loadTruck','workerSkills','createJob','assignJob','nextJob','takeOffJob','cancelJob','jobsMode','siteDetails','fixtures','commitLayout','cancelLayout','siteBoundary','retire','scrapContainer','quickAdjust','allocateLoadList','workerCommand','parking','yard','container','containerSettings','product','override','seed','importCatalogue','site','archive','truck','resources','queue','allocate','cancel','retry','dispatch','unload','condition','pause','count','observe','cancelCount','bookTruck','loadCollection'];
 operational.push(...WORLD_OPS);// Home world map: moving a site on the map (src/domain/world.js)
+operational.push(...GAME_OPS);// the game board's one-tap commands (src/domain/game.js)
 export class Simulation {
   constructor(db,user){this.db=db;this.user=user;this.auth=new Service(db);this.repo=new Repository(db,user.company_id);}
   assertSite(id){if(this.auth.permissions(this.user).includes('operations.manage'))return;const object=this.repo.get(id);let site=object;if(object.kind==='container')site=this.repo.get(object.location);if(object.kind==='truck')site=this.repo.get(object.at);requireRule(site.kind==='site'&&site.supervisor===this.user.id,'You can only access your assigned sites.');}
@@ -91,6 +93,7 @@ export class Simulation {
 }
 Object.assign(Simulation.prototype,catalogueMethods,inventoryMethods,logisticsMethods,movementMethods,workerMethods,forkliftMethods,materialsMethods,fleetMethods,layoutMethods,jobMethods,turningMethods,scheduleMethods,alertMethods,reportsMethods,hireMethods,collectionMethods,brandMethods,crewMethods);
 installWorld(Simulation.prototype);// Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
+installGame(Simulation.prototype);// the game board: one-tap commands, the truck autopilot after every tick, result.game
 function csv(rows){return rows.map(row=>row.map(value=>'"'+String(value??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(',')).join('\r\n');}
 
 // Everything a tick moves besides yard jobs (movement.js tick: advanceWorkers, advanceForklifts, trucks, tasks). With none of it those phases are

@@ -307,6 +307,8 @@ export function wmAttach(ctx){if(typeof document==='undefined')return;const host
   if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>{if(!W?.stage?.isConnected)return;const r=W.view.getBoundingClientRect(),dy=r.top<8?r.top-8:r.bottom>innerHeight-8?Math.min(r.top-8,r.bottom-innerHeight+8):0;if(dy)scrollBy(0,dy);W.anchor=null;});}W.yardWork=yardWork;
  if(live.yard!==built.yard){const g=W.placeG.get(l.places.find(p=>p.kind==='yard')?.id);if(g){const old=workerPos(g);setSVG(g,live.yard);glide(g,old);}built.yard=live.yard;W.U=live.U??W.U??30;}
  for(const p of l.places)if(p.kind==='site')syncSite(p,live.sites.get(p.id));
+ // the game board (public/game.js) lights up the site it is sending to or bringing back from (ctx.glow)
+ for(const [id,g] of W.placeG)g.classList.toggle('wm-glow',!!ctx.glow&&id===ctx.glow);
  if(ctx.state!==stateSeen){stateSeen=ctx.state;syncTrips(l,ctx);}tick();
  syncBar();syncTags(l,ctx);renderStrip(ctx);if(cardFor)renderCard();applyCam();if(W.picsDirty)lodSoon();else pumpPics();kick();holdSoon();measure('wm-attach',t0);}
 // Scroll anchoring for the map: after a render or patch, if the page was not scrolled since the last one and the map moved on screen (content above
@@ -584,8 +586,8 @@ function bindStage(){const svg=W.view,pts=new Map(),onMap=e=>!!e.target?.closest
   if(g.kind==='site'&&g.moved){clearGhost();const p=built.layout.byId.get(g.id);if(g.lot&&(g.lot.c!==p.col||g.lot.r!==p.row))placeSite(g.id,g.lot.c,g.lot.r);}};
  svg.addEventListener('pointerup',end,{capture:true});svg.addEventListener('pointercancel',end,{capture:true});
  svg.addEventListener('click',e=>{if(!onMap(e))return;if(W.suppress&&performance.now()-W.suppress<300){e.stopPropagation();e.preventDefault();return;}if(e.target.closest('[data-select],[data-worker],[data-forklift]'))return;if(ctxNow?.workerMoveMode||ctxNow?.layoutDraft)return;
-  const t=e.target.closest('[data-wm-truck]');if(t){e.stopPropagation();openCard('truck',t.dataset.wmTruck);return;}const s=e.target.closest('[data-wm-site]');if(s){e.stopPropagation();openCard('site',s.dataset.wmSite);}},{capture:true});
- svg.addEventListener('keydown',e=>{if(!onMap(e)||(e.key!=='Enter'&&e.key!==' '))return;const t=e.target.closest?.('[data-wm-truck]'),s=e.target.closest?.('[data-wm-site]');if(t){e.preventDefault();openCard('truck',t.dataset.wmTruck);}else if(s&&!e.target.closest('[data-select]')){e.preventDefault();openCard('site',s.dataset.wmSite);}});
+  const t=e.target.closest('[data-wm-truck]');if(t){e.stopPropagation();if(!ctxNow?.onPick?.('truck',t.dataset.wmTruck))openCard('truck',t.dataset.wmTruck);return;}const s=e.target.closest('[data-wm-site]');if(s){e.stopPropagation();if(!ctxNow?.onPick?.('site',s.dataset.wmSite))openCard('site',s.dataset.wmSite);}},{capture:true});
+ svg.addEventListener('keydown',e=>{if(!onMap(e)||(e.key!=='Enter'&&e.key!==' '))return;const t=e.target.closest?.('[data-wm-truck]'),s=e.target.closest?.('[data-wm-site]');if(t){e.preventDefault();if(!ctxNow?.onPick?.('truck',t.dataset.wmTruck))openCard('truck',t.dataset.wmTruck);}else if(s&&!e.target.closest('[data-select]')){e.preventDefault();if(!ctxNow?.onPick?.('site',s.dataset.wmSite))openCard('site',s.dataset.wmSite);}});
  W.stage.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||!W.stage.contains(b)||b.closest('svg'))return;const k=b.dataset.wm;
   if(k==='watch'){followId=null;mode='director';holdUntil=0;camGoal=null;syncBar();saveCam();kick();}
   else if(k==='close')closeCard();
@@ -616,6 +618,15 @@ function frame(t){raf=0;if(!W||!W.stage.isConnected||document.hidden||W.onScreen
 // director's shot), without touching the map itself.
 function tick(now=performance.now()){if(!W)return;W.tickT=now;let driving=false;for(const tr of trips.values())if(tr.driving&&tr.truck){tr.at=poseNow(tr,now);if(!tr.paused&&(tr.u??0)<1)driving=true;}drawMiniDots();tickStrip();tickCard();syncWatch();
  if(driving&&mode!=='free'&&!raf)kick();const want=driving||!!cardFor;if(want&&!W.ticker)W.ticker=setInterval(()=>{if(!W?.stage?.isConnected||document.hidden){clearInterval(W.ticker);W.ticker=null;return;}tick();},200);else if(!want&&W.ticker){clearInterval(W.ticker);W.ticker=null;}}
+// The game board (public/game.js) points the camera: at a site ('site', id), riding along with a truck ('truck', id), everything ('fit') or back to
+// the director ('director'). Its own clicks on the map arrive through ctx.onPick (return true to keep the map's own card closed).
+export function wmFocus(kind,id){if(!W||!cam||!built.layout)return;if(cardFor)closeCard();
+ if(kind==='site'){const p=built.layout.byId.get(id);if(!p)return;userCam();animateTo(boxCam(siteBox(p)));}
+ else if(kind==='truck'){if(!trips.has(id)&&!(ctxNow?.state?.trucks??[]).some(t=>t.id===id))return;if(mode!=='follow')W.prevMode=mode;followId=id;mode='follow';camGoal=null;holdUntil=0;kick();tick();}
+ else if(kind==='fit'){followId=null;lastUser=performance.now();camGoal=null;mode='fit';animateTo(boxCam(fitBox()));}
+ else if(kind==='director'){followId=null;mode='director';camGoal=null;holdUntil=0;kick();}
+ syncBar();saveCam();}
+export const wmFollowing=()=>followId;
 // operations.js applyView on Home: the world camera, not the yard view; a selected yard stillage off screen brings the camera to the yard.
 export function wmApplyView(selectedId){if(!W||!W.stage.isConnected)return false;if(selectedId){const el=W.svg.querySelector('[data-select="'+CSS.escape(selectedId)+'"]');const yp=built.layout?.places.find(p=>p.kind==='yard');if(el&&yp){const r=el.getBoundingClientRect(),v=W.view.getBoundingClientRect();if(r.right<v.left||r.left>v.right||r.bottom<v.top||r.top>v.bottom){userCam();fitNow({x0:yp.ext.x0-2000,y0:yp.ext.y0-2000,x1:yp.ext.x1+2000,y1:yp.ext.y1+2000,tall:4000});}}}applyCam();return true;}
 export function wmStop(){if(raf&&typeof cancelAnimationFrame==='function')cancelAnimationFrame(raf);raf=0;}

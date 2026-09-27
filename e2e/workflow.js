@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 // Shared between Playwright test runner and Codex Browser's supported Playwright surface.
-// Pages are reached through the sidebar (Home, Overview, Workers, Equipment, Truck 12.5 tonne, Truck 2 tonne, Stock, Materials list, Client sites, Yard (layout plan), Account).
+// The main screen is the game board; every other page (Today, Overview, Workers, Equipment, Truck 12.5 tonne, Truck 2 tonne, Stock, Materials list,
+// Client sites, Hire, Reports, Yard (layout plan), Control room, Account) is a tile in the Office drawer, opened with the Office button.
 const button=(p,name)=>p.getByRole('button',{name,exact:true});
 const fill=(p,name,value)=>p.getByRole('textbox',{name,exact:true}).fill(value);
-const nav=(p,label)=>p.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:label,exact:true});
+const tile=(p,label)=>p.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:label,exact:true});
+// Opens the Office drawer when it is closed, then taps the page's tile.
+export const office=(p,label)=>({click:async()=>{if(!await tile(p,label).isVisible())await p.getByRole('button',{name:'Office',exact:true}).first().click();await tile(p,label).click();}});
+const nav=office;
+// First run: the yard-size tiles, or 'Draw my own shape instead' for the shape editor with its 20 x 16 m rectangle; either lands on the game board.
+export async function firstYard(p){await p.getByRole('button',{name:'Draw my own shape instead',exact:true}).click();await visible(p,button(p,'Create yard'));assert.equal(await p.getByRole('spinbutton',{name:'Width (m)',exact:true}).inputValue(),'20');assert.equal(await p.getByRole('spinbutton',{name:'Depth (m)',exact:true}).inputValue(),'16');await button(p,'Create yard').click();await visible(p,p.getByRole('navigation',{name:'What do you want to do?'}));}
 // Fold-out forms: the summary carries a title and a small subtitle, so match on the title.
 const fold=(p,title)=>p.locator('summary').filter({hasText:title}).first();
 async function visible(p,locator,timeout=45000){
@@ -34,11 +40,10 @@ export async function setupDemo(p,email){
   await setupYard(p);
 }
 export async function setupYard(p){
-  // First run: the shape editor opens on its own with a 20 × 16 m rectangle already filled in. Creating the yard lands an operations user on Home, with the set-up guide.
-  await visible(p,button(p,'Create yard'));assert.equal(await p.getByRole('spinbutton',{name:'Width (m)',exact:true}).inputValue(),'20');assert.equal(await p.getByRole('spinbutton',{name:'Depth (m)',exact:true}).inputValue(),'16');await button(p,'Create yard').click();
-  await visible(p,p.getByRole('heading',{level:2,name:'Set up your real yard',exact:true}));
+  // First run: the yard-size tiles; 'Draw my own shape instead' opens the shape editor with a 20 × 16 m rectangle already filled in. Creating the yard lands an operations user on the game board.
+  await firstYard(p);
   await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Configure workers & equipment · DEMO ONLY').click();await sent(p,'resources',()=>button(p,'Save resources').click(),p.getByRole('status').filter({hasText:'Saved.'}));
-  await nav(p,'Account').click();await sent(p,'seed',()=>button(p,'Add synthetic demo catalogue').click(),p.getByRole('status').filter({hasText:'Synthetic catalogue added.'}));await button(p,'← Open yard').click();await visible(p,nav(p,'Stock'));
+  await nav(p,'Account').click();await sent(p,'seed',()=>button(p,'Add synthetic demo catalogue').click(),p.getByRole('status').filter({hasText:'Synthetic catalogue added.'}));await button(p,'← Back to the yard').click();await visible(p,button(p,'Office'));
   await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Add a stillage or small-parts cage').click();await button(p,'Register stillage / cage').click();await visible(p,p.getByRole('button',{name:/^S-001/}));
   await open(p,'Stock','Stock ledger');await fold(p,'Record original stock (opening balance)').click();await sent(p,'opening',()=>button(p,'Record original stock').click(),p.getByRole('status').filter({hasText:'Saved.'}));await stockIs(p,'DEMO ledger — 2 m',{'In yard':'100','At sites':'0',Total:'100'});
   await setupLogistics(p);

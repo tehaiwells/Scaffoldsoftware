@@ -45,4 +45,7 @@ test('the A4 hire statement: HIRE STATEMENT, lines, GST, total, and a DEMO water
 test('Hire is owner only: nav entry filtered by finance.view, next to Client sites',async t=>{const f=setup(t),{T,H}=await load();
  T.setState(f.sim.snapshot(),acct(f,['operations.manage','requests.create','stock.adjust']));assert.equal(H.ok(),false);assert.ok(H.view().includes('Hire is for the owner'));
  T.setState(f.sim.snapshot(),acct(f));assert.equal(H.ok(),true);
- const src=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(src.includes("['SITES','Client sites'],['HIRE','Hire'],['YARD'"));assert.ok(src.includes("NAV.filter(([v])=>v!=='HIRE'||hrOK())"));});
+ const src=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(src.includes("['SITES','Client sites'],['HIRE','Hire'],['YARD'"));// the pages now live behind the Office door (game.js): the drawer is told whether this person sees Hire, and leaves the tile out otherwise
+ assert.ok(src.includes("officeHTML({state,account,hire:hrOK(),view})"));assert.ok(src.includes("hire:hrOK(),refresh"),'the game board passes it too');
+ const {officeHTML}=await import('../public/game.js'),s=f.sim.snapshot();assert.ok(officeHTML({state:s,account:acct(f),hire:true}).includes('data-view="HIRE"'));assert.ok(!officeHTML({state:s,account:acct(f),hire:false}).includes('data-view="HIRE"'));
+ const o=officeHTML({state:s,account:acct(f),hire:true});assert.ok(o.indexOf('data-view="SITES"')<o.indexOf('data-view="HIRE"'),'next to Client sites');});

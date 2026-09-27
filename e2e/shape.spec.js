@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {office} from './workflow.js';
 // The yard shape editor and the one-click stillage turn, end to end. Each test starts a fresh company, so it opens on the first-run editor.
 const button=(p,name)=>p.getByRole('button',{name,exact:true});
 const width=p=>p.getByRole('spinbutton',{name:'Width (m)',exact:true});
@@ -7,16 +8,17 @@ async function cmd(p,name,data){const res=await p.request.post('/api/commands/'+
 const snapshot=async p=>(await p.request.get('/api/state')).json();
 async function register(p){
   await p.goto('/');await p.getByLabel('Company name').fill('Shape editor DEMO');await p.getByLabel('Your name').fill('Test Owner');await p.getByLabel('Email').fill(`shape-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await p.getByLabel('Password').fill('Local-demo-test-2026!');await p.getByRole('checkbox',{name:'Quickstage',exact:true}).check();await button(p,'Create company').click();
-  await expect(p.locator('#shape-editor')).toBeVisible();
+  // the first run offers yard sizes; drawing your own shape opens the editor
+  await button(p,'Draw my own shape instead').click();await expect(p.locator('#shape-editor')).toBeVisible();
 }
 // A 20 × 16 m yard with two workers, a forklift and one empty stillage S-001 at 4, 4 m, shown on the Yard (layout plan) page.
-// Creating the yard lands an operations user on Home with the set-up guide, so the test opens the Yard page itself.
+// Creating the yard lands an operations user on the game board, so the test opens the Yard page itself (through the Office).
 async function yardWithStock(p){
   await register(p);await expect(width(p)).toHaveValue('20');await expect(p.getByRole('spinbutton',{name:'Depth (m)',exact:true})).toHaveValue('16');await button(p,'Create yard').click();
-  await expect(p.getByRole('heading',{level:2,name:'Set up your real yard',exact:true})).toBeVisible();
+  await expect(p.getByRole('navigation',{name:'What do you want to do?'})).toBeVisible();
   const yard=(await snapshot(p)).yards[0];await cmd(p,'resources',{location:yard.id,workers:2,machines:1,capacity:1500000,stepMs:100,speed:20000,craneWorkers:1});
   const stillage=await cmd(p,'container',{name:'S-001',location:yard.id,type:'STILLAGE',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000,x:4000,y:4000});
-  await p.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Yard (layout plan)',exact:true}).click();await expect(p.getByRole('heading',{level:1,name:'Yard layout',exact:true})).toBeVisible();
+  await office(p,'Yard (layout plan)').click();await expect(p.getByRole('heading',{level:1,name:'Yard layout',exact:true})).toBeVisible();
   await expect(p.locator('.scene [data-select="'+stillage.id+'"]')).toBeVisible();return {yard,stillage};
 }
 async function openEditor(p){await button(p,'Change yard shape & size').click();await expect(p.locator('#shape-editor')).toBeVisible();}
