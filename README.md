@@ -86,6 +86,8 @@ The server prints one line either way ("Database moved to …" or "Database NOT 
 - If the new place holds an empty database (for example one an old test run created) while data/scaffold.sqlite still has your companies, the empty one is set aside as scaffold.sqlite.empty-<date and time> and your real database is moved in.
 - If the database is missing from the new place (or is there but empty) while a scaffold.sqlite.moved-… file with your data shows it was moved before, the server refuses to start ("Scaffold Yard did NOT start: … EMPTY database …") instead of quietly starting with an empty database. Put the file back (see Restoring a backup) and start again.
 
+**Start the server from the desktop launcher or a normal terminal, not from a terminal inside a Store-installed (MSIX) app.** Windows gives such apps (for example the terminal inside the Claude desktop app) a private copy of AppData: a database the server creates or moves there lands in `%LOCALAPPDATA%\Packages\<that app>\LocalCache\Local\ScaffoldYard\` instead, where the desktop launcher cannot see it. The launcher then stops with the "did NOT start" message above. If that happens, look in those Packages folders for `ScaffoldYard\scaffold.sqlite`, stop every Scaffold Yard server, make a consistent copy of it (for example `node scripts/backup.js <copy>` pointed at it with DATABASE_PATH) and copy that file to `%LOCALAPPDATA%\ScaffoldYard\scaffold.sqlite` from a normal File Explorer or terminal window.
+
 Scripts that write (seed:demo, import-catalogue) take the same lock and keep using the old file until the server has moved it; npm run backup only reads.
 
 ### Automatic backups
