@@ -15,7 +15,6 @@ function world(t,{site=true}={}){
   const sim=new Simulation(db,user),cmd=(action,input={})=>sim.execute(action,input,randomUUID());
   const yard=cmd('yard',{name:'Yard',segments:[{direction:'RIGHT',length:20000},{direction:'DOWN',length:16000},{direction:'LEFT',length:20000}],closed:true});
   const products=cmd('seed');cmd('resources',{location:yard.id,workers:3,machines:1,stepMs:100,speed:100000,jobs:false});
-  {const c=sim.repo.all('config')[0];c.truckTripMs=3000;sim.repo.save(c);}// quick trips (a real trip takes its road length)
   const truck=cmd('truck',{name:'T01',yard:yard.id});
   const container=(name,x,y,extra={})=>cmd('container',{name,location:yard.id,type:'STILLAGE',length:2000,width:1000,height:1000,tare:50000,x,y,...extra});
   const tick=(n=1,ms=1000)=>{for(let i=0;i<n;i++)atomic(db,()=>sim.tick(ms));};
