@@ -6,7 +6,7 @@ test('a worker opens on the crew phone view, takes orders there and the link ope
   await page.goto('/');
   await page.getByRole('textbox',{name:'Company name',exact:true}).fill('Crew DEMO');await page.getByRole('textbox',{name:'Your name',exact:true}).fill('Test Owner');
   await page.getByRole('textbox',{name:'Email',exact:true}).fill(`crew-${Date.now()}@example.test`);await page.getByRole('textbox',{name:'Password',exact:true}).fill('Local-demo-test-2026!');
-  await page.getByRole('checkbox',{name:'Quickstage',exact:true}).check();await page.getByRole('button',{name:'Create company',exact:true}).click();
+  await page.getByRole('button',{name:'Create company',exact:true}).click();
   await firstYard(page);
   const yard=(await api(page,'state')).yards[0];
   await api(page,'commands/resources',{location:yard.id,workers:3,machines:1,capacity:1500000,stepMs:300,speed:3000,jobs:false});

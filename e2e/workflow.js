@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 // Shared between Playwright test runner and Codex Browser's supported Playwright surface.
-// The main screen is the game board; every other page (Today, Overview, Workers, Equipment, Truck 12.5 tonne, Truck 2 tonne, Stock, Materials list,
-// Client sites, Hire, Reports, Yard (layout plan), Control room, Account) is a tile in the Office drawer, opened with the Office button.
+// The main screen is the game board; every other page (Today, Overview, Workers, Equipment, Big trucks, Small trucks, Stock ledger, Materials
+// catalogue, Client sites, Hire, Reports, Yard layout, Control room, Account) is a tile in the Office drawer, opened with the Office button. The
+// specs still name the pages by their old sidebar names; OFFICE_NAME maps them to the tiles.
 const button=(p,name)=>p.getByRole('button',{name,exact:true});
 const fill=(p,name,value)=>p.getByRole('textbox',{name,exact:true}).fill(value);
-const tile=(p,label)=>p.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:label,exact:true});
+const OFFICE_NAME={'Truck 12.5 tonne':'Big trucks','Truck 2 tonne':'Small trucks','Stock':'Stock ledger','Materials list':'Materials catalogue','Yard (layout plan)':'Yard layout','Home':'Control room'};
+const tile=(p,label)=>p.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:OFFICE_NAME[label]??label,exact:true});
 // Opens the Office drawer when it is closed, then taps the page's tile.
 export const office=(p,label)=>({click:async()=>{if(!await tile(p,label).isVisible())await p.getByRole('button',{name:'Office',exact:true}).first().click();await tile(p,label).click();}});
 const nav=office;
@@ -36,7 +38,7 @@ async function sent(p,name,click,sign){
   assert.ok(res.ok(),`${name} was refused: ${await res.text()}`);await visible(p,sign);
 }
 export async function setupDemo(p,email){
-  await fill(p,'Company name','Automated browser DEMO');await fill(p,'Your name','Test Owner');await fill(p,'Email',email);await fill(p,'Password','Local-demo-test-2026!');await p.getByRole('checkbox',{name:'Quickstage',exact:true}).check();await button(p,'Create company').click();
+  await fill(p,'Company name','Automated browser DEMO');await fill(p,'Your name','Test Owner');await fill(p,'Email',email);await fill(p,'Password','Local-demo-test-2026!');await button(p,'Create company').click();
   await setupYard(p);
 }
 export async function setupYard(p){

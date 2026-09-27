@@ -45,8 +45,21 @@ test('choosing a yard size makes the yard with a starter kit; a second start is 
 test('a new site comes with a crane and crew; the supplier lists load once for the systems in use',t=>{
   const f=game(t);const {site}=f.cmd('gameSite',{name:'George Street'});const crew=f.sim.repo.all('resource').filter(r=>r.location===site.id);
   assert.equal(crew.filter(r=>r.type==='CRANE').length,1);assert.equal(crew.filter(r=>r.type==='WORKER').length,2);
-  const r=f.cmd('gameCatalogue');assert.ok(r.added>=40,'the Quickstage list');const products=f.sim.repo.all('product');assert.ok(products.every(p=>p.system==='quickstage'&&p.verification==='SOURCE VERIFIED'),'only the systems in use, only reviewed figures');
+  const r=f.cmd('gameCatalogue');assert.ok(!/\d/.test(r.message),'no counts in the pop');assert.ok(r.added>=40,'the Quickstage list');const products=f.sim.repo.all('product');assert.ok(products.every(p=>p.system==='quickstage'&&p.verification==='SOURCE VERIFIED'),'only the systems in use, only reviewed figures');
   assert.throws(()=>f.cmd('gameCatalogue'),/already loaded/);
+});
+
+test('which scaffold is asked on the board: the systems picked become the company\'s, and only their reviewed lists load',t=>{
+  const f=game(t,{systems:['quickstage','at-pac','tube-clip']});const r=f.cmd('gameCatalogue',{systems:['tube-clip']});assert.ok(r.added>=100);
+  assert.ok(f.sim.repo.all('product').every(p=>p.system==='tube-clip'));assert.deepEqual(f.db.prepare('SELECT system_id FROM company_systems WHERE company_id=? AND enabled=1').all(f.user.company_id).map(x=>x.system_id),['tube-clip']);
+  assert.throws(()=>f.cmd('gameCatalogue',{systems:['no-such-system']}),/valid scaffold system/);
+});
+
+test('a site can be opened on the empty block that was tapped on the map',t=>{
+  const f=game(t);const first=f.cmd('gameSite',{name:'First'}).site;const l=f.sim.worldLayoutNow(),p=l.byId.get(first.id),yard=l.places.find(x=>x.kind==='yard');
+  // a free block next to the first site
+  const taken=new Set(l.places.map(x=>x.col+','+x.row));const spot=[[1,0],[-1,0],[0,1],[0,-1]].map(([dc,dr])=>({col:p.col+dc,row:p.row+dr})).find(x=>!taken.has(x.col+','+x.row));
+  const {site}=f.cmd('gameSite',{name:'Second',...spot});const q=f.sim.worldLayoutNow().byId.get(site.id);assert.deepEqual([q.col,q.row],[spot.col,spot.row]);assert.ok(yard);
 });
 
 test('added stock goes in by the pack, or in stillages a forklift can lift when there is no pack size',t=>{
@@ -74,19 +87,33 @@ test('Send: the next free truck is loaded with whole stillages, drives, is unloa
   const d=f.sim.repo.all('delivery').find(x=>x.to===site.id);assert.equal(d.status,'DELIVERED');
 });
 
-test('Send spreads a big order over free trucks and refuses when nothing is free',t=>{
+test('Send spreads a big order over free trucks; when every truck is out it waits and goes on the next truck back',t=>{
   const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:1500}]});
-  const {site}=f.cmd('gameSite',{name:'Tower'});const r=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:1500}]});
-  const n=r.trucks.reduce((s,t)=>s+t.stillages,0)+r.left.length;assert.equal(n,15);assert.ok(r.trucks.length>=1);
-  if(r.trucks.length<2)assert.ok(r.left.length>0);
-  assert.throws(()=>f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]}),/busy|free/);
+  const {site}=f.cmd('gameSite',{name:'Tower'});const r=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:1000}]});
+  const n=r.trucks.reduce((s,t)=>s+t.stillages,0)+r.left.length;assert.equal(n,10);assert.ok(r.trucks.length>=1);
+  // every truck out: the next Send waits (even while the stillages it wants are still busy) and goes on the first truck back
+  for(const t of f.sim.repo.all('truck').filter(t=>!t.game))f.cmd('quickAdjust',{kind:'TRUCK',delta:-1,location:f.yard.id});assert.ok(f.sim.repo.all('truck').filter(t=>!t.retired).every(t=>t.game));
+  const w=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.ok(w.queued,'waits instead of refusing');assert.match(w.message,/next truck back/);
+  const orders=f.sim.snapshot().gameOrders;assert.equal(orders.length,1);assert.equal(orders[0].type,'SEND');assert.equal(orders[0].site,site.id);
+  // a second one waits too, and can be taken off the list
+  const w2=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.ok(w2.queued);assert.match(f.cmd('gameCancel',{id:w2.queued}).message,/waiting list/);assert.equal(f.sim.snapshot().gameOrders.length,1);
+  // the first truck home takes the waiting Send by itself
+  assert.ok(f.until(()=>!f.sim.repo.all('gameOrder').length,1200),'the order went');assert.ok(f.sim.repo.all('truck').some(t=>t.game?.kind==='SEND'&&t.game.site===site.id),'on its way');
+});
+
+test('a waiting order that can no longer go is dropped with a note, not left forever',t=>{
+  const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:200}]});
+  const {site}=f.cmd('gameSite',{name:'Short job'});for(const t of f.sim.repo.all('truck')){t.game={kind:'SEND',site:site.id,stage:'RETURNING'};t.status='IN_TRANSIT';f.sim.repo.save(t);}
+  const w=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:100}]});assert.ok(w.queued);
+  f.cmd('archive',{id:site.id});for(const t of f.sim.repo.all('truck')){t.game=null;t.status='AT_YARD';f.sim.repo.save(t);}f.tick(2);
+  assert.equal(f.sim.repo.all('gameOrder').length,0);assert.ok(f.sim.repo.all('notification').some(n=>n.title==='Not sent'&&/Short job/.test(n.body)));
 });
 
 test('Bring back: a free truck drives out empty, the site crane loads the collection, it comes home and the yard unloads it',t=>{
   const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:200}]});
   const {site}=f.cmd('gameSite',{name:'Kent St'});const s=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:200}]});const first=s.trucks[0].id;
   assert.ok(f.until(()=>f.truck(first).status==='AT_YARD'&&!f.truck(first).game));assert.equal(f.at(site.id,ledger.id),200);
-  const snap=f.sim.snapshot();assert.equal(snap.game.items[site.id].length,2,'the board sees the stillages on site');
+  assert.equal(f.sim.gameItemsFor(site.id).items.length,2,'the board sees the stillages on site');assert.equal(f.sim.snapshot().game,undefined,'the 1 s poll does not carry them');
   const r=f.cmd('gameCollect',{site:site.id,lines:[{product:ledger.id,quantity:100}]});const id=r.truck.id;assert.equal(f.truck(id).status,'IN_TRANSIT');assert.equal(f.truck(id).game.stage,'OUTBOUND');
   const o=f.sim.repo.get(r.collection,'collection');assert.equal(o.scope,'SELECTED');assert.equal(o.containers.length,1);assert.equal(o.neededOn,f.sim.calendar().today);
   assert.ok(f.until(()=>f.truck(id).game?.stage==='RETURNING'),'loaded at the site');
@@ -110,7 +137,7 @@ test('a failed step waits with its reason and is tried again; Stop hands the tru
   f.tick(40);assert.equal(f.truck(id2).status,'AT_YARD','no longer dispatched by itself');assert.throws(()=>f.cmd('gameStop',{id:id2}),/not on an automatic trip/);
   f.auth.addUser(f.user,{name:'Sup',email:'sup-game@example.com',password:'demonstration-password',roles:['SUPERVISOR']});
   const sup=new Simulation(f.db,f.auth.authenticate(f.auth.login({email:'sup-game@example.com',password:'demonstration-password'})));
-  assert.equal(sup.snapshot().game,undefined);assert.throws(()=>sup.execute('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:1}]},randomUUID()),/does not allow/);
+  assert.equal(sup.snapshot().gameOrders,undefined);assert.throws(()=>sup.execute('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:1}]},randomUUID()),/does not allow/);assert.throws(()=>sup.gameItemsFor(site.id),/permission|allow/i);
 });
 
 test('a buried stillage can still go: what is stacked on it rides along',()=>{
@@ -127,9 +154,9 @@ test('added stock stands in tidy rows with aisles, three high at most, and every
   assert.ok(Math.max(...all.map(lvl))<=3,'piles at most three high');for(const c of all.filter(c=>c.support))assert.equal(f.sim.repo.lines(c.id)[0].product_id,f.sim.repo.lines(c.support)[0].product_id,'a pile holds one product');
   const ground=all.filter(c=>!c.support);for(const a of ground)for(const b of ground){if(a===b)continue;const gx=Math.max(b.x-(a.x+2000),a.x-(b.x+2000)),gy=Math.max(b.y-(a.y+1000),a.y-(b.y+1000));assert.ok(gx>=1200||gy>=1200,'an aisle between '+a.name+' and '+b.name);}
   const {site}=f.cmd('gameSite',{name:'Big job'});let sent=0;
-  for(let round=0;round<12;round++){const free=f.sim.snapshot().game.items[f.yard.id].filter(c=>!c.busy);if(!free.length)break;
+  for(let round=0;round<12;round++){const free=f.sim.gameItemsFor(f.yard.id).items.filter(c=>!c.busy);if(!free.length)break;
     const lines=[...new Set(free.map(c=>c.lines[0][0]))].slice(0,2).map(product=>({product,quantity:1}));
-    let r;try{r=f.cmd('gameSend',{site:site.id,lines});}catch(e){if(/busy/.test(e.message)){f.until(()=>f.sim.repo.all('truck').some(x=>!x.game),400);continue;}throw e;}sent+=r.trucks.reduce((n,x)=>n+x.stillages,0);
+    const r=f.cmd('gameSend',{site:site.id,lines});if(r.queued){f.cmd('gameCancel',{id:r.queued});f.until(()=>f.sim.repo.all('truck').some(x=>!x.game),400);continue;}sent+=r.trucks.reduce((n,x)=>n+x.stillages,0);
     f.until(()=>f.sim.tasks().some(x=>x.state==='BLOCKED')||!f.sim.repo.all('truck').some(x=>x.game?.stage==='LOADING'),600);
     assert.deepEqual(f.sim.tasks().filter(x=>x.state==='BLOCKED').map(x=>x.reason),[],'nothing gets stuck');}
   assert.ok(sent>=6,'sent '+sent);

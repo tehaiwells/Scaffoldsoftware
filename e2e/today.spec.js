@@ -5,7 +5,7 @@ test('the installed app opens on Today, which fits a phone',async({page})=>{
   await page.goto('/');
   await page.getByRole('textbox',{name:'Company name',exact:true}).fill('Today DEMO');await page.getByRole('textbox',{name:'Your name',exact:true}).fill('Test Owner');
   await page.getByRole('textbox',{name:'Email',exact:true}).fill(`today-${Date.now()}@example.test`);await page.getByRole('textbox',{name:'Password',exact:true}).fill('Local-demo-test-2026!');
-  await page.getByRole('checkbox',{name:'Quickstage',exact:true}).check();await page.getByRole('button',{name:'Create company',exact:true}).click();
+  await page.getByRole('button',{name:'Create company',exact:true}).click();
   await firstYard(page);
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href','/manifest.webmanifest');
   await page.goto('/?view=TODAY');await expect(page.getByRole('heading',{level:1,name:'Today',exact:true})).toBeVisible({timeout:45000});

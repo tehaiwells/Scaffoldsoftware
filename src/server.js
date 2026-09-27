@@ -14,9 +14,9 @@ export function createApp(db,{backups=null}={}) {
   const service=new Service(db), attempts=new Map();
   const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/shape.js':['shape.js','text/javascript'],'/shape-editor.js':['shape-editor.js','text/javascript'],'/style.css':['style.css','text/css']};
   Object.assign(assets,{'/world.js':['world.js','text/javascript'],'/world-layout.js':['world-layout.js','text/javascript']});// Home world map
-  Object.assign(assets,{'/game.js':['game.js','text/javascript'],'/game-art.js':['game-art.js','text/javascript'],'/game-pick.js':['game-pick.js','text/javascript'],'/game.css':['game.css','text/css']});// the game board
   // The installable app (Today page): the web app manifest and its icons (PNG files made once by scripts/make-icons.js).
   Object.assign(assets,{'/manifest.webmanifest':['manifest.webmanifest','application/manifest+json'],...Object.fromEntries(['icon-32','icon-192','icon-512','icon-maskable-512','apple-touch-icon'].map(n=>['/icons/'+n+'.png',['icons/'+n+'.png','image/png']]))});
+  Object.assign(assets,{'/game.js':['game.js','text/javascript'],'/game-art.js':['game-art.js','text/javascript'],'/game-pick.js':['game-pick.js','text/javascript'],'/game.css':['game.css','text/css']});// the game board
   return createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -53,6 +53,7 @@ export function createApp(db,{backups=null}={}) {
       else if(req.method==='GET'&&path==='/api/reports') {const days=new URL(req.url,'http://localhost').searchParams.get('days');send(200,simulation.reports(days===null?30:Number(days)));}
       else if(req.method==='GET'&&path==='/api/crew-day') send(200,simulation.crewDay(new URL(req.url,'http://localhost').searchParams.get('worker')));
       else if(req.method==='GET'&&path==='/api/hire') send(200,simulation.hire(Object.fromEntries(new URL(req.url,'http://localhost').searchParams)));
+      else if(req.method==='GET'&&path==='/api/game-items') send(200,simulation.gameItemsFor(new URL(req.url,'http://localhost').searchParams.get('loc')));// the game board's Send / Bring back slider (src/domain/game.js)
       else if(req.method==='GET'&&path==='/api/hire.csv') {const out=simulation.hireCSV(Object.fromEntries(new URL(req.url,'http://localhost').searchParams));res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="${out.name}"`});res.end('﻿'+out.csv);}
       else if(req.method==='GET'&&path==='/api/export') {const kind=new URL(req.url,'http://localhost').searchParams.get('kind');const output=simulation.export(kind);res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="scaffold-${['stock','register','additions','removals','yardlist'].includes(kind)?kind:'history'}.csv"`});res.end(output);}
       else if(req.method==='POST'&&path==='/api/placement-preview') send(200,simulation.placementPreview(body));

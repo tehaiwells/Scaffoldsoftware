@@ -59,6 +59,7 @@ function groundCell(l,ext,c,r,drive){const {X0,X1,Y0,Y1}=ext,{pw,ph,bw,bh}=l,o=W
  s+='<g fill="url(#wm-paving)">'+foot+'</g><g fill="url(#asphalt)">'+road+'</g>'+(kerb?'<path d="'+kerb+'" stroke="#e4ded0" stroke-width="200" fill="none"/><path d="'+kerb+'" stroke="#8a8474" stroke-width="50" stroke-opacity=".7" fill="none"/>':'')+(dash?'<path d="'+dash+'" stroke="#f4f1e6" stroke-width="130" stroke-dasharray="1500 1100" fill="none"/>':'')+(zebra?'<path d="'+zebra+'" stroke="#f2efe4" stroke-width="600" fill="none" stroke-opacity=".9"/>':'')+(drive?'<g fill="#d3cdbf" stroke="#bdb6a6" stroke-width="40">'+drive+'</g>':'');
  const m=400;return {svg:'<g transform="translate('+R(LOW.x)+' '+R(LOW.y)+')">'+s+'</g>',box:[gx0+LOW.x-m,gy0+LOW.y-m,gx1-gx0+2*m,gy1-gy0+2*m].map(R)};}
 // Everything static for one layout: {ground, blocks: Map diag -> svg}. Houses fill the empty blocks, trees the margins; the fronts of places stay clear.
+const CALM=.5;// the share of house lots left as lawn (the game board asks for a calm map)
 export function wmStatic(l){
  const {c0,c1,r0,r1}=l.range,C0=c0-1,C1=c1+1,R0=r0-1,R1=r1+1,X0=C0*l.pw-S,X1=(C1+1)*l.pw,Y0=R0*l.ph-S,Y1=(R1+1)*l.ph,ext={X0,X1,Y0,Y1,C0,C1,R0,R1};
  const placeAt=new Map(l.places.map(p=>[p.col+','+p.row,p])),front=new Set(l.places.map(p=>p.col+','+p.streetRow));
@@ -71,7 +72,7 @@ export function wmStatic(l){
   for(let x=x0+5000;x<x1-4000;x+=15000+R(hash(c,r,x)*3000)){if(!mine&&hash(c,r,x,1)<.85)tree(x,y1+900,.72+hash(c,r,x)*.2,R(hash(x,r)*3));if(!across&&hash(c,r,x,2)<.85)tree(x,y0-900,.72+hash(c,r,x,3)*.2,R(hash(x,c)*3));}
   if(!inner){for(let k=0;k<4;k++){if(hash(c,r,k,9)<.55)tree(x0+4000+hash(c,r,k)*(l.bw-8000),y0+4000+hash(r,c,k)*(l.bh-8000),.8+hash(k,c,r)*.35,k);}}
   else if(!place){// a suburban block: two rows of houses back to back, the front row facing the street below, the back row the street above
-   const n=Math.max(2,Math.floor(l.bw/16000)),lw=l.bw/n;for(let row=0;row<2;row++)for(let i=0;i<n;i++){const v=hash(c,r,i,row),w=R(Math.min(lw-5000,10500+v*2500)),dd=R(10500+hash(c,r,i,row,5)*2500),x=R(x0+i*lw+(lw-w)/2+(hash(i,r,c)-.5)*1200),yf=row===0?y1-6000-dd:y0+6000,y=R(yf),fr=row===0?1:-1;
+   const n=Math.max(2,Math.floor(l.bw/16000)),lw=l.bw/n;for(let row=0;row<2;row++)for(let i=0;i<n;i++){if(hash(c,r,i,row,7)<CALM){tree(x0+i*lw+lw/2+(hash(i,r)-.5)*3000,row===0?y1-9000:y0+9000,.95+hash(r,i,c)*.3,i+row);continue;}const v=hash(c,r,i,row),w=R(Math.min(lw-5000,10500+v*2500)),dd=R(10500+hash(c,r,i,row,5)*2500),x=R(x0+i*lw+(lw-w)/2+(hash(i,r,c)-.5)*1200),yf=row===0?y1-6000-dd:y0+6000,y=R(yf),fr=row===0?1:-1;
     items.push({dep:E.depth({x:x+w/2,y:y+dd/2}),svg:houseSVG(x,y,w,dd,fr,v)});
     const gx=x+(hash(c,i,row)<.5?600:w-3600);drive=row===0?'<rect x="'+R(gx)+'" y="'+(y+dd)+'" width="3000" height="'+(y1-(y+dd))+'"/>':'<rect x="'+R(gx)+'" y="'+y0+'" width="3000" height="'+(y-y0)+'"/>';addDrive(x0+1,y0+1,drive);
     if(hash(c,r,i,row,8)<.7)tree(x+w*.5+(hash(i,c)-.5)*w*.6,row===0?y-3500:y+dd+3500,.85+hash(r,i)*.3,i+row);}}
@@ -585,9 +586,9 @@ function bindStage(){const svg=W.view,pts=new Map(),onMap=e=>!!e.target?.closest
   if(g.moved){W.suppress=performance.now();saveCamSoon();}
   if(g.kind==='site'&&g.moved){clearGhost();const p=built.layout.byId.get(g.id);if(g.lot&&(g.lot.c!==p.col||g.lot.r!==p.row))placeSite(g.id,g.lot.c,g.lot.r);}};
  svg.addEventListener('pointerup',end,{capture:true});svg.addEventListener('pointercancel',end,{capture:true});
- svg.addEventListener('click',e=>{if(!onMap(e))return;if(W.suppress&&performance.now()-W.suppress<300){e.stopPropagation();e.preventDefault();return;}if(e.target.closest('[data-select],[data-worker],[data-forklift]'))return;if(ctxNow?.workerMoveMode||ctxNow?.layoutDraft)return;
-  const t=e.target.closest('[data-wm-truck]');if(t){e.stopPropagation();if(!ctxNow?.onPick?.('truck',t.dataset.wmTruck))openCard('truck',t.dataset.wmTruck);return;}const s=e.target.closest('[data-wm-site]');if(s){e.stopPropagation();if(!ctxNow?.onPick?.('site',s.dataset.wmSite))openCard('site',s.dataset.wmSite);}},{capture:true});
- svg.addEventListener('keydown',e=>{if(!onMap(e)||(e.key!=='Enter'&&e.key!==' '))return;const t=e.target.closest?.('[data-wm-truck]'),s=e.target.closest?.('[data-wm-site]');if(t){e.preventDefault();if(!ctxNow?.onPick?.('truck',t.dataset.wmTruck))openCard('truck',t.dataset.wmTruck);}else if(s&&!e.target.closest('[data-select]')){e.preventDefault();if(!ctxNow?.onPick?.('site',s.dataset.wmSite))openCard('site',s.dataset.wmSite);}});
+ svg.addEventListener('click',e=>{if(!onMap(e))return;if(W.suppress&&performance.now()-W.suppress<300){e.stopPropagation();e.preventDefault();return;}if(gamePick(e))return;if(e.target.closest('[data-select],[data-worker],[data-forklift]'))return;if(ctxNow?.workerMoveMode||ctxNow?.layoutDraft)return;
+  const t=e.target.closest('[data-wm-truck]');if(t){e.stopPropagation();openCard('truck',t.dataset.wmTruck);return;}const s=e.target.closest('[data-wm-site]');if(s){e.stopPropagation();openCard('site',s.dataset.wmSite);}},{capture:true});
+ svg.addEventListener('keydown',e=>{if(!onMap(e)||(e.key!=='Enter'&&e.key!==' '))return;if(gamePick(e)){e.preventDefault();return;}const t=e.target.closest?.('[data-wm-truck]'),s=e.target.closest?.('[data-wm-site]');if(t){e.preventDefault();openCard('truck',t.dataset.wmTruck);}else if(s&&!e.target.closest('[data-select]')){e.preventDefault();openCard('site',s.dataset.wmSite);}});
  W.stage.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||!W.stage.contains(b)||b.closest('svg'))return;const k=b.dataset.wm;
   if(k==='watch'){followId=null;mode='director';holdUntil=0;camGoal=null;syncBar();saveCam();kick();}
   else if(k==='close')closeCard();
@@ -622,11 +623,19 @@ function tick(now=performance.now()){if(!W)return;W.tickT=now;let driving=false;
 // the director ('director'). Its own clicks on the map arrive through ctx.onPick (return true to keep the map's own card closed).
 export function wmFocus(kind,id){if(!W||!cam||!built.layout)return;if(cardFor)closeCard();
  if(kind==='site'){const p=built.layout.byId.get(id);if(!p)return;userCam();animateTo(boxCam(siteBox(p)));}
+ else if(kind==='yard'){const p=built.layout.places.find(x=>x.kind==='yard');if(!p)return;userCam();animateTo(boxCam(yardBox(p)));}
  else if(kind==='truck'){if(!trips.has(id)&&!(ctxNow?.state?.trucks??[]).some(t=>t.id===id))return;if(mode!=='follow')W.prevMode=mode;followId=id;mode='follow';camGoal=null;holdUntil=0;kick();tick();}
  else if(kind==='fit'){followId=null;lastUser=performance.now();camGoal=null;mode='fit';animateTo(boxCam(fitBox()));}
  else if(kind==='director'){followId=null;mode='director';camGoal=null;holdUntil=0;kick();}
  syncBar();saveCam();}
 export const wmFollowing=()=>followId;
+// The game board takes taps on the map (ctx.onPick): a truck, a site, the yard (or anything in it) or an empty block. Returns true when it took one.
+function gamePick(e){const pick=ctxNow?.onPick;if(!pick||arrange||ctxNow.layoutDraft||ctxNow.workerMoveMode||!built.layout)return false;const done=()=>{e.stopPropagation();e.preventDefault();return true;};
+ const t=e.target.closest?.('[data-wm-truck]');if(t)return pick('truck',t.dataset.wmTruck)?done():false;
+ const s=e.target.closest?.('[data-wm-site]');if(s)return pick('site',s.dataset.wmSite)?done():false;
+ const l=built.layout,yp=l.places.find(p=>p.kind==='yard');if(yp&&e.target.closest?.('.wm-yard,[data-select],[data-worker],[data-forklift]'))return pick('yard',yp.id)?done():false;
+ if(e.type!=='click'||!W.view)return false;const r=W.view.getBoundingClientRect(),w=toWorld(e.clientX-r.left,e.clientY-r.top),lot=lotOf(l,w.x,w.y),place=l.places.find(p=>p.col===lot.c&&p.row===lot.r);
+ if(place)return pick(place.kind==='yard'?'yard':'site',place.id)?done():false;return pick('lot',{col:lot.c,row:lot.r})?done():false;}
 // operations.js applyView on Home: the world camera, not the yard view; a selected yard stillage off screen brings the camera to the yard.
 export function wmApplyView(selectedId){if(!W||!W.stage.isConnected)return false;if(selectedId){const el=W.svg.querySelector('[data-select="'+CSS.escape(selectedId)+'"]');const yp=built.layout?.places.find(p=>p.kind==='yard');if(el&&yp){const r=el.getBoundingClientRect(),v=W.view.getBoundingClientRect();if(r.right<v.left||r.left>v.right||r.bottom<v.top||r.top>v.bottom){userCam();fitNow({x0:yp.ext.x0-2000,y0:yp.ext.y0-2000,x1:yp.ext.x1+2000,y1:yp.ext.y1+2000,tall:4000});}}}applyCam();return true;}
 export function wmStop(){if(raf&&typeof cancelAnimationFrame==='function')cancelAnimationFrame(raf);raf=0;}

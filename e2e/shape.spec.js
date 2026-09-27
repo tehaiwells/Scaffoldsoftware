@@ -7,7 +7,7 @@ const save=p=>p.getByRole('button',{name:/^Save yard/});
 async function cmd(p,name,data){const res=await p.request.post('/api/commands/'+name,{data,headers:{'Idempotency-Key':crypto.randomUUID()}});const body=await res.json();if(!res.ok())throw new Error(body.error);return body;}
 const snapshot=async p=>(await p.request.get('/api/state')).json();
 async function register(p){
-  await p.goto('/');await p.getByLabel('Company name').fill('Shape editor DEMO');await p.getByLabel('Your name').fill('Test Owner');await p.getByLabel('Email').fill(`shape-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await p.getByLabel('Password').fill('Local-demo-test-2026!');await p.getByRole('checkbox',{name:'Quickstage',exact:true}).check();await button(p,'Create company').click();
+  await p.goto('/');await p.getByLabel('Company name').fill('Shape editor DEMO');await p.getByLabel('Your name').fill('Test Owner');await p.getByLabel('Email').fill(`shape-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await p.getByLabel('Password').fill('Local-demo-test-2026!');await button(p,'Create company').click();
   // the first run offers yard sizes; drawing your own shape opens the editor
   await button(p,'Draw my own shape instead').click();await expect(p.locator('#shape-editor')).toBeVisible();
 }

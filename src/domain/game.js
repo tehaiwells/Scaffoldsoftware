@@ -5,6 +5,8 @@
 //   gameAddStock  stock arriving at the yard, in stillages a forklift can lift                                -> stockIntake / purchase
 //   gameSend      materials to a site: whole stillages onto the next free truck(s)                            -> loadTruck
 //   gameCollect   stuff back from a site: a collection for today on the next free truck, sent there empty    -> requestCollection, dispatch
+//   gameCancel    a Send or Bring back still waiting for a truck (gameOrder), taken off the waiting list
+// When every truck is out, Send and Bring back wait as a gameOrder (oldest first) and go on the next truck that is back at the yard (gameTick).
 // A truck given a trip by gameSend / gameCollect carries truck.game = {kind, site, stage, ...}; after every engine tick the autopilot (gameTick)
 // takes the next step when the last one is finished: dispatch when loaded, unload at the site with its crane, drive home, load a collection,
 // bring it back and unload it at the yard. The people only watch. A step that fails leaves the truck where it is with game.problem set, and
@@ -16,9 +18,9 @@ import { active } from './inventory.js';
 import { cached,savepoint } from '../database.js';
 import { RT_EDITABLE } from './collections.js';
 import { gpChoose } from '../../public/game-pick.js';
-export const GAME_OPS=['gameStart','gameSite','gameCatalogue','gameAddStock','gameSend','gameCollect','gameStop'];
+export const GAME_OPS=['gameStart','gameSite','gameCatalogue','gameAddStock','gameSend','gameCollect','gameStop','gameCancel'];
 export const GAME_SIZES={S:{w:20000,d:16000,name:'Small yard'},M:{w:30000,d:20000,name:'Medium yard'},L:{w:40000,d:25000,name:'Large yard'}};
-const TRUCK_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='truck' AND json_type(data,'$.game')='object' LIMIT 1";
+const TRUCK_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='truck' AND json_type(data,'$.game')='object' LIMIT 1",ORDER_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='gameOrder' LIMIT 1";
 const HEAVY=10000000,RETRY_MS=4000,STILLAGE={type:'STILLAGE',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000};
 const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
 const lineList=lines=>{requireRule(Array.isArray(lines)&&lines.length>0&&lines.length<=60,'Pick at least one material.');const seen=new Map();for(const l of lines){requireRule(l&&typeof l.product==='string'&&l.product.length>0,'Pick a material.');seen.set(l.product,(seen.get(l.product)??0)+integer(l.quantity,'Amount',1,1000000));}return [...seen].map(([product,quantity])=>({product,quantity}));};
@@ -48,17 +50,22 @@ export const gameMethods={
     const yard=this.yard({name:label(input.name)??'Main yard',points:[{x:0,y:0},{x:w,y:0},{x:w,y:d},{x:0,y:d}],height:10000,loading:{x:w-5500,y:d-5500},gate:{x:w-5500,y:d-3000},fixtures:[{kind:'OFFICE',name:'Yard office',x:w-6500,y:500,w:6000,h:3000}]});
     this.resources({location:yard.id,workers:4,machines:2});
     for(let i=0;i<2;i++)this.quickAdjust({kind:'TRUCK',delta:1,location:yard.id,payload:12500000});
-    return {yard,message:size.name+' ready: 4 workers, 2 forklifts and 2 trucks are waiting for work.'};},
-  gameSite(input){const site=this.site({name:input?.name,address:typeof input?.address==='string'&&input.address.trim()?input.address:undefined});this.gameCrew(site);return {site,message:site.name+' is on the map. Its crane and crew are ready.'};},
+    return {yard,message:'Your yard is ready. The crew is waiting for work.'};},
+  gameSite(input){const site=this.site({name:input?.name,address:typeof input?.address==='string'&&input.address.trim()?input.address:undefined});
+    // tapped on an empty block of the map: the site goes there (the map's own rule for moving a site; a refused block keeps the automatic one)
+    if(Number.isInteger(input?.col)&&Number.isInteger(input?.row)&&typeof this.worldPlace==='function'){try{savepoint(this.db,'game_place',()=>this.worldPlace({id:site.id,col:input.col,row:input.row}));}catch(e){if(!e.status)throw e;}}
+    this.gameCrew(site);return {site,message:site.name+' is on the map. Its crane and crew are ready.'};},
   // The reviewed supplier lists (catalogues/verified, owner supplied, every figure cited) for the scaffold systems the company uses. Rows already
   // in the catalogue are left alone, so a second tap only adds what is missing.
-  gameCatalogue(){
+  gameCatalogue(input){
+    // the scaffold systems the owner ticked on the board ("Which scaffold do you use?"): saved as the company's systems first
+    if(Array.isArray(input?.systems)&&input.systems.length){this.auth.require(this.user,'company.manage');const all=new Set(cached(this.db,'SELECT id FROM scaffold_systems').all().map(r=>r.id)),want=[...new Set(input.systems)];requireRule(want.every(id=>typeof id==='string'&&all.has(id)),'Choose a valid scaffold system.');this.auth.saveSystems(this.user,want);this.auth.audit(this.user,'company.updated',{systems:want});}
     const on=new Set(cached(this.db,'SELECT system_id FROM company_systems WHERE company_id=? AND enabled=1').all(this.user.company_id).map(r=>r.system_id));requireRule(on.size,'Switch on a scaffold system on the Account page first.');
     const dir=new URL('../../catalogues/verified/',import.meta.url);let files=[];try{files=readdirSync(dir).filter(f=>f.endsWith('.json')).sort();}catch{}requireRule(files.length,'No supplier lists are installed on this computer.');
     const have=new Set(this.repo.all('product').map(p=>p.manufacturer+'|'+p.region+'|'+p.reference));let added=0;
     for(const f of files){const j=JSON.parse(readFileSync(new URL(f,dir),'utf8')),rows=(j.products??[]).filter(p=>on.has(p.system)&&!have.has(p.manufacturer+'|'+p.region+'|'+p.reference));
       for(let i=0;i<rows.length;i+=100){this.importCatalogue({name:(j.name??f)+(i?' part '+(i/100+1):''),products:rows.slice(i,i+100)});for(const p of rows.slice(i,i+100))have.add(p.manufacturer+'|'+p.region+'|'+p.reference);added+=Math.min(100,rows.length-i);}}
-    requireRule(added,'Your parts list is already loaded.');return {added,message:plural(added,'part')+' added to your parts list.'};},
+    requireRule(added,'Your parts list is already loaded.');return {added,message:'Your parts list is loaded.'};},
   // Stock arriving at the yard, one product at a time: its own stillages are topped up first, then new ones are set down (gamePlace). A stillage
   // holds one pack when the product has a pack size; without one, as much as a yard forklift can lift (its capacity less the stillage's tare), so
   // every stillage can be moved and sent; an unknown weight fills one stillage.
@@ -88,9 +95,9 @@ export const gameMethods={
   // on the next one. Each truck then drives, unloads and comes home by itself (gameTick).
   gameSend(input){
     const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');const lines=lineList(input.lines);
-    const items=this.gameItems([yard.id]).get(yard.id),pick=gpChoose(items,lines);requireRule(pick.ids.length,'None of that is free in the yard right now.');
     let trucks=this.gameFreeTrucks(yard);if(input.truck){const t=trucks.find(x=>x.id===input.truck);requireRule(t,'That truck is busy. Pick another one.');trucks=[t,...trucks.filter(x=>x!==t)];}
-    requireRule(trucks.length,'Every truck is busy. Try again when one is back at the yard.');
+    if(!trucks.length){requireRule(!input.fromQueue,'Every truck is busy.');const here=this.containers().filter(c=>c.location===yard.id);requireRule(lines.some(l=>here.some(c=>this.repo.quantity(c.id,l.product)>0)),'None of that is in the yard.');return this.gameWait('SEND',site,{lines});}
+    const items=this.gameItems([yard.id]).get(yard.id),pick=gpChoose(items,lines);requireRule(pick.ids.length,'None of that is free in the yard right now.');
     const onto=new Map(),left=[];let ti=0;
     for(const id of pick.ids){let placed=false;
       for(let k=ti;k<trucks.length&&!placed;k++){try{savepoint(this.db,'game_load',()=>this.loadTruck({truck:trucks[k].id,containers:[id]}));placed=true;ti=k;let l=onto.get(trucks[k].id);if(!l)onto.set(trucks[k].id,l=[]);l.push(id);}catch(e){if(!e.status)throw e;if(k===trucks.length-1)left.push({id,reason:e.message});}}}
@@ -104,20 +111,32 @@ export const gameMethods={
   gameCollect(input){
     const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');
     let scope='ALL',containers;if(!input.all){const lines=lineList(input.lines),items=this.gameItems([site.id]).get(site.id),pick=gpChoose(items,lines);requireRule(pick.ids.length,'None of that can be lifted at '+site.name+' right now.');scope='SELECTED';containers=pick.ids;}
-    const trucks=this.gameFreeTrucks(yard);requireRule(trucks.length,'Every truck is busy. Try again when one is back at the yard.');const t=trucks.find(x=>x.id===input.truck)??trucks[0];
+    if(scope==='ALL')requireRule(this.containers().some(c=>c.location===site.id),'Nothing is on '+site.name+' to bring back.');
+    const trucks=this.gameFreeTrucks(yard);if(!trucks.length){requireRule(!input.fromQueue,'Every truck is busy.');return this.gameWait('COLLECT',site,scope==='ALL'?{all:true}:{lines:lineList(input.lines)});}const t=trucks.find(x=>x.id===input.truck)??trucks[0];
     const o=this.requestCollection({site:site.id,scope,containers,neededOn:this.calendar().today,truck:t.id,notes:'Bring back from the yard board'});
     this.gameCrew(site);this.dispatch({id:t.id,destination:site.id});
     const f=this.repo.get(t.id,'truck');f.game={kind:'COLLECT',site:site.id,collection:o.id,stage:'OUTBOUND',since:new Date().toISOString(),problem:null,retryAt:null};this.repo.save(f);
     return {truck:{id:t.id,name:t.name},collection:o.id,message:t.name+' is on its way to '+site.name+' to bring '+(scope==='ALL'?'everything':'it')+' back.'};},
+  // Every truck is out: the order waits (oldest first) and goes on the next truck back at the yard (gameTick). The picked amounts are chosen again
+  // then, from what is there at that moment.
+  gameWait(type,site,what){const o=this.repo.add('gameOrder',{type,site:site.id,...what,createdAt:new Date().toISOString(),by:this.user.id});
+    return {queued:o.id,trucks:[],left:[],message:'Every truck is out. '+(type==='SEND'?'This goes to '+site.name+' on the next truck back at the yard.':'The next truck back goes to '+site.name+' to bring it back.')};},
+  gameCancel(input){const o=this.repo.get(input?.id,'gameOrder');this.repo.remove(o.id,'gameOrder');return {ok:true,message:'Taken off the waiting list.'};},
+  // A waiting order onto a truck that is free again; one that can no longer go (the site closed, the stock gone) is dropped with a note.
+  gameOrders(){const yard=this.repo.all('yard')[0];if(!yard)return;
+    for(const o of this.repo.all('gameOrder').sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))){if(!this.gameFreeTrucks(yard).length)return;
+      try{savepoint(this.db,'game_order',()=>{if(o.type==='SEND')this.gameSend({site:o.site,lines:o.lines,fromQueue:true});else this.gameCollect({site:o.site,all:o.all,lines:o.lines,fromQueue:true});this.repo.remove(o.id,'gameOrder');this.rtSync();});}
+      catch(error){if(!error.status){logError('game_order_error',{order:o.id,message:error.message});return;}this.repo.remove(o.id,'gameOrder');let name='the site';try{name=this.repo.get(o.site,'site').name;}catch{}this.notify('Not sent',(o.type==='SEND'?'Sending to '+name+' was dropped: ':'Bringing back from '+name+' was dropped: ')+error.message,o.site);}}},
   // Stop the autopilot for one truck (the Office pages then run it by hand, as before).
   gameStop(input){const t=this.repo.get(input?.id,'truck');requireRule(t.game,t.name+' is not on an automatic trip.');t.game=null;this.repo.save(t);return {ok:true,message:t.name+' is now run by hand from its truck page.'};},
   // ---------- the autopilot, after every engine tick ----------
   gameTick(){
-    if(!cached(this.db,TRUCK_PROBE).get(this.repo.company))return;const now=Date.now();
+    const trips=!!cached(this.db,TRUCK_PROBE).get(this.repo.company),orders=!!cached(this.db,ORDER_PROBE).get(this.repo.company);if(!trips&&!orders)return;const now=Date.now();if(trips)
     for(const t of this.repo.all('truck')){if(!t.game||t.retired||t.status==='IN_TRANSIT')continue;if(t.game.retryAt&&now<t.game.retryAt)continue;
       // rtSync as after every command (execute): a collection follows the trip the autopilot just started
       try{savepoint(this.db,'game_auto',()=>{this.gameStep(t);this.rtSync();});}
-      catch(error){if(!error.status)logError('game_autopilot_error',{truck:t.id,message:error.message});const f=this.repo.get(t.id,'truck');if(f.game){f.game={...f.game,problem:error.status?error.message:'Something went wrong. The truck waits here; see its truck page.',retryAt:now+RETRY_MS};this.repo.save(f);}}}},
+      catch(error){if(!error.status)logError('game_autopilot_error',{truck:t.id,message:error.message});const f=this.repo.get(t.id,'truck');if(f.game){f.game={...f.game,problem:error.status?error.message:'Something went wrong. The truck waits here; see its truck page.',retryAt:now+RETRY_MS};this.repo.save(f);}}}
+    if(orders)this.gameOrders();},
   gameStep(t){
     const g=t.game,tasks=this.tasks().filter(active),loading=tasks.some(x=>x.to===t.id),unloading=tasks.some(x=>x.from===t.id),cargo=this.containers().some(c=>c.location===t.id);
     const set=patch=>{const f=this.repo.get(t.id,'truck');f.game=patch===null?null:{...f.game,...patch,problem:null,retryAt:null};this.repo.save(f);};
@@ -140,9 +159,12 @@ export const gameMethods={
     if(cargo){this.unload({id:t.id});return set({stage:'UNLOADING'});}
     if(g.kind==='COLLECT'&&(g.brought||g.stage==='UNLOADING'))this.notify('Back at the yard',t.name+' is back from '+siteName()+' and everything is unloaded.',g.site);
     set(null);},
-  // result.game: every stillage at the yard and at each site with stock, with its contents and whether it can be lifted now (the slider's stops).
-  gameSnapshot(result){const yard=(result.yards??[])[0];if(!yard)return;const sites=(result.sites??[]).filter(s=>s.status==='ACTIVE').map(s=>s.id),m=this.gameItems([yard.id,...sites]);
-    result.game={yard:yard.id,items:Object.fromEntries([...m].filter(([id,l])=>id===yard.id||l.length))};}
+  // result.gameOrders: Sends and Bring backs waiting for a truck (a few bytes; the poll carries nothing else for the board).
+  gameSnapshot(result){result.gameOrders=this.repo.all('gameOrder').map(o=>({id:o.id,type:o.type,site:o.site,all:!!o.all,lines:o.lines??null,createdAt:o.createdAt})).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));},
+  // GET /api/game-items?loc=: the stillages at the yard or one active site, with their contents and whether each can be lifted now (the amount
+  // slider's stops, game-pick.js). Asked for only while Send or Bring back is open, so the 1 s poll never carries them.
+  gameItemsFor(loc){this.auth.require(this.user,'operations.manage');const yard=this.gameYard();let id=yard.id;if(loc&&loc!==yard.id){const site=this.repo.get(loc,'site');requireRule(site.status==='ACTIVE','Choose an active site.');id=site.id;}
+    return {loc:id,items:this.gameItems([id]).get(id)};}
 };
 function label(v){return typeof v==='string'&&v.trim()?v.trim().slice(0,120):null;}
 export function installGame(proto){
