@@ -2,6 +2,7 @@ import { requireRule } from './geometry.js';
 import { active,spotProblem } from './inventory.js';
 import { rect,contains } from './geometry.js';
 import { skillOn } from './jobs.js';
+import { holdLive } from './live.js';
 const states=['QUEUED','RESERVED','ASSIGNED','TRAVELLING_TO_PICKUP','PICKING','CARRYING','PLACING','COMPLETE'];
 export const movementMethods={
   advance(task){
@@ -40,6 +41,7 @@ export const movementMethods={
     for(const delivery of this.repo.all('delivery').filter(d=>d.status==='ARRIVED')){
       if(delivery.containers.every(id=>{const c=this.repo.get(id,'container');return c.location===delivery.to||c.delivery===delivery.id;})){delivery.status='DELIVERED';delivery.completedAt=new Date().toISOString();this.repo.save(delivery);this.notify('Delivery complete','Every container has been placed at its destination.',this.repo.get(delivery.to).kind==='site'?delivery.to:null);}
     }
+    this.rtSync();// scheduled collections follow their stillages (collections.js)
     for(const request of this.repo.all('request').filter(r=>['ALLOCATED','PARTIALLY ALLOCATED','DELIVERED'].includes(r.status))){
       const relevant=this.tasks().filter(t=>t.request===request.id&&t.type==='MOVE'&&t.state!=='CANCELLED');const quantity=relevant.reduce((sum,t)=>{const c=this.repo.get(t.container,'container');return sum+(c.location===request.site?this.repo.quantity(c.id,request.product):0);},0);request.delivered=quantity;const onTheWay=relevant.some(t=>{if(active(t))return true;const loc=this.repo.get(this.repo.get(t.container,'container').location);return loc.kind==='truck'||loc.kind==='resource';});if(quantity===request.quantity)request.status='DELIVERED';else if(request.status==='PARTIALLY ALLOCATED'&&quantity>0&&!onTheWay)request.status='DELIVERED';else if(request.status==='DELIVERED'&&quantity===0)request.status='RETURNED';this.repo.save(request);
     }
@@ -48,11 +50,11 @@ export const movementMethods={
     const config=this.repo.all('config')[0];if(!config||config.paused)return;
     this.advanceWorkers(elapsed);
     this.advanceForklifts(elapsed);
-    for(const truck of this.repo.all('truck').filter(t=>t.status==='IN_TRANSIT')){if(this.worldClock?.(truck,elapsed))continue;truck.remainingMs=Math.max(0,truck.remainingMs-elapsed);if(truck.remainingMs===0){const destination=this.repo.get(truck.destination);truck.at=destination.id;truck.status=destination.kind==='site'?'AT_SITE':'AT_YARD';truck.destination=null;const delivery=this.repo.get(truck.delivery,'delivery');delivery.status=delivery.containers.length?'ARRIVED':'DELIVERED';this.repo.save(delivery);this.notify('Truck arrived',`${truck.name} has arrived. Cargo stays on the truck until unloading.`,destination.kind==='site'?destination.id:null);}this.repo.save(truck);}
+    for(const truck of this.repo.all('truck').filter(t=>t.status==='IN_TRANSIT')){truck.remainingMs=Math.max(0,truck.remainingMs-elapsed);if(truck.remainingMs===0){const destination=this.repo.get(truck.destination);truck.at=destination.id;truck.status=destination.kind==='site'?'AT_SITE':'AT_YARD';truck.destination=null;const delivery=this.repo.get(truck.delivery,'delivery');delivery.status=delivery.containers.length?'ARRIVED':'DELIVERED';this.repo.save(delivery);this.notify('Truck arrived',`${truck.name} has arrived. Cargo stays on the truck until unloading.`,destination.kind==='site'?destination.id:null);}if(truck.remainingMs>0)holdLive(this.repo,truck,['remainingMs'],elapsed);else this.repo.save(truck);}// on the road: the countdown is held in memory (live.js)
     // Priority order (the title-free part of taskInfo), with one id -> kind lookup per id for the sort.
     this.taskKinds=new Map();let order;try{order=this.tasks().filter(t=>active(t)&&t.state!=='BLOCKED').map((t,i)=>({t,i,p:this.taskPriority(t)})).sort((a,b)=>a.p-b.p||a.i-b.i).map(x=>x.t);}finally{this.taskKinds=null;}
     for(let task of order){
-      if(task.due>0){task.due=Math.max(0,task.due-elapsed);this.repo.save(task);continue;}
+      if(task.due>0){task.due=Math.max(0,task.due-elapsed);if(task.due>0)holdLive(this.repo,task,['due'],elapsed);else this.repo.save(task);continue;}// countdown held in memory (live.js)
       this.db.exec('SAVEPOINT movement_step');
       try{this.advance(task);this.db.exec('RELEASE movement_step');}
       catch(error){this.db.exec('ROLLBACK TO movement_step');this.db.exec('RELEASE movement_step');task=this.repo.get(task.id,'task');task.resumeState=task.state;task.state='BLOCKED';task.reason=error.status?error.message:'Movement failed safely. Review the server log before retrying.';if(!error.status)console.error(JSON.stringify({event:'movement_error',task:task.id,message:error.message}));this.repo.save(task);}

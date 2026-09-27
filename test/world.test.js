@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase,atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
-import { flushWorldClocks } from '../src/domain/world.js';
+import { flushLive,LIVE_FLUSH_MS } from '../src/domain/live.js';
 import { WORLD,worldLayout,worldRoute,tripMs,routeGeom,poseAt,distanceAt,restPoses,lotOrder,kerbPose,bayPose,siteRot,placePoint } from '../public/world-layout.js';
 import { wmLayout,wmTools,__wm } from '../public/world.js';
 
@@ -48,16 +48,17 @@ test('a site across the street is a short trip: no detour round the block, and t
   assert.ok(tripMs(b.length,{speed:100000})<2500);assert.equal(tripMs(0,{speed:100000}),300);
 });
 
-test('the countdown is written about every 5 s of engine time, the snapshot reads it exactly, a pause freezes it, arrival is unchanged and a stop flushes it',t=>{
-  const f=world(t);load(f,[f.a.id]);defaultSpeed(f);
-  const sent=f.cmd('dispatch',{id:f.truck.id,destination:f.site.id}),D=sent.route.durationMs,v0=f.sim.repo.get(f.truck.id).version;assert.ok(D>7000);
+// One clock per thing: the trip countdown lives on the live overlay (live.js) like a walking worker, not in a second map of its own.
+test('the countdown is held on the live overlay: written about every 2 s of engine time, every read sees it exactly, a pause writes and freezes it, arrival is unchanged and a stop flushes it',t=>{
+  const f=world(t);load(f,[f.a.id]);defaultSpeed(f);const raw=()=>{const r=f.db.prepare('SELECT data,version FROM objects WHERE id=?').get(f.truck.id);return {...JSON.parse(r.data),version:r.version};};
+  const sent=f.cmd('dispatch',{id:f.truck.id,destination:f.site.id}),D=sent.route.durationMs,v0=raw().version;assert.ok(D>9000);assert.equal(LIVE_FLUSH_MS,2000);
   f.tick(28,250);// 7 s
-  const row=f.sim.repo.get(f.truck.id);assert.equal(row.status,'IN_TRANSIT');assert.ok(row.version-v0<=2,'at most one write per 5 s: '+(row.version-v0));assert.equal(row.remainingMs,D-5000,'the stored value is the last flush');
-  assert.equal(f.sim.snapshot().trucks.find(t=>t.id===f.truck.id).remainingMs,D-7000,'the snapshot has the exact countdown');
-  f.cmd('pause',{paused:true});f.tick(20,250);assert.equal(f.sim.snapshot().trucks[0].remainingMs,D-7000);f.cmd('pause',{paused:false});
-  assert.equal(flushWorldClocks(f.db),1);assert.equal(f.sim.repo.get(f.truck.id).remainingMs,D-7000);assert.equal(flushWorldClocks(f.db),0);
-  const writes=f.sim.repo.get(f.truck.id).version;f.tick(Math.ceil((D-7000)/250)+1,250);
-  const arrived=f.sim.repo.get(f.truck.id);assert.equal(arrived.status,'AT_SITE');assert.equal(arrived.at,f.site.id);assert.equal(arrived.destination,null);assert.ok(arrived.version-writes<=Math.ceil((D-7000)/5000)+1,'few writes on the way');
+  const row=raw();assert.equal(row.status,'IN_TRANSIT');assert.equal(row.version-v0,3,'one write per 2 s: '+(row.version-v0));assert.equal(row.remainingMs,D-6000,'the stored value is the last write');
+  assert.equal(f.sim.repo.get(f.truck.id).remainingMs,D-7000,'every read sees the exact countdown');assert.equal(f.sim.snapshot().trucks.find(t=>t.id===f.truck.id).remainingMs,D-7000,'the snapshot has the exact countdown');
+  f.cmd('pause',{paused:true});assert.equal(raw().remainingMs,D-7000,'pausing writes it');f.tick(20,250);assert.equal(f.sim.snapshot().trucks[0].remainingMs,D-7000);f.cmd('pause',{paused:false});
+  f.tick(3,250);assert.equal(raw().remainingMs,D-7000);assert.equal(flushLive(f.db),1,'a stop writes the held countdown');assert.equal(raw().remainingMs,D-7750);assert.equal(flushLive(f.db),0);
+  const writes=raw().version;f.tick(Math.ceil((D-7750)/250)+1,250);
+  const arrived=f.sim.repo.get(f.truck.id);assert.equal(arrived.status,'AT_SITE');assert.equal(arrived.at,f.site.id);assert.equal(arrived.destination,null);assert.ok(arrived.version-writes<=Math.ceil((D-7750)/2000)+1,'few writes on the way');
   const delivery=f.sim.repo.get(arrived.delivery,'delivery');assert.equal(delivery.status,'ARRIVED');assert.ok(f.sim.repo.all('notification').some(n=>n.title==='Truck arrived'));
   assert.equal(f.sim.repo.get(f.a.id).location,f.truck.id,'cargo stays on the truck until unloading, as before');
 });
@@ -137,4 +138,36 @@ test('the map builders are plain strings in Node: static scenery, a site with it
   assert.equal(__wm.siteParts(l.byId.get('S'),l,state,{},{art:false}).crane,true,'the site has a crane to draw');
   const ops=wmTools({ops:true,view:{rotate:0,tilt:true}}),sup=wmTools({ops:false});for(const w of ['Director','Fit all','Turn view','3D view','data-wm="in"','data-wm="out"'])assert.ok(ops.includes(w),w);assert.ok(ops.includes('Arrange map'));assert.ok(!sup.includes('Arrange map'),'arranging is for operations only');
   assert.match(__wm.signal({state,selected:null}),/^<i class="wm-sig" hidden data-v="\d+"><\/i>$/);
+});
+
+// Scheduled collections (src/domain/collections.js) on the map: the site crane loads the truck, the trip back to the yard gets its road and travel
+// time like a delivery, every read sees the exact countdown on the way, the truck reverses into the yard bay and the yard unloads it.
+test('a collection drives back on the map: site crane loads it, the road back to the yard is timed from its length, the snapshot counts it down, returned at the yard',t=>{
+  const f=world(t);load(f,[f.a.id,f.b.id]);const go=f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(Math.ceil(go.route.durationMs/250)+1,250);f.cmd('unload',{id:f.truck.id});f.tick(60);
+  for(const x of [f.a,f.b])assert.equal(f.sim.repo.get(x.id).location,f.site.id);
+  const today=f.sim.snapshot().calendar.today,rt=f.cmd('requestCollection',{site:f.site.id,neededOn:today,truck:f.truck.id});assert.equal(rt.status,'BOOKED');
+  assert.equal(f.sim.snapshot().collections.find(c=>c.id===rt.id).canLoad,true);
+  const loading=f.cmd('loadCollection',{id:rt.id});assert.equal(loading.status,'LOADING');assert.ok(loading.tasks.every(x=>x.handling===f.site.id),'the site crew and crane lift them on');
+  f.tick(60);for(const x of [f.a,f.b])assert.equal(f.sim.repo.get(x.id).location,f.truck.id);
+  const config=defaultSpeed(f),back=f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id}),r=back.route,D=r.durationMs;
+  assert.equal(r.from,f.site.id);assert.equal(r.to,f.yard.id);assert.equal(D,tripMs(r.length,config));assert.ok(D>=8000&&D<=45000,'a watchable trip: '+D);assert.ok(r.points.length>1);assert.equal(r.end.bay,true,'it reverses into the yard bay');
+  let s=f.sim.snapshot();const c=s.collections.find(x=>x.id===rt.id);assert.equal(c.status,'ON THE WAY');assert.equal(c.truckStatus,'IN_TRANSIT');
+  assert.deepEqual(s.world.items.filter(x=>x.location===f.truck.id).map(x=>x.id).sort(),[f.a.id,f.b.id].sort(),'the cargo rides on the truck on the map');
+  f.tick(12,250);s=f.sim.snapshot();assert.equal(s.trucks.find(x=>x.id===f.truck.id).remainingMs,D-3000,'the snapshot has the exact countdown on the way back');
+  f.tick(Math.ceil((D-3000)/250)+1,250);const at=f.sim.repo.get(f.truck.id);assert.equal(at.status,'AT_YARD');assert.equal(at.at,f.yard.id);
+  const fast=f.sim.repo.all('config')[0];fast.speed=100000;f.sim.repo.save(fast);// the yard forklifts at demo speed again
+  f.cmd('unload',{id:f.truck.id});f.tick(80);for(const t of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:t.id});f.tick(80);
+  for(const x of [f.a,f.b])assert.equal(f.sim.repo.get(x.id).location,f.yard.id);
+  f.sim.rtSync();assert.equal(f.sim.repo.get(rt.id,'collection').status,'RETURNED');
+});
+
+test('the map says what a truck does for a collection: waiting to load, the site crane loading it, loaded, bringing it back, back at the yard',()=>{
+  const T={id:'t1',name:'T01',status:'AT_SITE',at:'s1'},rt=(status,extra={})=>({id:'r1',site:'s1',status,plannedTruck:'t1',truck:status==='BOOKED'?null:'t1',...extra}),cargo=[{id:'c1',lines:[['p',40]]}];
+  const line=(t,st,cg=[])=>__wm.truckLine({truck:t,cargo:cg},{tasks:[],...st});
+  assert.match(line(T,{collections:[rt('BOOKED')]}).status,/Waiting to load the collection/);
+  assert.match(line(T,{collections:[rt('LOADING')],tasks:[{to:'t1',state:'PICKING'}]}).status,/site crane is loading the collection/);
+  assert.match(line(T,{collections:[rt('LOADING')]},cargo).status,/Collection loaded .*ready to go back to the yard/);
+  assert.equal(__wm.rtOf({collections:[rt('BOOKED',{plannedTruck:'t2'})]},T),null,'another truck booked: not this one');
+  assert.match(line({...T,status:'AT_YARD',at:'y1'},{collections:[rt('ON THE WAY')]},cargo).status,/Back from .* with the collection, waiting to unload/);
+  assert.match(line({...T,status:'AT_SITE'},{collections:[]},cargo).status,/Loaded, waiting to unload/,'a delivery reads as before');
 });
