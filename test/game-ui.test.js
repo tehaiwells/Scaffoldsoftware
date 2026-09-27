@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { openDatabase,atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
-import { __gm,officeHTML,OFFICE_TILES,cardHTML } from '../public/game.js';
+import { __gm,officeHTML,OFFICE_TILES,cardHTML,cardTight } from '../public/game.js';
 import { gaKind,gaLook,gaLength,gaLenTag,GA_TABS,gaTab,gaFamily } from '../public/game-art.js';
 
 // The game board's builders are plain strings from a snapshot (no DOM), so the main screen's content is checked in node.
@@ -118,4 +118,21 @@ test('the main screen is the game board (view HOME, fed by the Home poll) for th
   assert.ok(ops.includes(":not([data-gm-live])"),'dragging the amount slider does not stop the poll');
   assert.ok(html.includes('<link rel="stylesheet" href="/game.css">'));for(const f of ['game.js','game-art.js','game-pick.js','game.css'])assert.ok(server.includes("'/"+f+"'"),f+' is served');assert.ok(server.includes("path==='/api/game-items'"),'the slider asks for its stillages itself');
   assert.ok(!/\sstyle="/.test(game),'no inline style attributes in the board');assert.match(css,/\.gm-board \.world-svg \.tg/,'no stillage and crew tags on the board');assert.match(css,/@media \(max-width:760px\)/);
+});
+
+test('no truck codes on the board: a truck is a Big truck or a Truck in its window, its card and on the map; the codes stay in the Office',t=>{
+  const f=board(t);f.cmd('gameStart',{size:'S'});fast(f);f.cmd('gameCatalogue');const std=f.sim.repo.all('product').find(p=>p.name==='Kwikstage standard 3.0 m');f.cmd('gameAddStock',{lines:[{product:std.id,quantity:200}]});
+  const {site}=f.cmd('gameSite',{name:'George St'});f.cmd('gameSend',{site:site.id,lines:[{product:std.id,quantity:40}]});
+  let s=f.snap();for(let i=0;i<400&&!s.trucks.some(t=>t.status==='IN_TRANSIT');i++){f.tick(1);s=f.snap();}
+  const truck=s.trucks.find(t=>t.status==='IN_TRANSIT');assert.ok(truck,'a truck is on the road');assert.match(truck.name,/^T-\d+/);
+  __gm.reset();__gm.shell(ctxOf(f,s));__gm.setTruck(truck.id);const head=__gm.head(s);assert.match(head,/Big truck · /);assert.ok(!head.includes(truck.name),'no code in the truck window');
+  assert.ok(!__gm.trips(s).includes(truck.name),'no code on the trip card, not even in its tooltip');
+  const card=cardHTML(s,std);assert.match(card,/On a big truck/);assert.ok(!card.includes(truck.name),'no code in the hover card');
+  assert.match(cardTight(s,std),/Kwikstage standard 3\.0 m<\/b><span>\d+ in the yard<\/span>/,'the one-line card for a short strip of map on a phone');
+  const world=readFileSync(new URL('../public/world.js',import.meta.url),'utf8'),ops=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8'),css=readFileSync(new URL('../public/game.css',import.meta.url),'utf8');
+  assert.ok(ops.includes('onPick:gmPick,glow:gmGlow(),plain:true'),'the board asks the map for plain words');assert.match(world,/who=plain\(\)\?truckWord\(t\):t\.name/,'the map names trucks by kind on the board');
+  assert.match(css,/\.gm-board \.wm-truck\.parked:not\(\.followed\) \.wm-ttag\{display:none\}/,'parked trucks carry no tag on the board');
+  // the board is view HOME, so its poll is the one that carries the map block (?world=, grouped with revisions)
+  assert.ok(ops.includes("wmParam=()=>view==='HOME'&&typeof document!=='undefined'"),'the poll of the board asks for the map block');
+  assert.ok(ops.includes("wm:()=>wmAttach({...wmCtx(),"),'the board draws with the Home map context (the last map block stands in until the next poll)');
 });

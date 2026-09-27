@@ -13,7 +13,7 @@ import { bdRoute, BD_LOGO_BODY } from './domain/brand.js';
 export function createApp(db,{backups=null}={}) {
   const service=new Service(db), attempts=new Map();
   const assets={'/art.js':['art.js','text/javascript'],'/design.css':['design.css','text/css'],'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/operations.js':['operations.js','text/javascript'],'/visual.js':['visual.js','text/javascript'],'/shape.js':['shape.js','text/javascript'],'/shape-editor.js':['shape-editor.js','text/javascript'],'/style.css':['style.css','text/css']};
-  Object.assign(assets,{'/world.js':['world.js','text/javascript'],'/world-layout.js':['world-layout.js','text/javascript']});// Home world map
+  Object.assign(assets,{'/world.js':['world.js','text/javascript'],'/world-layout.js':['world-layout.js','text/javascript'],'/world-pic.js':['world-pic.js','text/javascript']});// Home world map
   // The installable app (Today page): the web app manifest and its icons (PNG files made once by scripts/make-icons.js).
   Object.assign(assets,{'/manifest.webmanifest':['manifest.webmanifest','application/manifest+json'],...Object.fromEntries(['icon-32','icon-192','icon-512','icon-maskable-512','apple-touch-icon'].map(n=>['/icons/'+n+'.png',['icons/'+n+'.png','image/png']]))});
   Object.assign(assets,{'/game.js':['game.js','text/javascript'],'/game-art.js':['game-art.js','text/javascript'],'/game-pick.js':['game-pick.js','text/javascript'],'/game.css':['game.css','text/css']});// the game board
@@ -48,7 +48,7 @@ export function createApp(db,{backups=null}={}) {
       const user=service.authenticate(token);
       const simulation=new Simulation(db,user);
       if(req.method==='GET'&&path==='/api/me') send(200,service.snapshot(user));
-      else if(req.method==='GET'&&path==='/api/state') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.snapshot(Number(query.get('page')??0),{lean:true,catalogue:query.get('catalogue')}));}
+      else if(req.method==='GET'&&path==='/api/state') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.snapshot(Number(query.get('page')??0),{lean:true,catalogue:query.get('catalogue'),world:query.get('world')}));}
       else if(req.method==='GET'&&path==='/api/history') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.history(Number(query.get('limit')??100),Number(query.get('after')??0)));}
       else if(req.method==='GET'&&path==='/api/reports') {const days=new URL(req.url,'http://localhost').searchParams.get('days');send(200,simulation.reports(days===null?30:Number(days)));}
       else if(req.method==='GET'&&path==='/api/crew-day') send(200,simulation.crewDay(new URL(req.url,'http://localhost').searchParams.get('worker')));

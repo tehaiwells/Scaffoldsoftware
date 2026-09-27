@@ -3200,7 +3200,7 @@ button.cw-panel-btn{display:inline-flex;align-items:center;gap:6px;min-height:36
    Home plan host after every render; the map svg's viewBox is its own pixel size, so tags and cards are drawn in plain screen pixels. ===== */
 .world-scene .plan-wrap{position:relative}
 .wm-host{display:block;min-height:360px}
-.wm-stage{display:grid;gap:10px}
+.wm-stage{display:grid;gap:10px;position:relative}
 .wm-bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px;margin:0 0 10px;border-radius:12px;background:#f3f6ee;border:1px solid #e2e9d9}
 .wm-turn{display:inline-flex;align-items:center;gap:4px}
 .wm-btn{min-height:34px;padding:6px 12px;border-radius:9px;background:#fff;border:1px solid #d9e1ce;box-shadow:0 1px 0 #dfe6d5;color:#1f3d2c;font-size:12.5px;font-weight:650;display:inline-flex;align-items:center;gap:7px}
@@ -3214,16 +3214,25 @@ button.cw-panel-btn{display:inline-flex;align-items:center;gap:6px;min-height:36
 .wm-zl{min-width:48px;text-align:center;font-size:12px;color:#4f6249;font-variant-numeric:tabular-nums}
 .wm-arrange{margin-left:auto}
 .wm-hint{flex-basis:100%;font-size:11.5px;color:#6d7d66;padding:0 2px}
+.wm-bar .wm-morebar{display:none}
+/* an archived site a truck still needs: drawn faded */
+.world-svg .wm-archived{opacity:.55}
 /* overflow-anchor: the browser never picks a moving truck or tag as its scroll anchor (that made the page jump when the map changed) */
 .wm-view{overflow-anchor:none;position:relative;height:clamp(380px,64vh,660px);border-radius:12px;overflow:hidden;background:#a3b27a;box-shadow:inset 0 0 0 1px #c9d3bd}
 .wm-view svg.world-svg{position:absolute;left:0;top:0;display:block;width:100%;height:100%;min-height:0;max-height:none;transform-origin:50% 50%;will-change:transform;border:0;border-radius:0;background:#a3b27a;box-shadow:none;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
 .wm-view svg.world-svg:active{cursor:grabbing}
 .wm-view svg.wm-over-svg{background:none;pointer-events:none}
-.wm-tlayer{position:absolute;left:0;top:0;pointer-events:none;transform-origin:50% 50%;will-change:transform}
+/* the place tags: over the cranes and trucks, never scaled by a camera glide (placed in screen pixels every frame, on a layer of their own so the
+   page around the map is never repainted for them) */
+.wm-view svg.wm-tag-svg{background:none;pointer-events:none;cursor:default}
+/* while a glide changes the zoom the name tags fade out, and come back placed for the new zoom */
+.wm-view .wm-tag-svg,.wm-view .wm-ttag{transition:opacity .15s}.wm-view.wm-zooming :is(.wm-tag-svg,.wm-ttag){opacity:0}
+.wm-slide{position:absolute;left:0;top:0;transform-origin:50% 50%;will-change:transform}
+.wm-tlayer{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
 .wm-tlayer .wm-truck{position:absolute;left:0;top:0;width:0;height:0;will-change:transform;cursor:pointer}
 .wm-tlayer .wm-truck:focus{outline:none}.wm-tlayer .wm-truck:focus-visible .wm-ttag{box-shadow:0 0 0 2px #fff,0 0 0 4px #1c3a2d}
 .wm-tsvg{position:absolute;overflow:visible;pointer-events:none}.wm-tsvg *{pointer-events:visiblePainted}
-.wm-ttag{position:absolute;transform:translate(-50%,-100%);padding:1px 8px;border-radius:10px;border:1.6px solid #98cc2e;background:#2b3a33;color:#fff;font-size:11.5px;font-weight:750;line-height:16px;white-space:nowrap;pointer-events:none}
+.wm-ttag{position:absolute;transform:translate(-50%,-100%) scale(var(--ik,1));transform-origin:50% 100%;padding:1px 8px;border-radius:10px;border:1.6px solid #98cc2e;background:#2b3a33;color:#fff;font-size:11.5px;font-weight:750;line-height:16px;white-space:nowrap;pointer-events:none}
 .wm-truck.followed .wm-ttag{background:#d9f56b;color:#17301f}.wm-truck.followed .wm-tsvg{filter:drop-shadow(0 0 5px #e9ff8a)}
 .wm-tlayer.wm-far .wm-truck.parked:not(.followed) .wm-ttag{display:none}
 .world-svg [data-wm-truck],.world-svg [data-wm-site]{cursor:pointer}
@@ -3237,9 +3246,11 @@ button.cw-panel-btn{display:inline-flex;align-items:center;gap:6px;min-height:36
 .wm-stage.arranging .world-svg .wm-site-ground>polygon:last-of-type{stroke:#2f7353;stroke-width:320;stroke-dasharray:1400 900}
 .wm-note{position:absolute;top:10px;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px);padding:7px 14px;border-radius:20px;background:#1c3a2dE6;color:#f1f7e8;font-size:12px;font-weight:600;box-shadow:0 4px 14px #15361d40;pointer-events:none}
 .wm-mini{position:absolute;right:10px;bottom:10px;width:150px;height:100px;opacity:.94;border-radius:10px;background:#e9eddc;border:1px solid #ffffffb0;box-shadow:0 4px 14px #1f392533;cursor:pointer}
-.wm-card{position:absolute;top:10px;left:10px;width:min(300px,calc(100% - 20px));max-height:calc(100% - 20px);overflow:auto;padding:12px 14px 12px;border-radius:14px;background:#fbfcf7;border:1px solid #e1e7d9;box-shadow:0 10px 28px #14302438;font-size:13px;color:#24402f}
+.wm-card{position:absolute;z-index:2;top:10px;left:10px;width:min(300px,calc(100% - 20px));max-height:calc(clamp(380px,64vh,660px) - 20px);overflow:auto;padding:12px 14px 12px;border-radius:14px;background:#fbfcf7;border:1px solid #e1e7d9;box-shadow:0 10px 28px #14302438;font-size:13px;color:#24402f}
 .wm-card-head{display:flex;align-items:center;justify-content:space-between}
-.wm-card-kicker{font-size:10px;letter-spacing:1.4px;font-weight:700;color:#6d8a5f}
+.wm-card-kicker{font-size:11px;letter-spacing:1.3px;font-weight:700;color:#6d8a5f}
+.wm-card-tools{display:inline-flex;align-items:center;gap:6px}
+.wm-more-btn{display:none;min-height:28px;padding:2px 10px;border-radius:14px;background:#eef3e6;color:#1f3d2c;border:0;font-size:12px;font-weight:700}
 .wm-x{min-height:28px;min-width:28px;padding:0;border-radius:50%;background:#eef3e6;color:#1f3d2c;border:0;font-size:17px;line-height:1}
 .wm-card h3{margin:2px 0 6px;font-size:18px;color:#17301f}
 .wm-route{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 6px;font-weight:650}
@@ -3252,12 +3263,14 @@ button.cw-panel-btn{display:inline-flex;align-items:center;gap:6px;min-height:36
 .wm-watch{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;max-width:calc(100% - 24px);min-height:34px;padding:6px 14px;border-radius:20px;border:1px solid #f0c26a;background:#fffaf0;color:#1f3d2c;font-size:12.5px;font-weight:700;box-shadow:0 4px 14px #15361d30;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wm-watch[hidden]{display:none}
 .wm-watch .wm-rec{background:#d64a2e;box-shadow:0 0 0 3px #d64a2e33}
-.wm-card:not([hidden])~.wm-watch{left:auto;right:10px;transform:none}
+.wm-stage.carded .wm-watch{left:auto;right:10px;transform:none}
 .wm-eta{margin:4px 0 6px;font-size:12px;color:#4f6249;font-variant-numeric:tabular-nums}
 .wm-warn{margin:6px 0;padding:6px 8px;border-radius:8px;background:#fff1e6;color:#8a3d12;font-size:12px}
 .wm-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .wm-acts button{min-height:34px;padding:6px 12px;font-size:12.5px}
-.wm-send{display:inline-flex;gap:6px;align-items:center}.wm-send select{min-height:34px;max-width:160px}
+.wm-acts button.wm-link{background:none;border:0;box-shadow:none;color:#5d6f57;text-decoration:underline;padding:6px 4px;font-weight:600}
+.wm-acts button[disabled]{opacity:.55;cursor:not-allowed}
+.wm-send{display:inline-flex;gap:6px;align-items:center;max-width:100%}.wm-send select{min-height:34px;max-width:170px;min-width:0}
 .wm-move{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px}.wm-move button{min-height:32px;min-width:36px;padding:4px 0}
 .wm-bar-p{display:block;height:6px;border-radius:6px;background:#dfe7d3;overflow:hidden;margin:4px 0 0}.wm-bar-p.big{height:8px}
 .wm-bar-p b{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#f0a81c,#ffd36a)}
@@ -3265,20 +3278,29 @@ button.cw-panel-btn{display:inline-flex;align-items:center;gap:6px;min-height:36
 .wm-chip{flex:0 0 auto;display:grid;gap:2px;min-width:180px;max-width:260px;padding:8px 12px;border-radius:12px;text-align:left;background:linear-gradient(180deg,#fcfdf9,#f3f6ee);border:1px solid #e1e7d9;color:#1f3d2c;font-weight:400}
 .wm-chip.road{border-color:#f0c26a;background:linear-gradient(180deg,#fffaf0,#fbf1dc)}
 .wm-chip.busy{border-color:#bcd86a}
+.wm-chip.stuck{border-color:#e39a6b;background:linear-gradient(180deg,#fff7f1,#fdeee3)}
 .wm-chip.on{box-shadow:0 0 0 2px #98cc2e}
 .wm-chip-t{font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wm-chip-s{font-size:11.5px;color:#5d6f57;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wm-empty{margin:0;color:#6d7d66;font-size:12.5px}
 @media(max-width:750px){
- .wm-view{height:clamp(320px,58vh,520px)}
+ .wm-view{height:clamp(300px,54vh,500px)}
  .wm-hint{display:none}
  .wm-mini{display:none}
- .wm-card{top:auto;bottom:8px;left:8px;right:8px;width:auto;max-height:52%;padding:8px 12px}
- .wm-card h3{font-size:16px;margin:0 0 4px}.wm-card .wm-products,.wm-card .wm-addr{display:none}.wm-card .wm-stillages li:nth-child(n+4){display:none}
- .wm-watch{top:8px;font-size:12px}.wm-card .wm-load{margin:2px 0}.wm-card .wm-acts{margin-top:6px}
+ /* on a phone the card goes under the map (in the page), so it never covers the truck it follows; Details opens the lists */
+ .wm-card{position:static;width:auto;max-height:none;overflow:visible;padding:10px 12px;box-shadow:0 4px 14px #14302420}
+ .wm-card-kicker{font-size:12px}.wm-more-btn{display:inline-block}
+ .wm-card:not(.more) .wm-more{display:none}
+ .wm-card h3{font-size:17px;margin:0 0 4px}.wm-card .wm-load{margin:2px 0}.wm-card .wm-acts{margin-top:6px}
+ .wm-stage.carded .wm-watch{left:50%;right:auto;transform:translateX(-50%)}
+ .wm-watch{top:8px;font-size:12px}
  .world-svg .wm-tag-sub{display:none}
+ /* one row of map buttons; More opens Yard, Turn view, 3D view and Arrange map */
+ .wm-bar{gap:4px;padding:5px 6px;flex-wrap:wrap}.wm-bar .wm-btn{padding:6px 8px}.wm-bar .wm-btn.wm-sq{min-width:32px}.wm-bar .wm-zl{display:none}
+ .wm-bar .wm-morebar{display:inline-flex;margin-left:auto}
+ .wm-bar:not(.more) :is(.wm-turn,[data-wm="yard"],.wm-arrange){display:none}
  .wm-arrange{margin-left:0}
- .wm-tt{display:none}.wm-bar{gap:5px;padding:5px 6px}.wm-bar .wm-btn{padding:6px 10px}
+ .wm-tt{display:none}
  .wm-chip{min-width:160px}
 }
 @media print{.wm-stage,.wm-bar{display:none}}

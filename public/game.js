@@ -13,6 +13,8 @@ const byName=new Intl.Collator(undefined,{numeric:true}).compare;
 const SYS_CLASS={quickstage:'qs','at-pac':'at','tube-clip':'tc'},SYS_NAME={quickstage:'Quickstage','at-pac':'AT-PAC','tube-clip':'Tube & Clip'};
 const SYSTEMS=[['quickstage','Quickstage','Cups and blades'],['at-pac','AT-PAC','Ringlock rosettes'],['tube-clip','Tube & Clip','Tubes and fittings']];
 const TARE=50000,HEAVY=10000000,PICKING=['send','back','add'];
+// A truck in words: 'Big truck' (12.5 t) or 'Truck' (2 t), as on the map. Fleet codes (T-01) stay on the Office pages.
+const truckKind=t=>(t?.payload??0)>=HEAVY?'Big truck':'Truck';
 // ---------------------------------------------------------------- state of the board (per browser tab)
 const G={mode:'yard',site:null,truck:null,tab:null,picks:new Map(),sel:null,showAll:false,busy:false,office:false,ctx:null,seen:null,counts:new Map(),bumps:new Set(),cols:10,rows:4,who:null,hintOff:new Set(),
  hoverId:null,hoverT:0,pressT:0,items:{loc:null,list:null,at:0,busy:false},pending:null,win:null,systems:new Set(),lastSite:null,quiet:new Map(),aimT:0};
@@ -88,7 +90,7 @@ function headHTML(s){const sites=activeSites(s),site=sites.find(x=>x.id===G.site
  else if(G.mode==='add'){title='Add stock to the yard';sub='Tap what arrived, then how much';}
  else if(G.mode==='parts'){title='Your scaffold parts';sub='Which scaffold do you use? Tap one or more.';}
  else if(G.mode==='site'){title=site?.name??'Site';sub='On site now';}
- else if(G.mode==='truck'){const t=(s.trucks??[]).find(x=>x.id===G.truck);const w=t?truckWords(s,t):null;title=w?.word??'Truck';sub=t?esc(t.name)+(w.fill>0?' · '+w.load.toLowerCase():' · empty'):'';}
+ else if(G.mode==='truck'){const t=(s.trucks??[]).find(x=>x.id===G.truck);const w=t?truckWords(s,t):null;title=w?.word??'Truck';sub=t?truckKind(t)+(w.fill>0?' · '+w.load.toLowerCase():' · empty'):'';}
  else if(!products(s).length){title='Your scaffold parts';sub='Which scaffold do you use? Tap one or more.';}
  const x=G.mode==='yard'?'':'<button type="button" class="gm-x" data-gm-close aria-label="Close">&times;</button>';
  if(G.mode==='yard'&&products(s).length&&hasStock(s,yardOf(s)?.id))extra='<button type="button" class="gm-chip'+(G.showAll?' on':'')+'" data-gm-all aria-pressed="'+G.showAll+'">'+(G.showAll?'Only what I have':'Show every part')+'</button>';
@@ -159,7 +161,7 @@ function truckWords(s,t){const tasks=s.tasks??[],to=tasks.some(x=>x.to===t.id),f
  return {word,fill,load,state:g?.problem?'warn':t.status==='IN_TRANSIT'?'road':to||from?'busy':'idle'};}
 function tripsHTML(s){const list=(s.trucks??[]).filter(t=>!t.retired&&(t.game||t.status==='IN_TRANSIT')).sort((a,b)=>byName(a.name,b.name));
  const orders=(s.gameOrders??[]).map(o=>'<div class="gm-trip wait"><span class="gm-trip-wait" aria-hidden="true"></span><span class="gm-trip-t"><b>Waiting for a truck</b><small>'+(o.type==='SEND'?'To ':'Back from ')+esc(siteName(s,o.site))+'</small></span><button type="button" class="gm-x gm-x-sm" data-gm-cancel="'+esc(o.id)+'" aria-label="Do not send this">&times;</button></div>').join('');
- return list.map(t=>{const w=truckWords(s,t);return '<button type="button" class="gm-trip '+w.state+(G.truck===t.id&&G.mode==='truck'?' on':'')+'" data-gm-truck="'+esc(t.id)+'" title="'+esc(t.name+': '+w.word)+'">'+ovImg(t.payload>=HEAVY?'spr-truck12':'spr-truck2','gm-trip-img')+'<span class="gm-trip-t"><small>'+esc(w.word)+'</small><i class="gm-fill" aria-hidden="true"><b data-style="width:'+Math.round(w.fill*100)+'%"></b></i></span></button>';}).join('')+orders;}
+ return list.map(t=>{const w=truckWords(s,t);return '<button type="button" class="gm-trip '+w.state+(G.truck===t.id&&G.mode==='truck'?' on':'')+'" data-gm-truck="'+esc(t.id)+'" title="'+esc(truckKind(t)+': '+w.word)+'">'+ovImg(t.payload>=HEAVY?'spr-truck12':'spr-truck2','gm-trip-img')+'<span class="gm-trip-t"><small>'+esc(w.word)+'</small><i class="gm-fill" aria-hidden="true"><b data-style="width:'+Math.round(w.fill*100)+'%"></b></i></span></button>';}).join('')+orders;}
 // ---------------------------------------------------------------- hints: one at a time, game-tutorial style, each dismissable for good
 function hintOf(s){const stuck=(s.trucks??[]).find(t=>t.game?.problem);if(stuck)return {id:'',text:'A truck is waiting'+(stuck.status==='AT_SITE'?' at '+siteName(s,stuck.at):'')+': '+stuck.game.problem,warn:true};
  // the crew cannot finish a lift for a truck on a trip: say why, and where to sort it out
@@ -302,17 +304,25 @@ function onSubmit(e){const f=e.target.closest('[data-gm-newsite-form]');if(!f)re
 function onOver(e){if(e.pointerType==='touch')return;const b=e.target.closest?.('[data-gm-slot]');if(!b)return;clearTimeout(G.hoverT);G.hoverT=setTimeout(()=>showCard(b),PICKING.includes(G.mode)?500:200);}
 function onOut(e){const b=e.target.closest?.('[data-gm-slot]');if(!b)return;if(e.relatedTarget&&b.contains(e.relatedTarget))return;clearTimeout(G.hoverT);hideCard();}
 function onDown(e){if(e.pointerType!=='touch')return;const b=e.target.closest?.('[data-gm-slot]');if(!b)return;clearTimeout(G.pressT);G.pressT=setTimeout(()=>showCard(b,true),480);}
-// Beside the inventory window, level with the slot, so it never covers the grid (a phone: just above the sheet).
-function showCard(b,sticky=false){const card=document.querySelector('[data-gm-card]'),s=G.ctx?.state;if(!card||!s)return;const id=b.dataset.gmSlot,p=products(s).find(x=>x.id===id);if(!p)return;G.hoverId=id;
- card.innerHTML=cardHTML(s,p);card.__h=null;card.hidden=false;card.classList.toggle('sticky',sticky);const r=b.getBoundingClientRect(),dock=document.querySelector('[data-gm-win]')?.getBoundingClientRect(),w=card.offsetWidth,h=card.offsetHeight;let x,y;
- if(phone()||!dock){x=Math.max(8,Math.min(innerWidth-w-8,r.left+r.width/2-w/2));y=(dock?dock.top:r.top)-h-8;if(y<8)y=8;}
- else{x=dock.left-w-12;y=r.top-10;if(x<8)x=Math.min(innerWidth-w-8,dock.right+12);if(y+h>innerHeight-8)y=innerHeight-h-8;if(y<8)y=8;}
+// Beside the inventory window, level with the slot, so it never covers the grid. A phone: in the strip of map between the top bar and the sheet;
+// where that strip is too short for the card, a one-line card (the name and how many are in the yard); shorter still, no card (the amount panel
+// already names the part). It never covers the top bar, the inventory or the big buttons.
+function showCard(b,sticky=false){const card=document.querySelector('[data-gm-card]'),s=G.ctx?.state;if(!card||!s)return;const id=b.dataset.gmSlot,p=products(s).find(x=>x.id===id);if(!p)return;G.hoverId=id;G.cardTight=false;
+ card.innerHTML=cardHTML(s,p);card.__h=null;card.hidden=false;card.classList.remove('tight');card.classList.toggle('sticky',sticky);const r=b.getBoundingClientRect(),dock=document.querySelector('[data-gm-win]')?.getBoundingClientRect(),w=card.offsetWidth;let h=card.offsetHeight,x,y;
+ const topBar=document.querySelector('.gm-top')?.getBoundingClientRect(),top=(topBar?.bottom??0)+6;
+ if(phone()||!dock){const bar=document.querySelector('.gm-bar')?.getBoundingClientRect(),bottom=Math.min(dock&&dock.height?dock.top:r.top,bar&&bar.height?bar.top:innerHeight)-6;
+  if(h>bottom-top){G.cardTight=true;card.innerHTML=cardTight(s,p);card.classList.add('tight');h=card.offsetHeight;}
+  if(h>bottom-top){hideCard();return;}
+  x=Math.max(8,Math.min(innerWidth-card.offsetWidth-8,r.left+r.width/2-card.offsetWidth/2));y=bottom-h;}
+ else{x=dock.left-w-12;y=r.top-10;if(x<8)x=Math.min(innerWidth-w-8,dock.right+12);if(y+h>innerHeight-8)y=innerHeight-h-8;if(y<top)y=top;}
  card.style.left=Math.round(x)+'px';card.style.top=Math.round(y)+'px';}
+// The one-line card for a short strip of map on a phone.
+export function cardTight(s,p){const q=rowsAt(s,yardOf(s)?.id).get(p.id)?.quantity??0;return '<div class="gm-card-line"><b>'+esc(p.name)+'</b><span>'+num(q)+' in the yard</span></div>';}
 function hideCard(){const card=document.querySelector('[data-gm-card]');if(card&&!card.hidden){card.hidden=true;G.hoverId=null;}}
-function syncCard(){if(!G.hoverId)return;const b=document.querySelector('[data-gm-slot="'+CSS.escape(G.hoverId)+'"]');if(!b||!b.getClientRects().length||getComputedStyle(b.closest('.gm-dock')??b).visibility==='hidden'){hideCard();return;}const card=document.querySelector('[data-gm-card]');const s=G.ctx.state,p=products(s).find(x=>x.id===G.hoverId);if(card&&p){const html=cardHTML(s,p);if(card.__h!==html){card.__h=html;card.innerHTML=html;}}}
-export function cardHTML(s,p){const yard=yardOf(s),yr=rowsAt(s,yard?.id).get(p.id),sites=activeSites(s).map(x=>({name:x.name,q:rowsAt(s,x.id).get(p.id)?.quantity??0})).filter(x=>x.q>0),trucks=(s.trucks??[]).map(t=>({name:t.name,q:rowsAt(s,t.id).get(p.id)?.quantity??0})).filter(x=>x.q>0);
+function syncCard(){if(!G.hoverId)return;const b=document.querySelector('[data-gm-slot="'+CSS.escape(G.hoverId)+'"]');if(!b||!b.getClientRects().length||getComputedStyle(b.closest('.gm-dock')??b).visibility==='hidden'){hideCard();return;}const card=document.querySelector('[data-gm-card]');const s=G.ctx.state,p=products(s).find(x=>x.id===G.hoverId);if(card&&p){const html=G.cardTight?cardTight(s,p):cardHTML(s,p);if(card.__h!==html){card.__h=html;card.innerHTML=html;}}}
+export function cardHTML(s,p){const yard=yardOf(s),yr=rowsAt(s,yard?.id).get(p.id),sites=activeSites(s).map(x=>({name:x.name,q:rowsAt(s,x.id).get(p.id)?.quantity??0})).filter(x=>x.q>0),trucks=(s.trucks??[]).map(t=>({name:truckKind(t).toLowerCase(),q:rowsAt(s,t.id).get(p.id)?.quantity??0})).filter(x=>x.q>0);
  const line=(k,v,cls='')=>'<li class="'+cls+'"><span>'+esc(k)+'</span><b>'+num(v)+'</b></li>',len=gaLength(p);
  return '<div class="gm-card-head">'+gaItem(p,'gm-card-pic')+'<div><b>'+esc(p.name)+'</b><small>'+esc([SYS_NAME[p.system]??p.system,p.category].filter(Boolean).join(' · '))+'</small></div></div><ul>'
-  +line('In the yard',yr?.quantity??0,'yard')+(yr&&yr.free!==yr.quantity?line('free to send',yr.free??0,'sub'):'')+sites.map(x=>line(x.name,x.q)).join('')+trucks.map(x=>line('On '+x.name,x.q)).join('')+'</ul>'
+  +line('In the yard',yr?.quantity??0,'yard')+(yr&&yr.free!==yr.quantity?line('free to send',yr.free??0,'sub'):'')+sites.map(x=>line(x.name,x.q)).join('')+(trucks.length>1?line('On the trucks',trucks.reduce((n,x)=>n+x.q,0)):trucks.map(x=>line('On a '+x.name,x.q)).join(''))+'</ul>'
   +'<p>'+[len&&gaLenTag(p)?'Length '+(Math.round(len*100)/100)+' m':'',p.packQuantity>0?'1 pack = '+num(p.packQuantity)+' pieces':'',p.unitWeight>0?(Math.round(p.unitWeight/100)/10)+' kg each':''].filter(Boolean).join(' · ')+'</p></div>';}
-export const __gm={state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;}};
+export const __gm={state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setTruck:id=>{G.mode='truck';G.truck=id;},head:s=>headHTML(s),setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;}};
