@@ -3,8 +3,10 @@
 // The map is schematic: one block per place (the yard in block 0,0, each active site in its own block), a grid of streets between the blocks.
 // A street corridor is a footpath, a two-lane carriageway and a footpath; trucks keep left (Australia) and turn on rounded corners.
 // Trip time: a truck drives at truckFactor x the simulation's demo travel speed (config.speed, 4000 mm/s by default -> 8 m/s, about 29 km/h), at
-// least minMs (scaled with that speed, so the fast test fixtures keep sub-second trips) and at most maxMs. A site across the street is a short trip.
-export const WORLD={street:12000,foot:2200,lane:2000,truckFactor:2,minMs:8000,maxMs:45000,siteFront:2000,yardFront:4000,side:9000,siteBack:18000,yardBack:9000,minW:52000,minH:46000,grain:8000,turn:7000,lotRange:20,wait:14000,gateIn:3000};
+// least minMs (scaled with that speed, so the fast test fixtures keep sub-second trips) and at most maxMs. A site across the street is a short trip,
+// still long enough to watch. The time is taken from the road length measured in standard blocks (tripLength): one very large site makes every
+// block bigger on the map, but never makes every trip in the company longer.
+export const WORLD={street:12000,foot:2200,lane:2000,truckFactor:2,minMs:14000,maxMs:45000,siteFront:2000,yardFront:4000,side:9000,siteBack:18000,yardBack:9000,minW:52000,minH:46000,grain:8000,turn:7000,lotRange:20,wait:14000,gateIn:-300,refW:64000,refH:56000,fallbackLength:150000};
 export const DEFAULT_PARKING={side:'RIGHT',vehicleLength:9000,vehicleWidth:2100,clearance:500,length:10000,width:3100};
 const R=Math.round,S=WORLD.street,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const DIRS=[{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}];// E S W N
@@ -26,7 +28,8 @@ export function extentOf(place){const b=bbox(place.points);if(place.kind!=='yard
 // Truck length bumper to bumper: deck + headboard gap + cab (visual.js truckDims).
 export const truckTotal=t=>{const l=t?.length??6000;return l+120+(l>=4500?1900:1550);};
 // Candidate lots around the yard, the ones that keep the map compact on a wide screen first. Lot (c,r) projects to screen x ~ c-r, y ~ c+r.
-export function lotOrder(bw,bh){const pw=bw+S,ph=bh+S,out=[];for(let r=-6;r<=6;r++)for(let c=-6;c<=6;c++){if(!c&&!r)continue;const X=(c*pw-r*ph)*0.866,Y=(c*pw+r*ph)*0.55;out.push({c,r,cost:(X/1.7)**2+Y**2});}return out.sort((a,b)=>a.cost-b.cost||a.r-b.r||a.c-b.c);}
+// n: how many lots are needed; the ring grows with it, so a company with hundreds of sites still gets one lot each.
+export function lotOrder(bw,bh,n=0){const pw=bw+S,ph=bh+S,out=[],K=Math.max(6,Math.ceil((Math.sqrt(2*n+1)+1)/2)+1);for(let r=-K;r<=K;r++)for(let c=-K;c<=K;c++){if(!c&&!r)continue;const X=(c*pw-r*ph)*0.866,Y=(c*pw+r*ph)*0.55;out.push({c,r,cost:(X/1.7)**2+Y**2});}return out.sort((a,b)=>a.cost-b.cost||a.r-b.r||a.c-b.c);}
 const validLot=m=>m&&Number.isInteger(m.col)&&Number.isInteger(m.row)&&Math.abs(m.col)<=WORLD.lotRange&&Math.abs(m.row)<=WORLD.lotRange;
 // Block size: every place fits its block with room for the site building behind it and houses at the sides.
 export function blockSize(places){let w=WORLD.minW,h=WORLD.minH;for(const p of places){const e=extentOf(p),site=p.kind!=='yard';w=Math.max(w,e.x1-e.x0+2*WORLD.side);h=Math.max(h,e.y1-e.y0+(site?WORLD.siteFront+WORLD.siteBack:WORLD.yardFront+WORLD.yardBack));}return {bw:Math.ceil(w/WORLD.grain)*WORLD.grain,bh:Math.ceil(h/WORLD.grain)*WORLD.grain};}
@@ -41,12 +44,13 @@ export function worldLayout(yard,sites,given=null,also=null){
  for(const s of list)if(s.kind==='site'){const g=fixed?.[s.id];if(g){lots.set(s.id,{col:g[0],row:g[1],auto:!!g[2]});taken.add(g[0]+','+g[1]);}}
  if(!fixed||list.some(s=>s.kind==='site'&&!lots.has(s.id))){
   for(const s of list)if(s.kind==='site'&&!lots.has(s.id)&&validLot(s.map)&&!taken.has(s.map.col+','+s.map.row)){lots.set(s.id,{col:s.map.col,row:s.map.row,auto:false});taken.add(s.map.col+','+s.map.row);}
-  const order=lotOrder(bw,bh);let k=0;for(const s of list)if(s.kind==='site'&&!lots.has(s.id)){while(k<order.length&&taken.has(order[k].c+','+order[k].r))k++;const o=order[k]??{c:k+7,r:0};lots.set(s.id,{col:o.c,row:o.r,auto:true});taken.add(o.c+','+o.r);}}
+  const order=lotOrder(bw,bh,list.length);let k=0;for(const s of list)if(s.kind==='site'&&!lots.has(s.id)){while(k<order.length&&taken.has(order[k].c+','+order[k].r))k++;const o=order[k]??{c:k+7,r:0};k++;lots.set(s.id,{col:o.c,row:o.r,auto:true});taken.add(o.c+','+o.r);}}
  const places=list.map(src=>{const lot=lots.get(src.id),X0=lot.col*pw,Y0=lot.row*ph,e=extentOf(src),front=src.kind==='yard'?WORLD.yardFront:WORLD.siteFront;
-  const face=faceOf(src.kind,lot.row),ox=R(X0+(bw-(e.x1-e.x0))/2-e.x0),oy=face==='N'?R(Y0+front-e.y0):R(Y0+bh-front-e.y1),streetY=face==='N'?Y0-S/2:Y0+bh+S/2;const p={id:src.id,kind:src.kind,name:src.name??'',col:lot.col,row:lot.row,auto:lot.auto,face,fs:face==='N'?-1:1,streetRow:face==='N'?lot.row-1:lot.row,ox,oy,block:{x0:X0,y0:Y0,x1:X0+bw,y1:Y0+bh},ext:{x0:e.x0+ox,y0:e.y0+oy,x1:e.x1+ox,y1:e.y1+oy},streetY,src};
+  const face=faceOf(src.kind,lot.row),ox=R(X0+(bw-(e.x1-e.x0))/2-e.x0),oy=face==='N'?R(Y0+front-e.y0):R(Y0+bh-front-e.y1),streetY=face==='N'?Y0-S/2:Y0+bh+S/2;const p={id:src.id,kind:src.kind,name:src.name??'',archived:src.kind==='site'&&!!src.status&&src.status!=='ACTIVE',col:lot.col,row:lot.row,auto:lot.auto,face,fs:face==='N'?-1:1,streetRow:face==='N'?lot.row-1:lot.row,ox,oy,block:{x0:X0,y0:Y0,x1:X0+bw,y1:Y0+bh},ext:{x0:e.x0+ox,y0:e.y0+oy,x1:e.x1+ox,y1:e.y1+oy},streetY,src};
   if(src.kind==='yard'){const bay=bayOf(src);p.bay={...bay,x:bay.px+ox,y:bay.py+oy};p.attachX=R(ox+bay.px+bay.clearance+bay.vehicleWidth/2);p.rot=0;p.lb=bbox(src.points);}
   else{p.rot=siteRot(src,face);p.lb=bbox(src.points);const g=src.gate&&Number.isFinite(src.gate.x)?placePoint(p,src.gate.x+1000,src.gate.y).x:(p.ext.x0+p.ext.x1)/2;p.attachX=R(clamp(g,Math.max(X0+10000,p.ext.x0+2600),Math.min(X0+bw-10000,p.ext.x1-2600)));
-   // The site's "bay" is its gate: a truck backs in off the street until its tail is WORLD.gateIn inside the fence line, cab to the street.
+   // The site's "bay" is its gate: a truck backs onto the crossover until its tail is at the fence line (WORLD.gateIn: 0.3 m short of it), cab to
+   // the street, so the stillages the crane sets down just inside the gate are never hidden under it.
    p.gateY=face==='N'?p.ext.y0:p.ext.y1;}
   p.pts=(src.points??[]).map(q=>p.kind==='yard'?{x:q.x+ox,y:q.y+oy}:placePoint(p,q.x,q.y));
   return p;});
@@ -124,8 +128,9 @@ export function worldRoute(l,truck,fromId,toId,opts={}){
  let rev=null,end;
  if(toBay){const RV=9000;C.push({x:dest.x+dx*RV,y:to.streetY});offs.push(lane);}
  let pts=laneLine(C,offs);
- // into the bay (a yard) or the gate (a site): past it, stop, then back in on a quarter circle (tighter when the gate is close to the lane)
- if(toBay){const bay=bayPose(l,to.id,truck),Q=pts.at(-1),yl=Q.y,sy=Math.sign(bay.y-yl)||-1,Rr=clamp(Math.abs(yl-bay.y),1000,to.kind==='site'?8000:6000),s=dx;rev=pts.length-1;const c={x:dest.x+s*Rr,y:yl+sy*Rr};pts.push({x:dest.x+s*Rr,y:yl});for(let k=1;k<=6;k++){const a=Math.PI/2*k/6;pts.push({x:c.x-s*Math.sin(a)*Rr,y:c.y-sy*Math.cos(a)*Rr});}pts.push({x:bay.x,y:bay.y});end=bay;}
+ // into the bay (a yard) or the gate (a site): past it, stop, then back in on a quarter circle (tighter when the gate is close to the lane) and the
+ // last metre straight, so the truck stands square to the street
+ if(toBay){const bay=bayPose(l,to.id,truck),Q=pts.at(-1),yl=Q.y,sy=Math.sign(bay.y-yl)||-1,Rr=clamp(Math.abs(yl-bay.y)-800,1000,to.kind==='site'?8000:6000),s=dx;rev=pts.length-1;const c={x:dest.x+s*Rr,y:yl+sy*Rr};pts.push({x:dest.x+s*Rr,y:yl});for(let k=1;k<=6;k++){const a=Math.PI/2*k/6;pts.push({x:c.x-s*Math.sin(a)*Rr,y:c.y-sy*Math.cos(a)*Rr});}pts.push({x:bay.x,y:bay.y});end=bay;}
  else{const Q=pts.at(-1),P=pts.at(-2)??Q,h=unit(P,Q);end={x:R(Q.x),y:R(Q.y),hx:Math.round(h.x),hy:Math.round(h.y),bay:false};}
  const out=[];for(const p of pts){const q=[R(p.x),R(p.y)],m=out.at(-1);if(!m||m[0]!==q[0]||m[1]!==q[1])out.push(q);else if(rev!=null&&out.length<=rev)rev--;}
  let length=0;for(let i=1;i<out.length;i++)length+=Math.hypot(out[i][0]-out[i-1][0],out[i][1]-out[i-1][1]);
@@ -134,6 +139,9 @@ export function worldRoute(l,truck,fromId,toId,opts={}){
 // A stored route still matches the map when neither end nor the block size has moved since it was built (else the page re-draws the same trip on
 // today's roads, at the same fraction of the way).
 export function routeFits(l,route){const a=l?.byId.get(route?.from),b=l?.byId.get(route?.to);if(!a||!b||!route.points||route.points.length<2)return false;if(route.grid&&(route.grid[0]!==l.bw||route.grid[1]!==l.bh))return false;if(route.lot&&(route.lot[0]!==b.col||route.lot[1]!==b.row))return false;if(route.fromLot&&(route.fromLot[0]!==a.col||route.fromLot[1]!==a.row))return false;return true;}
+// The road length a trip is timed on: the drawn road with every block counted at no more than a standard block (WORLD.refW x refH), so a very
+// large site that makes every block bigger does not make every trip longer. The same as the drawn length on a map of ordinary blocks.
+export function tripLength(route,l){const P=route?.points;if(!P||P.length<2)return route?.length??0;const kx=Math.min(1,(WORLD.refW+S)/(l?.pw||1)),ky=Math.min(1,(WORLD.refH+S)/(l?.ph||1));if(kx===1&&ky===1)return route.length??0;let n=0;for(let i=1;i<P.length;i++)n+=Math.hypot((P[i][0]-P[i-1][0])*kx,(P[i][1]-P[i-1][1])*ky);return R(n);}
 // Travel time for a road length at the simulation's demo speed (config.speed, as the forklifts and cranes use it).
 export function tripMs(length,config={}){const speed=Math.max(1,Number.isFinite(config?.speed)&&config.speed>0?config.speed:4000),k=4000/speed;
  return Math.max(250,R(clamp((length||0)/(WORLD.truckFactor*speed)*1000,WORLD.minMs*Math.min(1,k),WORLD.maxMs)/50)*50);}
