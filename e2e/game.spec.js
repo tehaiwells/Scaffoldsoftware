@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {office} from './workflow.js';
+import {createCompany,office} from './workflow.js';
 // The game board, as a new owner meets it: four boxes to sign up, pick a yard size, say which scaffold (pictures) and load its parts list, add
 // stock, send it to a new site with one button, watch it delivered, bring it back, and find the Office pages behind the Office door with a way
 // back to the yard.
@@ -7,7 +7,7 @@ const api=(page,path,data)=>page.evaluate(async([path,data])=>{const res=await f
 async function signUp(page,name){
   await page.getByRole('textbox',{name:'Company name',exact:true}).fill(name);await page.getByRole('textbox',{name:'Your name',exact:true}).fill('Test Owner');
   await page.getByRole('textbox',{name:'Email',exact:true}).fill(`game-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await page.getByRole('textbox',{name:'Password',exact:true}).fill('Local-demo-test-2026!');
-  await expect(page.getByRole('checkbox')).toHaveCount(0);await page.getByRole('button',{name:'Create company',exact:true}).click();
+  await expect(page.getByRole('checkbox')).toHaveCount(0);await createCompany(page);
 }
 test('sign up, choose a yard size, load the parts, add stock, send it to a site, see it delivered and bring it back',async({page})=>{
   test.setTimeout(240000);

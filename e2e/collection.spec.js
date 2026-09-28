@@ -21,7 +21,8 @@ test('a collection brings the site stock back: booked on the site card, loaded b
   await office(page,'Truck 12.5 tonne').click();
   const unload=page.getByRole('button',{name:'Unload T-01 at the yard',exact:true});
   // The yard crew may start unloading by itself (yard jobs); otherwise the collection card offers the unload.
-  for(let i=0;i<180;i++){if(await unload.isVisible()){await unload.click();break;}if(await page.getByText('The crew is unloading it',{exact:false}).count()||!(await page.locator('.rt-truck').count()))break;await page.waitForTimeout(500);}
+  await expect.poll(async()=>await unload.isVisible()?'unload':await page.getByText('The crew is unloading it',{exact:false}).count()?'crew':await page.locator('.rt-truck').count()?'on the way':'off the truck',{timeout:90000,intervals:[250]}).not.toBe('on the way');
+  if(await unload.isVisible())await unload.click();
   await office(page,'Client sites').click();
   await expect(status).toHaveText('RETURNED',{timeout:90000});
 });

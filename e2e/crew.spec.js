@@ -1,12 +1,12 @@
 import {test,expect} from '@playwright/test';
-import {firstYard,office} from './workflow.js';
+import {createCompany,firstYard,office} from './workflow.js';
 // The crew phone view: tap a worker on the Workers page, give orders with the big buttons, keep the page open through polls, fit a phone, and open straight from the link.
 const api=(page,path,data)=>page.evaluate(async([path,data])=>{const res=await fetch('/api/'+path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(data)});const v=await res.json();if(!res.ok)throw new Error(v.error);return v;},[path,data]);
 test('a worker opens on the crew phone view, takes orders there and the link opens it again',async({page})=>{
   await page.goto('/');
   await page.getByRole('textbox',{name:'Company name',exact:true}).fill('Crew DEMO');await page.getByRole('textbox',{name:'Your name',exact:true}).fill('Test Owner');
   await page.getByRole('textbox',{name:'Email',exact:true}).fill(`crew-${Date.now()}@example.test`);await page.getByRole('textbox',{name:'Password',exact:true}).fill('Local-demo-test-2026!');
-  await page.getByRole('button',{name:'Create company',exact:true}).click();
+  await createCompany(page);
   await firstYard(page);
   const yard=(await api(page,'state')).yards[0];
   await api(page,'commands/resources',{location:yard.id,workers:3,machines:1,capacity:1500000,stepMs:300,speed:3000,jobs:false});
@@ -28,7 +28,7 @@ test('a worker opens on the crew phone view, takes orders there and the link ope
   await page.locator('[data-cw-cmd="HOLD"]').click();await expect(page.locator('.cw-pill')).toHaveText('On hold',{timeout:15000});await expect(page.locator('[data-cw-cmd="HOLD"]')).toBeDisabled();
   await page.locator('[data-cw-cmd="AUTO"]').click();await expect(page.locator('.cw-pill')).not.toHaveText('On hold',{timeout:15000});
   // The Assign menu stays open through the 1 s poll, and assigning a job shows it under Now.
-  await page.locator('[data-cw-menu="assign"]').click();await expect(page.locator('#cw-menu')).toBeVisible();await page.waitForTimeout(2500);await expect(page.locator('#cw-menu')).toBeVisible();
+  await page.locator('[data-cw-menu="assign"]').click();await expect(page.locator('#cw-menu')).toBeVisible();{const polled=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/state',{timeout:15000});await polled();await polled();}await expect(page.locator('#cw-menu')).toBeVisible();
   await page.locator('#cw-menu [data-cw-assign]').filter({hasText:'Sweep the loading zone'}).click();
   await expect(page.locator('.cw-now .cw-big')).toHaveText(/Sweep the loading zone/,{timeout:15000});
   // Next worker, then the link opens the first worker again after a reload.

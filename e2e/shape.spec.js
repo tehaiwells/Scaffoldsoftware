@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {office} from './workflow.js';
+import {createCompany,office} from './workflow.js';
 // The yard shape editor and the one-click stillage turn, end to end. Each test starts a fresh company, so it opens on the first-run editor.
 const button=(p,name)=>p.getByRole('button',{name,exact:true});
 const width=p=>p.getByRole('spinbutton',{name:'Width (m)',exact:true});
@@ -7,7 +7,7 @@ const save=p=>p.getByRole('button',{name:/^Save yard/});
 async function cmd(p,name,data){const res=await p.request.post('/api/commands/'+name,{data,headers:{'Idempotency-Key':crypto.randomUUID()}});const body=await res.json();if(!res.ok())throw new Error(body.error);return body;}
 const snapshot=async p=>(await p.request.get('/api/state')).json();
 async function register(p){
-  await p.goto('/');await p.getByLabel('Company name').fill('Shape editor DEMO');await p.getByLabel('Your name').fill('Test Owner');await p.getByLabel('Email').fill(`shape-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await p.getByLabel('Password').fill('Local-demo-test-2026!');await button(p,'Create company').click();
+  await p.goto('/');await p.getByLabel('Company name').fill('Shape editor DEMO');await p.getByLabel('Your name').fill('Test Owner');await p.getByLabel('Email').fill(`shape-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`);await p.getByLabel('Password').fill('Local-demo-test-2026!');await createCompany(p);
   // the first run offers yard sizes; drawing your own shape opens the editor
   await button(p,'Draw my own shape instead').click();await expect(p.locator('#shape-editor')).toBeVisible();
 }
@@ -39,7 +39,7 @@ test('one click on Save yard saves the new size (no click is lost to the 1 s ref
 
 test('focus stays where the owner put it: drag the right side, then type a width',async({page})=>{
   await yardWithStock(page);await openEditor(page);
-  const handle=page.locator('#shape-svg [data-handle="side:1"]').first();await handle.scrollIntoViewIfNeeded();const b=await handle.boundingBox();
+  const handle=page.locator('#shape-svg [data-handle="side:1"]').first();let b;await expect(async()=>{await handle.scrollIntoViewIfNeeded({timeout:2000});b=await handle.boundingBox();expect(b).not.toBeNull();}).toPass({timeout:15000});
   await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2+40,b.y+b.height/2,{steps:5});
   await expect(page.locator('#shape-svg .dim-label').first()).not.toHaveText('20.0 m');await page.mouse.up();
   await width(page).click();await width(page).fill('25');await width(page).press('Tab');
@@ -58,7 +58,7 @@ test('typing survives the poll, and Movement activity keeps updating while the e
 
 test('the gate cannot be dropped outside the yard; it stays at its last allowed spot',async({page})=>{
   await yardWithStock(page);await openEditor(page);
-  const gate=page.locator('#shape-svg [data-handle="gate"]');await gate.scrollIntoViewIfNeeded();await expect(gate).toBeInViewport();const b=await gate.boundingBox(),svg=await page.locator('#shape-svg').boundingBox();
+  const gate=page.locator('#shape-svg [data-handle="gate"]');let b;await expect(async()=>{await gate.scrollIntoViewIfNeeded({timeout:2000});await expect(gate).toBeInViewport({timeout:1000});b=await gate.boundingBox();expect(b).not.toBeNull();}).toPass({timeout:15000});const svg=await page.locator('#shape-svg').boundingBox();
   expect(svg.x).toBeGreaterThanOrEqual(0);expect(svg.y).toBeGreaterThanOrEqual(0);// the drop point (the plan's top-left corner) must be on screen too
   await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(svg.x+4,svg.y+4,{steps:8});await page.mouse.up();
   const [x,y]=(await gate.getAttribute('aria-label')).match(/(-?[\d.]+), (-?[\d.]+) m/).slice(1).map(Number);

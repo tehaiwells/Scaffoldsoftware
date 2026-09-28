@@ -13,6 +13,9 @@ const nav=office;
 // First run: the yard-size tiles, or 'Draw my own shape instead' for the shape editor with its 20 x 16 m rectangle; either lands on the game board.
 export async function firstYard(p){await p.getByRole('button',{name:'Draw my own shape instead',exact:true}).click();await visible(p,button(p,'Create yard'));assert.equal(await p.getByRole('spinbutton',{name:'Width (m)',exact:true}).inputValue(),'20');assert.equal(await p.getByRole('spinbutton',{name:'Depth (m)',exact:true}).inputValue(),'16');await button(p,'Create yard').click();await visible(p,p.getByRole('navigation',{name:'What do you want to do?'}));}
 // Fold-out forms: the summary carries a title and a small subtitle, so match on the title.
+// The demo pace the other specs set through the resources command, here through the same form the flow already saves: pickups and placements take
+// 100 ms instead of 700 ms and travel is 20 m/s, so a truck trip takes about 3 s instead of 14 s. Both saves need it: each one writes the pace.
+const pace=async p=>{await p.getByRole('spinbutton',{name:'Pickup / placement time (milliseconds)',exact:true}).fill('100');await p.getByRole('spinbutton',{name:'Travel speed (mm per second)',exact:true}).fill('20000');};
 const fold=(p,title)=>p.locator('summary').filter({hasText:title}).first();
 async function visible(p,locator,timeout=45000){
   if(!p.domSnapshot)return locator.first().waitFor({state:'visible',timeout});
@@ -37,14 +40,18 @@ async function sent(p,name,click,sign){
   const [res]=await Promise.all([p.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/commands/'+name,{timeout:45000}),click()]);
   assert.ok(res.ok(),`${name} was refused: ${await res.text()}`);await visible(p,sign);
 }
+// Clicks Create company and checks the server's answer, so a refused sign-up (the server takes 10 sign-ups a minute from one address) fails here
+// with its reason instead of as a timeout further on. A driver without waitForResponse only clicks.
+export async function createCompany(p){const click=()=>button(p,'Create company').click();if(!p.waitForResponse)return click();
+  const [res]=await Promise.all([p.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/register',{timeout:45000}),click()]);assert.ok(res.ok(),`Sign-up was refused: ${await res.text()}`);}
 export async function setupDemo(p,email){
-  await fill(p,'Company name','Automated browser DEMO');await fill(p,'Your name','Test Owner');await fill(p,'Email',email);await fill(p,'Password','Local-demo-test-2026!');await button(p,'Create company').click();
+  await fill(p,'Company name','Automated browser DEMO');await fill(p,'Your name','Test Owner');await fill(p,'Email',email);await fill(p,'Password','Local-demo-test-2026!');await createCompany(p);
   await setupYard(p);
 }
 export async function setupYard(p){
   // First run: the yard-size tiles; 'Draw my own shape instead' opens the shape editor with a 20 × 16 m rectangle already filled in. Creating the yard lands an operations user on the game board.
   await firstYard(p);
-  await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Configure workers & equipment · DEMO ONLY').click();await sent(p,'resources',()=>button(p,'Save resources').click(),p.getByRole('status').filter({hasText:'Saved.'}));
+  await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Configure workers & equipment · DEMO ONLY').click();await pace(p);await sent(p,'resources',()=>button(p,'Save resources').click(),p.getByRole('status').filter({hasText:'Saved.'}));
   await nav(p,'Account').click();await sent(p,'seed',()=>button(p,'Add synthetic demo catalogue').click(),p.getByRole('status').filter({hasText:'Synthetic catalogue added.'}));await button(p,'Back to the yard').click();await visible(p,button(p,'Office'));
   await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Add a stillage or small-parts cage').click();await button(p,'Register stillage / cage').click();await visible(p,p.getByRole('button',{name:/^S-001/}));
   await open(p,'Stock','Stock ledger');await fold(p,'Record original stock (opening balance)').click();await sent(p,'opening',()=>button(p,'Record original stock').click(),p.getByRole('status').filter({hasText:'Saved.'}));await stockIs(p,'DEMO ledger — 2 m',{'In yard':'100','At sites':'0',Total:'100'});
@@ -53,7 +60,7 @@ export async function setupYard(p){
 export async function setupLogistics(p){
   await open(p,'Truck 12.5 tonne','Big trucks');await fold(p,'Add a 12.5 tonne truck').click();await button(p,'Add truck').click();await visible(p,p.getByRole('img',{name:'T-01 truck deck',exact:true}));
   await open(p,'Client sites','Client sites');await fold(p,'Create a site').click();await fill(p,'Site name','Browser demo site');await fill(p,'Address / location','Synthetic test location');await button(p,'Create site').click();await visible(p,p.getByRole('heading',{name:/Browser demo site/}));
-  await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Configure workers & equipment · DEMO ONLY').click();await p.getByRole('combobox',{name:'Location',exact:true}).selectOption({label:'Browser demo site'});await sent(p,'resources',()=>button(p,'Save resources').click(),p.getByRole('status').filter({hasText:'Saved.'}));
+  await open(p,'Yard (layout plan)','Yard layout');await fold(p,'Configure workers & equipment · DEMO ONLY').click();await p.getByRole('combobox',{name:'Location',exact:true}).selectOption({label:'Browser demo site'});await pace(p);await sent(p,'resources',()=>button(p,'Save resources').click(),p.getByRole('status').filter({hasText:'Saved.'}));
 }
 export async function deliverDemo(p){
   await open(p,'Client sites','Client sites');await fold(p,'Quick single-line request').click();await button(p,'Send to yard').click();await visible(p,button(p,'Plan packs & load truck'));await p.getByRole('combobox',{name:'Loading truck',exact:true}).selectOption({label:'T-01'});await button(p,'Plan packs & load truck').click();await visible(p,p.getByText('ALLOCATED',{exact:true}));await idle(p);
