@@ -73,3 +73,31 @@ Added mounted right-click driving and explicit pickup / place controls. Browser 
 - `npm test`: **934 passed, 0 failed** (22 in test/backups.test.js, 11 new: kills after the copy, after the new home is placed and after the old file is renamed; two servers started together; stale and live locks; a writer blocked during the copy and a writer just before the rename; empty and zero-byte new-home files; a missing database after a move; an emptied new-home database after a move; shared backup folder; future/invalid dates and the manual cap; partial sweep). test/backups.test.js also passes with TZ=UTC and five runs in a row. `npm run check`: 54 files.
 - The reviewer's repro scripts (scratchpad review/: fault.mjs with every fault, twin.mjs and twin2.mjs, shared.mjs, rot.mjs, heavy.mjs) were re-run against this code on a synthetic database: every fault (none, disk full, failed rename, kill after the copy, kill after the old file was renamed, a writer during the copy, a writer just before the rename) ended with the old file untouched and in use, or the complete data at the new home with the engine starting at once, and nothing lost; two servers started together (0–70 ms apart, same and different ports, 10 runs) always ended with one server on the moved database with all companies; shared.mjs no longer takes the live daily slot; rot.mjs keeps all 14 real dailies; heavy.mjs copies stayed consistent (stall ≤ 11 ms).
 - Browser tests (`PW_CHANNEL=msedge E2E_PORT=3417 npm run test:e2e`): 9 passed, twice in a row; the temp folder is removed afterwards.
+
+## Faster, steadier tests and CI — 28 September 2026
+Measured on one 4 vCPU Linux box (the same vCPU count as GitHub's ubuntu-latest), Node 24.21. main and this branch ran alternately, so machine drift hit both equally.
+- `npm test` on main: **2589 test runs in 97–101 s** (3 runs). There were only 543 different tests: 31 files imported the fixture from simulation.test.js, so its 66 tests ran in 32 processes.
+- `npm test` on this branch: **545 tests in 10.4–10.9 s**. These are the same 543 tests (same files and names, checked from JUnit reports), plus two new ones: one checks that no test file or test helper imports a test file, the other that a catalogue batch repeating a variant within itself is refused. Steps, each measured on the full suite:
+  - fixture moved to test/fixture.js: 110 → 30 s
+  - test users' passwords hashed at scrypt N=1024 via the test/setup.js preload: 30 → 16 s
+  - mock timers instead of real sleeps (perf-server scheduler 3.6 s → 0.04 s; shape editor 4.8 s → 0.2 s): 16 → 14 s
+  - `f.idle(n)` and the shared `settle`, plus the catalogue import no longer quadratic: 14 → 10.7 s
+- `f.idle(n)` is checked, not assumed. A checking version ran the skipped ticks anyway and compared every table and every live object: all **432** early stops (**52,273** skipped ticks) were identical to the full run.
+- Browser tests (`npm run test:e2e`, CI=1, so a failed test retries once as on GitHub): main **14 passed in 3.3–3.5 min** (one test at a time). This branch: **14 passed in 51–58 s** in 12 runs in a row, with no retries, 4 of them with two busy CPU loops alongside. This box cannot download Playwright's pinned Chromium, so the runs used the pre-installed headless shell (build 1194) through a local config with executablePath.
+- GitHub CI before: main run 36352642644 took **6m15s**: the unit job (2m11s) and then the browser job (3m56s; 29 s installing Chromium and system libraries, 3m18s of tests). After: not measured on GitHub yet, because CI runs only for main and pull requests. Expected: about 1½–2 min, with both jobs at once, the browser from the cache and only the headless shell.
+
+Flaky tests found (stress runs: busy CPUs, `--test-concurrency=8`, several time zones, the clock shifted to just before midnight, each file alone) and fixed:
+- reports '50,000 ledger rows': single wall-clock readings failed about 1 run in 20 under load, and a CI log showed the cached read at 6× its usual time. Now CPU time, with the same budgets. The cached read keeps the wall clock on Windows, whose CPU time moves in 15.6 ms ticks.
+- revision 'a large relocation previews and saves quickly': failed once at concurrency 8. The budgets and the preview's own 400 ms deadline now use CPU time.
+- Midnight: crew-day (2 tests), runs done today (4 tests in simulation.test.js) and the game board Send / Bring back. Work was stamped with the real clock and read back as 'today'. Before the fix, crew failed at 1 and simulation at 3 of 12 start times just before midnight; after it, none failed. These tests now use a fixed clock.
+- backups 'two servers started at the same moment': the single-engine check relied on a 600 ms pause. Both children now keep their engine until both have reported, so a broken lease guard fails every time.
+- perf-server scheduler and the shape editor debounce tests: real sleeps raced real work. They now use mock timers, stepped so the order of events is the same as in real time. They catch the same mutations as before.
+- e2e shape.spec 'focus stays…' and 'the gate cannot…': the 1 s poll repaints the plan while Playwright scrolls a handle into view ("Element is not attached to the DOM"). This failed once on CI (run 36305275821) and 2 in 50 times locally under load. The scroll is now retried.
+- e2e sign-ups: the server allows 10 a minute from one address and the suite used exactly 10. There are now two servers (6 and 8 sign-ups), and a refused sign-up fails at once with its reason.
+
+After the fixes, all of these runs passed:
+- the full unit suite 3 times plain, 2 times at concurrency 8, 2 times with 3 busy loops, and once each in Kiritimati and Los Angeles time;
+- the full suite with the clock 0.3 / 0.8 / 1.5 / 3 s before midnight, in UTC, Los Angeles and Sydney time;
+- the 14 formerly timing-sensitive files 5 times each under 3 busy loops.
+
+Still on wall-clock budgets, with wide measured margins and no failures seen: global-search (averaged over 20/60 calls), material-card (averaged over 200) and hire-rules (1500 ms).

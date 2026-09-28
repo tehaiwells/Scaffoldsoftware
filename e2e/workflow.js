@@ -12,10 +12,10 @@ export const office=(p,label)=>({click:async()=>{if(!await tile(p,label).isVisib
 const nav=office;
 // First run: the yard-size tiles, or 'Draw my own shape instead' for the shape editor with its 20 x 16 m rectangle; either lands on the game board.
 export async function firstYard(p){await p.getByRole('button',{name:'Draw my own shape instead',exact:true}).click();await visible(p,button(p,'Create yard'));assert.equal(await p.getByRole('spinbutton',{name:'Width (m)',exact:true}).inputValue(),'20');assert.equal(await p.getByRole('spinbutton',{name:'Depth (m)',exact:true}).inputValue(),'16');await button(p,'Create yard').click();await visible(p,p.getByRole('navigation',{name:'What do you want to do?'}));}
-// Fold-out forms: the summary carries a title and a small subtitle, so match on the title.
 // The demo pace the other specs set through the resources command, here through the same form the flow already saves: pickups and placements take
 // 100 ms instead of 700 ms and travel is 20 m/s, so a truck trip takes about 3 s instead of 14 s. Both saves need it: each one writes the pace.
 const pace=async p=>{await p.getByRole('spinbutton',{name:'Pickup / placement time (milliseconds)',exact:true}).fill('100');await p.getByRole('spinbutton',{name:'Travel speed (mm per second)',exact:true}).fill('20000');};
+// Fold-out forms: the summary carries a title and a small subtitle, so match on the title.
 const fold=(p,title)=>p.locator('summary').filter({hasText:title}).first();
 async function visible(p,locator,timeout=45000){
   if(!p.domSnapshot)return locator.first().waitFor({state:'visible',timeout});

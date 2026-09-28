@@ -113,9 +113,10 @@ test('50,000 ledger rows: the first report replays them within budget and the ne
   // The budgets are in this process's CPU time, so time spent waiting for a core on a busy machine is not counted as the report's cost.
   const cpu=()=>{const u=process.cpuUsage();return (u.user+u.system)/1000;};
   const t1=cpu();const r=f.sim.reports(90),cold=cpu()-t1;
-  const t2=cpu();f.sim.reports(90);const warm=cpu()-t2;
+  const fine=process.platform==='win32'?()=>performance.now():cpu;// Windows counts process CPU time in 15.6 ms clock ticks: too coarse for this sub-millisecond read
+  const t2=fine();f.sim.reports(90);const warm=fine()-t2;
   const t3=cpu();f.cmd('opening',{container:f.empty.id,product:f.products[0].id,quantity:1,reason:'One more'});const r2=f.sim.reports(90),step=cpu()-t3;
-  console.log(`50k rows (CPU time): cold ${cold.toFixed(0)} ms, cached ${warm.toFixed(2)} ms, one new row ${step.toFixed(1)} ms`);
+  console.log(`50k rows (CPU time${process.platform==='win32'?'; cached read wall-clock':''}): cold ${cold.toFixed(0)} ms, cached ${warm.toFixed(2)} ms, one new row ${step.toFixed(1)} ms`);
   assert.ok(r.pieces.check.ok,'rebuilt '+r.pieces.check.rebuilt+' vs live '+r.pieces.check.actual);assert.equal(r.pieces.now,200+added);assert.equal(r2.pieces.now,201+added);
   assert.ok(cold<1500,'cold replay took '+cold+' ms');assert.ok(warm<5,'cached read took '+warm+' ms');assert.ok(step<250,'incremental took '+step+' ms');
 });

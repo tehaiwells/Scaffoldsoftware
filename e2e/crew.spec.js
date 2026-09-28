@@ -27,8 +27,9 @@ test('a worker opens on the crew phone view, takes orders there and the link ope
   // Hold here, then back to automatic: the pill follows and the buttons swap.
   await page.locator('[data-cw-cmd="HOLD"]').click();await expect(page.locator('.cw-pill')).toHaveText('On hold',{timeout:15000});await expect(page.locator('[data-cw-cmd="HOLD"]')).toBeDisabled();
   await page.locator('[data-cw-cmd="AUTO"]').click();await expect(page.locator('.cw-pill')).not.toHaveText('On hold',{timeout:15000});
-  // The Assign menu stays open through the 1 s poll, and assigning a job shows it under Now.
-  await page.locator('[data-cw-menu="assign"]').click();await expect(page.locator('#cw-menu')).toBeVisible();{const polled=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/state',{timeout:15000});await polled();await polled();}await expect(page.locator('#cw-menu')).toBeVisible();
+  // The Assign menu stays open through the 1 s poll (three poll answers: the first two are drawn by the time the third arrives), and assigning a
+  // job shows it under Now.
+  await page.locator('[data-cw-menu="assign"]').click();await expect(page.locator('#cw-menu')).toBeVisible();{const polled=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/state',{timeout:15000});await polled();await polled();await polled();}await expect(page.locator('#cw-menu')).toBeVisible();
   await page.locator('#cw-menu [data-cw-assign]').filter({hasText:'Sweep the loading zone'}).click();
   await expect(page.locator('.cw-now .cw-big')).toHaveText(/Sweep the loading zone/,{timeout:15000});
   // Next worker, then the link opens the first worker again after a reload.
