@@ -6,6 +6,7 @@ const synthetic=JSON.parse(readFileSync(new URL('../../catalogues/synthetic.json
 export const label=(v,name='Name')=>{requireRule(typeof v==='string'&&v.trim().length>0&&v.length<=250,`${name} is required (maximum 250 characters).`);return v.trim();};
 export const nullable=(v,name)=>v===null||v===undefined?null:integer(v,name,0);
 const catalogueCache=new WeakMap();
+const productKey=p=>JSON.stringify([p.manufacturer,p.region,p.reference]);
 const byIdOf=list=>{const m=new Map();for(const p of list)if(!m.has(p.id))m.set(p.id,p);return m;};
 // A product with its company settings applied: the company's weight / pack win, then the product's own figures. A product with company settings also says so
 // (figuresStatus, and figuresSource: where the company says the figures came from), so a demo product whose figures the company entered is not shown as demo figures.
@@ -15,11 +16,12 @@ const sourceOf=s=>{if(!s)return null;const w=s.weightSource,k=s.packSource;if(w=
 const withSettings=(p,setting,pack)=>({...p,unitWeight:setting?.unitWeight??p.unitWeight,packQuantity:setting?.packQuantity??pack?.operatingQuantity??null,...(setting&&setting.figures!==false?{figuresStatus:setting.status??'COMPANY CONFIGURED',figuresSource:sourceOf(setting)}:{}),...(setting?.minYard>0?{minYard:setting.minYard}:{})});
 export function computeEffectiveProducts(repo){const first=(kind)=>{const m=new Map();for(const s of repo.all(kind))if(!m.has(s.product))m.set(s.product,s);return m;};const settings=first('productSettings'),packs=first('packaging');return repo.all('product').map(p=>withSettings(p,settings.get(p.id),packs.get(p.id)));}
 export const catalogueMethods={
-  product(input){
+  // have (importCatalogue only): the manufacturer / region / reference keys already in the catalogue, read once per batch instead of once per row.
+  product(input,have){
     const system=cached(this.db,'SELECT s.id FROM scaffold_systems s JOIN company_systems c ON c.system_id=s.id WHERE c.company_id=? AND s.id=? AND c.enabled=1').get(this.user.company_id,input.system);
     requireRule(system,'Enable this scaffold system before selecting new materials.');
     const reference=label(input.reference,'Manufacturer or demo reference'),manufacturer=label(input.manufacturer??'Synthetic demonstration','Manufacturer'),region=label(input.region??'DEMO','Region');
-    const same=this.repo.all('product').find(p=>p.reference===reference&&p.manufacturer===manufacturer&&p.region===region);
+    const k=have&&productKey({reference,manufacturer,region}),same=have?have.has(k):this.repo.all('product').find(p=>p.reference===reference&&p.manufacturer===manufacturer&&p.region===region);
     requireRule(!same,'This manufacturer / region / reference already exists. Review conflicting values instead of overwriting.');
     const statuses=['NOT PROVIDED','CONFLICTING','NEEDS REGIONAL CHECK','COMPANY CONFIGURED','SOURCE VERIFIED','DEMO ONLY'];
     requireRule(statuses.includes(input.verification),'Choose an explicit verification status.');
@@ -28,7 +30,7 @@ export const catalogueMethods={
     const definition=this.repo.add('definition',{name:label(input.name),system:input.system,category:label(input.category??'Scaffold components')});
     const product=this.repo.add('product',{definition:definition.id,source:source.id,name:definition.name,system:input.system,category:definition.category,manufacturer,reference,region,finish:input.finish??null,nominalSize:input.nominalSize??null,unit:'each',unitWeight:nullable(input.unitWeight,'Unit weight (g)'),length:nullable(input.length,'Physical length'),width:nullable(input.width,'Physical width'),height:nullable(input.height,'Physical height'),verification:input.verification,unknownReason:input.unknownReason??'NOT PROVIDED'});
     this.repo.add('packaging',{product:product.id,publishedQuantity:nullable(input.publishedQuantity,'Published quantity'),operatingQuantity:input.packQuantity==null?null:integer(input.packQuantity,'Operating pack quantity',1),status:input.verification,source:source.id});
-    return product;
+    have?.add(k);return product;
   },
   // A company's own weight / pack for a product (grams, pieces per stillage). sourceNote (optional) records where the company took the figures from: a figure this save changes
   // takes the note as its own source (weightSource / packSource), a figure it leaves as it was keeps its earlier source. An omitted spannerSize keeps the one already set.
@@ -52,5 +54,5 @@ export const catalogueMethods={
     const system=cached(this.db,'SELECT system_id FROM company_systems WHERE company_id=? AND enabled=1 ORDER BY system_id LIMIT 1').get(this.user.company_id)?.system_id;
     return synthetic.map(product=>this.product({...product,system}));
   },
-  importCatalogue(input){requireRule(Array.isArray(input.products)&&input.products.length>0&&input.products.length<=100,'Import between 1 and 100 factual variants per batch.');const batch=this.repo.add('importBatch',{actor:this.user.id,createdAt:new Date().toISOString(),status:'REVIEWED BY COMPANY',name:label(input.name,'Batch name')});const products=input.products.map(p=>this.product(p));batch.products=products.map(p=>p.id);this.repo.save(batch);return {batch,products};}
+  importCatalogue(input){requireRule(Array.isArray(input.products)&&input.products.length>0&&input.products.length<=100,'Import between 1 and 100 factual variants per batch.');const batch=this.repo.add('importBatch',{actor:this.user.id,createdAt:new Date().toISOString(),status:'REVIEWED BY COMPANY',name:label(input.name,'Batch name')});const have=new Set(this.repo.all('product').map(productKey)),products=input.products.map(p=>this.product(p,have));batch.products=products.map(p=>p.id);this.repo.save(batch);return {batch,products};}
 };
