@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 import { normalise,lShape,splitSide,freeZone,sides,slantedSides,sameGround,ringInside } from '../public/shape.js';
 const rectPts=(w,h,x=0,y=0)=>[{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h}];
 const pickedTurn=f=>{for(let i=0;i<40;i++){f.tick(1);const t=f.sim.tasks().find(t=>t.turn&&t.picked&&!['COMPLETE','CANCELLED'].includes(t.state));if(t)return t;}return null;};

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 
 // Scheduled returns (collections): validation, permissions, the status flow through the real engine, the schedule, alerts and reports.
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney

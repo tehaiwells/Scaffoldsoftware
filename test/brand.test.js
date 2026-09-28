@@ -5,7 +5,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
 import { bdAbnValid, bdAbnFormat, bdSanitiseSvg, bdCheckLogo, bdDetails, BD_LOGO_MAX } from '../src/domain/brand.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 // Company details and logo for the paperwork (src/domain/brand.js, prefix bd): ABN checksum, field checks, logo type / size limits, SVG sanitising,
 // permissions (only an owner changes them; supervisors and managers read them), the routes, and the print header built from them (public/operations.js).
 

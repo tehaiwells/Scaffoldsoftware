@@ -1,7 +1,7 @@
 process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 // Wave E review, on the page: the Schedule counts loads and collections apart and keeps Return cards short; Today says when loads have no date,
 // greys out 'Allocate all idle' when nobody is idle and shows a truck waiting to load a collection; collection alerts carry the return picture;
 // the hire statement is addressed to the client first; the Today menu icon is no longer the Schedule calendar.

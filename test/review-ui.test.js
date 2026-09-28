@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 import { yardSVG } from '../public/visual.js';
 import { stopOperations } from '../public/operations.js';
 // Regression tests for the review of the shape editor and one-click turning (UI side). The operations page runs in node with no DOM.

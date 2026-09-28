@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 import { Simulation } from '../src/simulation.js';
 import { polygonFromPoints,turnPath } from '../src/domain/geometry.js';
 import { ringProblems,cleanCorners } from '../public/shape.js';

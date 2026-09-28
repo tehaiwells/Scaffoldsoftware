@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 
 test('loadTruck loads a whole pile top first plus a loose stillage in one request, and the crew completes it',t=>{
   const f=fixture(t);const upper=f.container('U',4000,4000,{support:f.a.id});

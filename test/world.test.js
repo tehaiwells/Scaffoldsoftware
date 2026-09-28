@@ -8,7 +8,7 @@ import { flushLive,LIVE_FLUSH_MS } from '../src/domain/live.js';
 import { WORLD,worldLayout,worldRoute,tripMs,routeGeom,poseAt,distanceAt,restPoses,lotOrder,kerbPose,bayPose,siteRot,placePoint } from '../public/world-layout.js';
 import { wmLayout,wmTools,wmWorldMerge,wmWorldQuery,__wm } from '../public/world.js';
 
-// Its own small world (importing the shared fixture from simulation.test.js would run those tests a second time): a 20 x 16 m yard, Site A,
+// Its own small world: a 20 x 16 m yard, Site A,
 // truck T01, two stillages with stock. The crews work at a fast demo speed, so trips are short unless a test sets the default speed.
 function world(t){const db=openDatabase(':memory:');t.after(()=>db.close());const auth=new Service(db);const user=auth.authenticate(auth.register({name:'Owner',companyName:'Demo',email:randomUUID()+'@example.com',password:'demonstration-password',systems:['quickstage']}));const sim=new Simulation(db,user);const cmd=(action,input={},key=randomUUID())=>sim.execute(action,input,key);
   const yard=cmd('yard',{name:'Yard',segments:[{direction:'RIGHT',length:20000},{direction:'DOWN',length:16000},{direction:'LEFT',length:20000}],closed:true});const products=cmd('seed');cmd('resources',{location:yard.id,workers:5,machines:1,stepMs:100,speed:100000,jobs:false});

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 // Printable pick lists and delivery dockets: the pure sheet builders (prPickSheet, prDocketSheet, prSheetHTML) over real snapshots, and the page buttons.
 const load=()=>import('../public/operations.js');
 const acct=(f,perms=['operations.manage','stock.adjust','requests.create'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage',enabled:1}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id,name:'Owner'}});

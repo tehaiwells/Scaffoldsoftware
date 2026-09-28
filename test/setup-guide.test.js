@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sgSteps, SG_STILLAGES, __test } from '../public/operations.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 // The Home set-up guide: the pure step-status function (snapshot + account in, nine steps out) and who gets the card. Runs in node with no DOM.
 const Y={id:'y1',name:'Main yard',points:[{x:0,y:0},{x:30000,y:0},{x:30000,y:20000},{x:0,y:20000}],shapeRev:1};
 const ACCT={company:{id:'c1'},systems:[{id:'quickstage',enabled:true},{id:'at-pac',enabled:false}],permissions:['operations.manage','stock.adjust']};

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 import { __test, alTest, materialFacts, materialCardHTML, materialsView } from '../public/operations.js';
 // The alerts UI in node (no DOM): the bell, the Needs attention strip, the drawer, the minimum chips, the stockpile mark and the hover-card line, from live snapshots.
 const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');

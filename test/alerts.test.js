@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
 import { catalogueRevision } from '../src/repository.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 import { alFreeInYards,alBelow,alSort } from '../src/domain/alerts.js';
 // Alerts and minimum stock levels: the minYard setting (override), the snapshot's derived alerts and the one-off 'below minimum' notification.
 const WED=Date.parse('2026-09-23T00:00:00Z'),TODAY='2026-09-23';

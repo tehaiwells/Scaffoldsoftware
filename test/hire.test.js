@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './fixture.js';
 import { hireBook,hireArrive,hireLeave,hirePeriod,hireRateFor,hireAmount,hireGst,hireMoney,overlapDays } from '../src/domain/hire.js';
 
 // ---- The piece-day core ----
