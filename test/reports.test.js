@@ -101,7 +101,7 @@ test('GET /api/reports: period parameter, login required',async t=>{
 });
 
 test('50,000 ledger rows: the first report replays them within budget and the next one is served from the store',t=>{
-  const f=fixture(t);const {db}=f,company=f.user.company_id;
+  const f=setup(t);const {db}=f,company=f.user.company_id;// a fixed day: a midnight between the reports would start a new period and replay again
   // a year of synthetic custody moves between the yard and the site through the forklift (net zero), plus purchases into stillage A
   const fork=f.sim.repo.all('resource').find(r=>r.type==='FORKLIFT'&&r.location===f.yard.id).id,ins=db.prepare('INSERT INTO ledger(id,company_id,actor,event,product_id,container_id,quantity,source,destination,reason,command_key,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
   const t0=Date.now()-360*86400000;let added=0;
@@ -111,10 +111,12 @@ test('50,000 ledger rows: the first report replays them within budget and the ne
     ins.run(randomUUID(),company,f.user.id,k===1?'PICKUP':k===2?'PLACEMENT':'PICKUP',f.products[0].id,f.b.id,1,k===1?f.yard.id:k===2?fork:f.yard.id,k===1?fork:k===2?f.yard.id:fork,'Moved',randomUUID(),when);
     if(k===3)ins.run(randomUUID(),company,f.user.id,'PLACEMENT',f.products[0].id,f.b.id,1,fork,f.yard.id,'Moved',randomUUID(),when);}
     f.sim.repo.balance(f.a.id,f.products[0].id,added);});
-  const t1=performance.now();const r=f.sim.reports(90),cold=performance.now()-t1;
-  const t2=performance.now();f.sim.reports(90);const warm=performance.now()-t2;
-  const t3=performance.now();f.cmd('opening',{container:f.empty.id,product:f.products[0].id,quantity:1,reason:'One more'});const r2=f.sim.reports(90),step=performance.now()-t3;
-  console.log(`50k rows: cold ${cold.toFixed(0)} ms, cached ${warm.toFixed(2)} ms, one new row ${step.toFixed(1)} ms`);
+  // The budgets are in this process's CPU time, so time spent waiting for a core on a busy machine is not counted as the report's cost.
+  const cpu=()=>{const u=process.cpuUsage();return (u.user+u.system)/1000;};
+  const t1=cpu();const r=f.sim.reports(90),cold=cpu()-t1;
+  const t2=cpu();f.sim.reports(90);const warm=cpu()-t2;
+  const t3=cpu();f.cmd('opening',{container:f.empty.id,product:f.products[0].id,quantity:1,reason:'One more'});const r2=f.sim.reports(90),step=cpu()-t3;
+  console.log(`50k rows (CPU time): cold ${cold.toFixed(0)} ms, cached ${warm.toFixed(2)} ms, one new row ${step.toFixed(1)} ms`);
   assert.ok(r.pieces.check.ok,'rebuilt '+r.pieces.check.rebuilt+' vs live '+r.pieces.check.actual);assert.equal(r.pieces.now,200+added);assert.equal(r2.pieces.now,201+added);
   assert.ok(cold<1500,'cold replay took '+cold+' ms');assert.ok(warm<5,'cached read took '+warm+' ms');assert.ok(step<250,'incremental took '+step+' ms');
 });

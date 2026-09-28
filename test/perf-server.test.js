@@ -111,14 +111,17 @@ test('the quiescence probe runs only yard jobs when nothing else moves, and that
 test('scheduler: per-company rounds tick, renew the lease, keep the singleton guard and stop cleanly',async t=>{
   const f=world(t,{site:false});f.tick(1,250);f.cmd('jobsMode',{jobs:true,routineJobs:true});
   const other=world(t,{site:false});// a second database is independent
+  // A virtual clock for the scheduler's own timers and lease maths, stepped 50 ms at a time; the real setImmediate between steps lets each round's
+  // per-company yield finish, so the rounds land at the same moments as in real time (a round is only scheduled once the previous one ends).
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:Date.now()});const wait=async ms=>{for(let left=ms;left>0;left-=50){t.mock.timers.tick(Math.min(50,left));await new Promise(r=>setImmediate(r));}};
   const stop=startScheduler(f.db);assert.throws(()=>startScheduler(f.db),/Another movement engine/);
   const first=f.db.prepare('SELECT expires_at FROM engine_lease').get().expires_at;
-  await new Promise(r=>setTimeout(r,2200));
+  await wait(2200);
   assert.ok(f.sim.repo.all('job').length>0,'the engine ticked the company');assert.ok(f.db.prepare('SELECT expires_at FROM engine_lease').get().expires_at>first,'lease renewed');
   stop();assert.equal(f.db.prepare('SELECT COUNT(*) n FROM engine_lease').get().n,0);
-  const versions=JSON.stringify(dump(f.db));await new Promise(r=>setTimeout(r,600));assert.equal(JSON.stringify(dump(f.db)),versions,'no rounds after stop');
+  const versions=JSON.stringify(dump(f.db));await wait(600);assert.equal(JSON.stringify(dump(f.db)),versions,'no rounds after stop');
   // a paused company is skipped without a transaction and nothing of it changes
   f.cmd('pause',{paused:true});const frozen=JSON.stringify(dump(f.db));let begins=0;const exec=f.db.exec.bind(f.db);f.db.exec=sql=>{if(sql==='BEGIN IMMEDIATE')begins++;return exec(sql);};
-  const again=startScheduler(f.db);await new Promise(r=>setTimeout(r,700));again();f.db.exec=exec;assert.equal(JSON.stringify(dump(f.db)),frozen);assert.equal(begins,1,'only the lease is taken');
+  const again=startScheduler(f.db);await wait(700);again();f.db.exec=exec;assert.equal(JSON.stringify(dump(f.db)),frozen);assert.equal(begins,1,'only the lease is taken');
   const third=startScheduler(other.db);third();
 });

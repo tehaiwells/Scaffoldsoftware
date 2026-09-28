@@ -129,7 +129,11 @@ class El{constructor(o={}){Object.assign(this,{dataset:{},listeners:{},kids:new 
   addEventListener(t,fn){(this.listeners[t]??=[]).push(fn);}removeEventListener(t,fn){this.listeners[t]=(this.listeners[t]??[]).filter(f=>f!==fn);}fire(t,e){for(const fn of [...this.listeners[t]??[]])fn(e);}
   contains(){return true;}closest(){return this;}focus(){}blur(){}scrollIntoView(){}setAttribute(){}removeAttribute(){}setPointerCapture(){}releasePointerCapture(){}
   getBoundingClientRect(){return {width:800,height:560,left:0,top:0};}createSVGPoint(){return {x:0,y:0,matrixTransform(){return {x:this.x,y:this.y};}};}getScreenCTM(){return {inverse:()=>({})};}}
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
+// The editor's debounce timers run on a mocked clock (node:test MockTimers): wait(ms) advances it 1 ms at a time and lets the
+// promise chains of the stand-in server settle between steps, so a busy machine can neither outrun nor stall the 300 ms debounce.
+let clock=null;const settle=()=>new Promise(r=>setImmediate(r));
+const wait=async ms=>{if(!clock)return new Promise(r=>setTimeout(r,ms));for(let i=0;i<ms;i++){clock.tick(1);await settle();}};
+const later=ms=>new Promise(r=>setTimeout(r,ms));
 const box=(c,x,y)=>({id:c,name:c.toUpperCase(),location:'Y1',x,y,length:2000,width:1000,height:1000,rotation:0});
 // The server side of the rig: a yard, its stillages and a boundary preview that answers like turning.js (conflict on a stale shapeRev).
 function server(o={}){const srv={rev:2,height:10000,stops:0,containers:[box('a',4000,4000)],fixtures:[],...o};
@@ -140,11 +144,12 @@ function server(o={}){const srv={rev:2,height:10000,stops:0,containers:[box('a',
     return {ok:true,detail:b.detail,affected:[...aff].map(([id,why])=>({id,name:st.find(s=>s.id===id).name,why})),stock:st,stops:srv.stops,jobs:0,incoming:0,halted:[],loading:b.loading,gate:b.gate,loadingMoved:false,gateMoved:false,...(b.detail==='full'?{moved:[]}:{})};};
   return srv;}
 function rig(t,srv,{command}={}){
+  t.mock.timers.enable({apis:['setTimeout']});clock=t.mock.timers;t.after(()=>{clock=null;});
   const saved={document:globalThis.document,raf:globalThis.requestAnimationFrame,caf:globalThis.cancelAnimationFrame,confirm:globalThis.confirm};
   const doc=new El({activeElement:null,documentElement:new El()});globalThis.document=doc;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;globalThis.confirm=()=>true;
   const calls=[],sent=[],closed=[];
-  const api=async(path,body)=>{calls.push({path,body});await wait(1);return path==='state'?srv.state():srv.preview(body);};
-  command??=async(action,p)=>{sent.push(p);await wait(1);if(p.shapeRev!==srv.rev)throw new Error(srv.conflict);return {message:'Saved.'};};
+  const api=async(path,body)=>{calls.push({path,body});await later(1);return path==='state'?srv.state():srv.preview(body);};
+  command??=async(action,p)=>{sent.push(p);await later(1);if(p.shapeRev!==srv.rev)throw new Error(srv.conflict);return {message:'Saved.'};};
   const ed=createShapeEditor({target:{kind:'yard',id:'Y1'},state:srv.state(),account:{},api,command:(a,p)=>command(a,p,sent),notify:()=>{},onClose:r=>closed.push(r)});
   const host=new El();ed.mount(host);
   t.after(()=>{ed.destroy();Object.assign(globalThis,{document:saved.document,requestAnimationFrame:saved.raf,cancelAnimationFrame:saved.caf,confirm:saved.confirm});});
@@ -202,7 +207,7 @@ test('typing while the save is in flight does not change the draft and the field
   release();await wait(10);assert.equal(r.closed.length,1);assert.equal(r.sent[0].name,'Yard');});
 
 // Waits for a condition instead of a fixed pause, so a busy machine cannot outrun the simulated server replies.
-const until=async(ok,ms=5000)=>{const end=Date.now()+ms;for(;;){try{if(ok())return;}catch{}if(Date.now()>end)return;await wait(10);}};
+const until=async(ok,ms=5000)=>{for(let spent=0;;spent+=10){try{if(ok())return;}catch{}if(spent>ms)return;await wait(10);}};
 test('Save mine anyway uses the latest saved shapeRev even when no poll has reached the editor',async t=>{
   const srv=server(),r=rig(t,srv);await wait(30);r.field('rect.w',18);await wait(400);
   srv.rev=3;srv.height=9000;// someone else saves; the poll is paused (a panel is open), so update() never runs

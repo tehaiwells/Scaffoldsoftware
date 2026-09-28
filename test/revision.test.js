@@ -35,7 +35,9 @@ test('the full boundary preview is bounded; a tight shrink is refused before any
  const slow=f.sim.boundaryPreview({id:f.yard.id,points:rectPts(20000,15000),detail:'full',budgetMs:0});assert.equal(slow.ok,true);assert.equal(slow.slow,true);assert.equal(slow.moved,null);assert.match(slow.message,/chosen when you save/);
  const tight=f.sim.boundaryPreview({id:f.yard.id,points:rectPts(20000,8000)});assert.equal(tight.ok,false);assert.match(tight.message,/Not enough free ground inside the new yard shape for the \d+ stillages that must move/);});
 
-test('a large relocation previews and saves quickly (384 stillages, 48 and 96 moved)',t=>{const f=fixture(t);const big=f.cmd('yard',{name:'Big',points:rectPts(60000,40000)});f.cmd('resources',{location:big.id,workers:5,machines:2,jobs:false});let n=0;
+test('a large relocation previews and saves quickly (384 stillages, 48 and 96 moved)',t=>{const f=fixture(t);
+  // One clock for the budgets below and the preview's own 400 ms deadline: this process's CPU time, so a busy machine cannot run either of them out.
+  const cpu=()=>{const u=process.cpuUsage();return (u.user+u.system)/1000;};t.mock.method(performance,'now',cpu);const big=f.cmd('yard',{name:'Big',points:rectPts(60000,40000)});f.cmd('resources',{location:big.id,workers:5,machines:2,jobs:false});let n=0;
  for(let y=4000;y<36000;y+=2000)for(let x=4000;x<56000;x+=3000){const c=f.cmd('container',{name:'S'+(++n),location:big.id,type:'STILLAGE',length:2000,width:1000,height:1000,tare:50000,x,y});if(n%3===0)f.cmd('container',{name:'U'+n,location:big.id,type:'STILLAGE',length:2000,width:1000,height:1000,tare:50000,x,y,support:c.id});}
  let t0=performance.now();const q=f.sim.boundaryPreview({id:big.id,points:rectPts(52000,40000)});assert.ok(performance.now()-t0<100,'quick');assert.equal(q.affected.length,48);
  t0=performance.now();const full=f.sim.boundaryPreview({id:big.id,points:rectPts(52000,40000),detail:'full'});assert.ok(performance.now()-t0<500,'full');assert.equal(full.moved.length,48);

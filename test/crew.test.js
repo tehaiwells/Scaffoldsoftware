@@ -11,6 +11,8 @@ const acct=(f,perms=['operations.manage','stock.adjust','requests.create'])=>({p
 const crewOf=f=>f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id);
 const until=(f,pred,n=200)=>{for(let i=0;i<n&&!pred();i++)f.tick(1);return pred();};
 const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
+// 'Today' is the local calendar day: a fixed local noon, so a run that crosses midnight cannot split one test's finished jobs over two days.
+const noon=t=>t.mock.timers.enable({apis:['Date'],now:new Date(2026,8,23,12).getTime()});
 
 test('status pill: Working, Walking, Driving forklift, Idle or On hold, with what exactly',async()=>{const {cwTest}=await load();
  const s={resources:[{id:'m1',type:'FORKLIFT',name:'Forklift 1'}],tasks:[{id:'t1',to:'k1'},{id:'t2',to:'y1'}],trucks:[{id:'k1'}],sites:[]};
@@ -57,7 +59,7 @@ test('a link opens one worker: ?view=CREW&worker=<id>, nothing for other pages o
  assert.equal(cwTest.linkFrom('?view=CREW&worker=abc-123'),'abc-123');assert.equal(cwTest.linkFrom('?worker=abc&view=crew'),'abc');
  for(const v of ['','?view=CREW','?view=TODAY&worker=abc','?view=CREW&worker=a%20b','?view=CREW&worker=<x>',null,undefined])assert.equal(cwTest.linkFrom(v),null,String(v));});
 
-test('crew-day records: finished yard jobs and forklift moves of today for one worker, routine apart, supervisors kept to their sites',async t=>{const f=fixture(t);const [w,other]=crewOf(f);
+test('crew-day records: finished yard jobs and forklift moves of today for one worker, routine apart, supervisors kept to their sites',async t=>{noon(t);const f=fixture(t);const [w,other]=crewOf(f);
  const job=f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'Sweep bay 3',where:{kind:'here'},priority:7,seconds:2,worker:w.id});
  assert.ok(until(f,()=>f.sim.repo.get(job.id).state==='DONE',30),'the job finishes');
  const routine=f.sim.routineJob(f.yard,{verb:'clean yard',category:'YARD',priority:7},null,new Date().toISOString());const r=f.sim.repo.get(routine.id);Object.assign(r,{state:'DONE',worker:w.id,completedAt:new Date().toISOString()});f.sim.repo.save(r);
@@ -111,7 +113,7 @@ test('the crew page stylesheet is one block at the end of design.css, phone firs
  const block=css.slice(at);assert.ok(block.includes('max-width:640px'),'centred column on desktop');assert.ok(/@media\(max-width:650px\)/.test(block)&&/@media\(max-width:360px\)/.test(block),'phone rules down to 320 px');assert.ok(/min-height:(4[89]|[5-9]\d)px/.test(block),'big buttons');
  assert.ok(!css.slice(0,at).includes('.page-crew'),'nothing about the crew page before its block');});
 
-test('crew-day counts every job finished today, past the 100 closed jobs the yard keeps, and a count never drops on its own',async t=>{const f=fixture(t);const crew=crewOf(f);
+test('crew-day counts every job finished today, past the 100 closed jobs the yard keeps, and a count never drops on its own',async t=>{noon(t);const f=fixture(t);const crew=crewOf(f);
  f.cmd('jobsMode',{jobs:true,routineJobs:false});
  const batch=(n,tag)=>{for(let i=0;i<n;i++)f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:tag+' '+i,where:{kind:'here'},priority:5,seconds:1});};
  const openLeft=tag=>f.sim.repo.all('job').filter(j=>j.title.startsWith(tag)&&['OPEN','ASSIGNED','IN_PROGRESS'].includes(j.state)).length;
@@ -125,7 +127,7 @@ test('crew-day counts every job finished today, past the 100 closed jobs the yar
  assert.ok(f.sim.crewDay(one).jobs.length<=60&&f.sim.crewDay(crew[0].id).jobs.every(j=>j.title&&j.completedAt),'the newest finished jobs are listed');
  assert.equal(f.sim.crewDay(one,new Date(Date.now()+36*3600000)).jobsDone,0,'a new day starts from nothing');});
 
-test('time on a job taken off part-way stays in the day, so the time on jobs never drops',async t=>{const f=fixture(t);const [w]=crewOf(f);
+test('time on a job taken off part-way stays in the day, so the time on jobs never drops',async t=>{noon(t);const f=fixture(t);const [w]=crewOf(f);
  const job=f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'Long sweep',where:{kind:'here'},priority:5,seconds:60,worker:w.id});
  assert.ok(until(f,()=>{const j=f.sim.repo.get(job.id);return j.state==='IN_PROGRESS'&&j.remainingMs<=j.durationMs-5000;},60),'part of the job is done');
  const spent=(()=>{const j=f.sim.repo.get(job.id);return j.durationMs-j.remainingMs;})();

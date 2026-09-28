@@ -182,10 +182,14 @@ test('two servers started at the same moment: one moves, the other waits for it 
     if(!['new','env','default'].includes(r.status)&&!(await import('node:fs')).existsSync(r.path))throw new Error('missing');
     const db=openDatabase(r.path);let engine='started',stop=null;try{stop=startScheduler(db);}catch(e){engine=e.message;}r.release();
     console.log(JSON.stringify({status:r.status,path:r.path,engine,companies:db.prepare('SELECT COUNT(*) n FROM companies').get().n}));
-    await new Promise(res=>setTimeout(res,600));stop?.();db.close();`;
+    await new Promise(res=>{process.stdin.once('data',res);process.stdin.once('end',res);});stop?.();db.close();// holds its engine until the test has both reports`;
   const childEnv={...process.env,RELOCATE:src('relocate.js'),DATABASE:src('database.js'),SIMULATION:src('simulation.js'),LAD:join(dir,'local'),ROOT:dir};
-  const run=()=>new Promise(done=>{const kid=spawn(process.execPath,['--input-type=module','-e',code],{env:childEnv});let out='';kid.stdout.on('data',d=>out+=d);kid.stderr.on('data',d=>out+=d);kid.on('exit',()=>done(out));});
-  const results=(await Promise.all([run(),run()])).map(out=>JSON.parse(out.trim().split(/\r?\n/).at(-1)));
+  // Both engines stay up until both starters have reported (no fixed pause), so the second one always tries startScheduler while the first still holds the lease.
+  const kids=[0,1].map(()=>{const kid=spawn(process.execPath,['--input-type=module','-e',code],{env:childEnv});let out='',err='';kid.stdin.on('error',()=>{});kid.stderr.on('data',d=>err+=d);
+    const closed=new Promise(done=>kid.on('close',done)),reported=new Promise(ok=>{kid.stdout.on('data',d=>{out+=d;if(/^\{.*\}\r?$/m.test(out))ok();});closed.then(ok);});
+    return {kid,reported,closed,report:()=>{const line=out.split(/\r?\n/).find(l=>l.startsWith('{'));assert.ok(line,'no report from a starter: '+out+err);return JSON.parse(line);}};});
+  await Promise.all(kids.map(k=>k.reported));for(const {kid} of kids)kid.stdin.end();await Promise.all(kids.map(k=>k.closed));
+  const results=kids.map(k=>k.report());
   assert.deepEqual(results.map(r=>r.status).sort(),['current','moved']);
   for(const r of results){assert.equal(r.path,target);assert.equal(r.companies,1);}
   assert.equal(results.filter(r=>r.engine==='started').length,1,'only one movement engine runs');

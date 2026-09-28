@@ -19,6 +19,9 @@ function game(t,{systems=['quickstage']}={}){
   const at=(loc,product)=>sim.containers().filter(x=>x.location===loc).reduce((n,x)=>n+sim.repo.quantity(x.id,product),0);
   return {db,auth,user,sim,cmd,tick,until,truck,total,at,yard:start.yard};
 }
+// A fixed clock for the tests that read 'today' (Wednesday 23 September 2026, 10:00 in Sydney), so midnight never passes mid-test. Not in game():
+// 'a failed step waits with its reason and is tried again' needs the real clock.
+const WED=Date.parse('2026-09-23T00:00:00Z');
 const items=(...rows)=>rows.map(([id,support,lines,busy=false])=>({id,name:id,support,lines,busy}));
 
 test('picking takes whole stillages, tops of piles first, single-product ones before mixed ones, fuller ones first',()=>{
@@ -110,7 +113,7 @@ test('a waiting order that can no longer go is dropped with a note, not left for
   assert.equal(f.sim.repo.all('gameOrder').length,0);assert.ok(f.sim.repo.all('notification').some(n=>n.title==='Not sent'&&/Short job/.test(n.body)));
 });
 
-test('Bring back: a free truck drives out empty, the site crane loads the collection, it comes home and the yard unloads it',t=>{
+test('Bring back: a free truck drives out empty, the site crane loads the collection, it comes home and the yard unloads it',t=>{t.mock.timers.enable({apis:['Date'],now:WED});
   const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:200}]});
   const {site}=f.cmd('gameSite',{name:'Kent St'});const s=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:200}]});const first=s.trucks[0].id;
   assert.ok(f.until(()=>f.truck(first).status==='AT_YARD'&&!f.truck(first).game));assert.equal(f.at(site.id,ledger.id),200);
@@ -202,7 +205,7 @@ test('a stillage on a Bring back is not offered again, and the board never adds 
   assert.equal(f.sim.gameCrew(office),false);assert.equal(f.sim.repo.all('resource').filter(x=>x.location===office.id&&x.type==='CRANE').length,1);
 });
 
-test('a board Send is on Today and the Schedule: loading, on the road and delivered today, on the truck that ran it',async t=>{
+test('a board Send is on Today and the Schedule: loading, on the road and delivered today, on the truck that ran it',async t=>{t.mock.timers.enable({apis:['Date'],now:WED});
   const {tdDay,boardRuns}=await import('../public/operations.js');
   const f=game(t);const demo=f.cmd('seed');const ledger=demo.find(p=>f.sim.effective(p.id).packQuantity===100);f.cmd('gameAddStock',{lines:[{product:ledger.id,quantity:200}]});
   const {site}=f.cmd('gameSite',{name:'George St'});const r=f.cmd('gameSend',{site:site.id,lines:[{product:ledger.id,quantity:200}]});const id=r.trucks[0].id;
