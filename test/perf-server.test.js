@@ -113,7 +113,9 @@ test('scheduler: per-company rounds tick, renew the lease, keep the singleton gu
   const other=world(t,{site:false});// a second database is independent
   const stop=startScheduler(f.db);assert.throws(()=>startScheduler(f.db),/Another movement engine/);
   const first=f.db.prepare('SELECT expires_at FROM engine_lease').get().expires_at;
-  await new Promise(r=>setTimeout(r,2200));
+  // The lease is only renewed once it is within 3.5 s of expiry (started at +5 s), so this needs real wall-clock time to pass; poll instead of a blind sleep so it finishes as soon as both are true.
+  const deadline=Date.now()+5000;
+  while(Date.now()<deadline&&!(f.sim.repo.all('job').length>0&&f.db.prepare('SELECT expires_at FROM engine_lease').get().expires_at>first))await new Promise(r=>setTimeout(r,50));
   assert.ok(f.sim.repo.all('job').length>0,'the engine ticked the company');assert.ok(f.db.prepare('SELECT expires_at FROM engine_lease').get().expires_at>first,'lease renewed');
   stop();assert.equal(f.db.prepare('SELECT COUNT(*) n FROM engine_lease').get().n,0);
   const versions=JSON.stringify(dump(f.db));await new Promise(r=>setTimeout(r,600));assert.equal(JSON.stringify(dump(f.db)),versions,'no rounds after stop');

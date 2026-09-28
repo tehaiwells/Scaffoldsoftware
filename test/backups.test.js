@@ -184,8 +184,10 @@ test('two servers started at the same moment: one moves, the other waits for it 
     console.log(JSON.stringify({status:r.status,path:r.path,engine,companies:db.prepare('SELECT COUNT(*) n FROM companies').get().n}));
     await new Promise(res=>setTimeout(res,600));stop?.();db.close();`;
   const childEnv={...process.env,RELOCATE:src('relocate.js'),DATABASE:src('database.js'),SIMULATION:src('simulation.js'),LAD:join(dir,'local'),ROOT:dir};
-  const run=()=>new Promise(done=>{const kid=spawn(process.execPath,['--input-type=module','-e',code],{env:childEnv});let out='';kid.stdout.on('data',d=>out+=d);kid.stderr.on('data',d=>out+=d);kid.on('exit',()=>done(out));});
-  const results=(await Promise.all([run(),run()])).map(out=>JSON.parse(out.trim().split(/\r?\n/).at(-1)));
+  // Only stdout carries the JSON line (console.log); stderr also gets a Node experimental-feature warning whose two lines
+  // can land interleaved with it, so parsing "whichever stream line came last" is racy. Keep the streams apart instead.
+  const run=()=>new Promise(done=>{const kid=spawn(process.execPath,['--input-type=module','-e',code],{env:childEnv});let out='',err='';kid.stdout.on('data',d=>out+=d);kid.stderr.on('data',d=>err+=d);kid.on('exit',()=>done({out,err}));});
+  const results=(await Promise.all([run(),run()])).map(({out,err})=>{try{return JSON.parse(out.trim().split(/\r?\n/).at(-1));}catch(e){throw new Error(`${e.message}\nstdout: ${out}\nstderr: ${err}`);}});
   assert.deepEqual(results.map(r=>r.status).sort(),['current','moved']);
   for(const r of results){assert.equal(r.path,target);assert.equal(r.companies,1);}
   assert.equal(results.filter(r=>r.engine==='started').length,1,'only one movement engine runs');
