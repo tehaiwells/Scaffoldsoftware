@@ -3,13 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 
 // Scheduled returns after review: a collection with nothing left to collect closes itself (no overdue alert for an empty site), and cancelling a
 // collection that is already loading is office work.
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney
 const setup=t=>{const f=fixture(t);t.mock.timers.enable({apis:['Date'],now:WED});return f;};
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const user=(f,email,role)=>{f.auth.addUser(f.user,{name:'Sam Supervisor',email,password:'demonstration-password',roles:[role]});return new Simulation(f.db,f.auth.authenticate(f.auth.login({email,password:'demonstration-password'})));};
 const as=(sim,action,input)=>sim.execute(action,input,randomUUID());
 const stockOnSite=f=>{f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id,f.b.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f);};

@@ -1,14 +1,13 @@
 process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 // Wave E review, on the page: the Schedule counts loads and collections apart and keeps Return cards short; Today says when loads have no date,
 // greys out 'Allocate all idle' when nobody is idle and shows a truck waiting to load a collection; collection alerts carry the return picture;
 // the hire statement is addressed to the client first; the Today menu icon is no longer the Schedule calendar.
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hr,td:m.tdTest,al:m.alTest,prSheetHTML:m.prSheetHTML};};
 const acct=(f,perms=['company.manage','users.manage','operations.manage','sites.assigned','requests.create','finance.view','stock.adjust'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id,name:'Owner'}});
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const setup=t=>{t.mock.timers.enable({apis:['Date'],now:WED});const f=fixture(t);
  f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id,f.b.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f);return f;};
 

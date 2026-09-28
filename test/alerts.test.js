@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
 import { catalogueRevision } from '../src/repository.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 import { alFreeInYards,alBelow,alSort } from '../src/domain/alerts.js';
 // Alerts and minimum stock levels: the minYard setting (override), the snapshot's derived alerts and the one-off 'below minimum' notification.
 const WED=Date.parse('2026-09-23T00:00:00Z'),TODAY='2026-09-23';
@@ -13,7 +13,6 @@ const setup=t=>{const f=fixture(t);t.mock.timers.enable({apis:['Date'],now:WED})
 const alerts=(sim,kind)=>sim.snapshot().alerts.items.filter(a=>!kind||a.kind===kind);
 const lows=f=>f.sim.repo.all('notification').filter(n=>n.title==='Below minimum stock');
 const user=(f,email,role)=>{f.auth.addUser(f.user,{name:role,email,password:'demonstration-password',roles:[role]});const u=f.auth.authenticate(f.auth.login({email,password:'demonstration-password'}));return new Simulation(f.db,u);};
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 
 test('override minYard: a minimum-only save keeps the figures, needs no reason, bumps the catalogue revision and is validated',t=>{
   const f=fixture(t),p=f.products[0],before=f.sim.effective(p.id),rev=catalogueRevision(f.db,f.user.company_id);

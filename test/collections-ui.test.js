@@ -2,13 +2,12 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 import { __test, rtTest } from '../public/operations.js';
 // The collections UI in node (no DOM): the site card block and its form, the Schedule's return cards, the truck garage panel, from live snapshots.
 const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
 const ops=f=>({permissions:['operations.manage','stock.adjust','requests.create'],systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}});
 const sup={permissions:['requests.create','sites.assigned'],systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:'s'}};
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 // A and B delivered to Site A; T01 still parked there.
 function world(t){const f=fixture(t);t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-09-23T00:00:00Z')});
   f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id,f.b.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f);return f;}

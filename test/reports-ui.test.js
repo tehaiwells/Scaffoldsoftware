@@ -2,11 +2,10 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 // Client side of the Reports page, rendered in node from a live report: the page, the SVG charts at a few widths, tooltips and the table twins.
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hc};};
 const acct=(f,user=f.user,perms=['operations.manage','stock.adjust','requests.create'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage'}],users:[],company:{id:'c',name:'Demo'},user:{id:user.id}});
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const deliver=f=>{f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f,60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);};
 const setup=t=>{t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-09-21T00:00:00Z')});const f=fixture(t);t.mock.timers.setTime(Date.parse('2026-09-23T00:00:00Z'));deliver(f);return f;};
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 import { hireBook,hireArrive,hireLeave,hirePeriod,hireRateFor,hireAmount,hireGst,hireMoney,overlapDays } from '../src/domain/hire.js';
 
 // ---- The piece-day core ----
@@ -70,7 +70,6 @@ test('rates: a site price replaces the standard price as a whole, its minimum wi
 // ---- Replayed from a real ledger: deliveries, a collection, rates, a statement, permissions and the HTTP routes ----
 const START=Date.parse('2026-08-02T23:00:00Z');// Monday 3 Aug 2026, 9 am in Sydney
 const later=(t,days)=>t.mock.timers.setTime(Date.now()+days*86400000);
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const deliver=(f,container,site=f.site)=>{f.cmd('loadTruck',{truck:f.truck.id,containers:[container.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f,60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);};
 const giveBack=(f,container,site=f.site)=>{f.cmd('dispatch',{id:f.truck.id,destination:site.id});f.tick(5);f.cmd('returnStock',{container:container.id,truck:f.truck.id});settle(f,60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f,60);};
 const user=(f,email,role)=>{f.auth.addUser(f.user,{name:role,email,password:'demonstration-password',roles:[role]});return new Simulation(f.db,f.auth.authenticate(f.auth.login({email,password:'demonstration-password'})));};

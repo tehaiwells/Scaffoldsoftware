@@ -5,14 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 import { addDays } from '../src/domain/schedule.js';
 
 const START=Date.parse('2026-08-03T00:00:00Z');// Monday 3 Aug 2026, 10:00 in Sydney
 const setup=(t,now=START)=>{t.mock.timers.enable({apis:['Date'],now});return fixture(t);};
 const at=(t,iso)=>t.mock.timers.setTime(Date.parse(iso));
 const later=(t,days)=>t.mock.timers.setTime(Date.now()+days*86400000);
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 // The live numbers the Stock page shows (the register), which the rebuilt ledger history must match.
 const register=(sim=null,f)=>(sim??f.sim).snapshot().register.reduce((s,r)=>({yard:s.yard+r.yard,site:s.site+r.site,truck:s.truck+r.truck}),{yard:0,site:0,truck:0});
 const user=(f,email,role)=>{f.auth.addUser(f.user,{name:role,email,password:'demonstration-password',roles:[role]});return new Simulation(f.db,f.auth.authenticate(f.auth.login({email,password:'demonstration-password'})));};

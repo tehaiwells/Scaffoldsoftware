@@ -1,14 +1,13 @@
 process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 // Wave E merge: the four features working together. A scheduled return (collection) ends hire for what it loads and shows on the Hire page;
 // returns show on the Today page with their own buttons; the hire statement prints under the company's paperwork header (bdHead).
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hr,td:m.tdTest,prSheetHTML:m.prSheetHTML,bdHead:m.bdHead};};
 const acct=(f,perms=['company.manage','users.manage','operations.manage','sites.assigned','requests.create','finance.view','stock.adjust'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id,name:'Owner'}});
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney
 const clock=(t,iso)=>t.mock.timers.setTime(Date.parse(iso));
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 // A and B (100 pieces each) go to Site A on T01 on Wed 23 Sep; the truck stays parked there.
 const setup=t=>{t.mock.timers.enable({apis:['Date'],now:WED});const f=fixture(t);
  f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id,f.b.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f);

@@ -1,7 +1,7 @@
 process.env.TZ='Australia/Sydney';// the server's local day is Sydney's in this file
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 import { hireBook,hireArrive,hireLeave,hireReopen,hirePeriod,hireRateFor,hireCharge,hireTimeline,hireCost,hireVersions } from '../src/domain/hire.js';
 import { addDays } from '../src/domain/schedule.js';
 // Hire rules after review: negotiated prices, week + day rates, rate changes from a date, loads put back on the same site, transfers between sites,
@@ -55,7 +55,6 @@ test('minimum hire: only for pieces collected, never for a stocktake shortfall o
 // ---- Through the real engine ----
 const START=Date.parse('2026-08-02T23:00:00Z');// Monday 3 Aug 2026, 9 am in Sydney
 const later=(t,days)=>t.mock.timers.setTime(Date.now()+days*86400000);
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const deliver=(f,container,site=f.site)=>{f.cmd('loadTruck',{truck:f.truck.id,containers:[container.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f,60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);};
 
 test('a load put back down on the same site never ends its hire: no top-up, the same since day, the same place in the queue',t=>{

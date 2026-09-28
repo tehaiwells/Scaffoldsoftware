@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 import { addDays,dayLabel,calendarNow,parseDay,weekdayOf,mondayOf,urgencyOf,ladderBucket,whenWords } from '../src/domain/schedule.js';
 
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney (AEST, UTC+10)
@@ -15,7 +15,6 @@ const clock=(t,iso)=>t.mock.timers.setTime(Date.parse(iso));
 const createList=(f,extra={},quantity=10,sim=null)=>{const input={site:f.site.id,lines:[{product:f.products[0].id,quantity}],...extra};return sim?sim.execute('createLoadList',input,randomUUID()):f.cmd('createLoadList',input);};
 const view=(f,id,sim=f.sim)=>{const s=sim.snapshot();return s.loadLists.find(l=>l.id===id)??s.requests.find(r=>r.id===id);};
 const notes=f=>f.sim.repo.all('notification');
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const secondSite=f=>{const s=f.cmd('site',{name:'Site B'});f.cmd('resources',{location:s.id,workers:2,machines:1,stepMs:100,speed:100000,jobs:false});return s;};
 const secondTruck=(f,name='T02')=>f.cmd('truck',{name,yard:f.yard.id});
 const jobsOn=f=>f.cmd('jobsMode',{jobs:true,routineJobs:false});

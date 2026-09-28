@@ -3,14 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 
 // Scheduled returns (collections): validation, permissions, the status flow through the real engine, the schedule, alerts and reports.
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney
 const TODAY='2026-09-23',TOMORROW='2026-09-24',FRI='2026-09-25';
 const setup=t=>{const f=fixture(t);t.mock.timers.enable({apis:['Date'],now:WED});return f;};
 const clock=(t,iso)=>t.mock.timers.setTime(Date.parse(iso));
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const user=(f,email,role)=>{f.auth.addUser(f.user,{name:role==='SUPERVISOR'?'Sam Supervisor':role,email,password:'demonstration-password',roles:[role]});const u=f.auth.authenticate(f.auth.login({email,password:'demonstration-password'}));return new Simulation(f.db,u);};
 const as=(sim,action,input)=>sim.execute(action,input,randomUUID());
 const view=(f,id,sim=f.sim)=>sim.snapshot().collections.find(c=>c.id===id);

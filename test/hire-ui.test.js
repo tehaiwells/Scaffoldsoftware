@@ -2,11 +2,10 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './fixture.js';
+import { fixture,settle } from './fixture.js';
 // Client side of the Hire page, rendered in node from a live /api/hire result: hero, sites, statement, rates, the A4 sheet, money parsing and the owner-only nav.
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hr,cents:m.hrCents,aud:m.hrAUD,prSheetHTML:m.prSheetHTML};};
 const acct=(f,perms=['company.manage','users.manage','operations.manage','sites.assigned','requests.create','finance.view','stock.adjust'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id,name:'Owner'}});
-const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.state==='BLOCKED'))f.cmd('retry',{id:task.id});f.tick(n);};
 const deliver=(f,c)=>{f.cmd('loadTruck',{truck:f.truck.id,containers:[c.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f,60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);};
 const setup=t=>{t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-09-06T23:00:00Z')});const f=fixture(t);deliver(f,f.a);t.mock.timers.setTime(Date.parse('2026-09-13T23:00:00Z'));deliver(f,f.b);t.mock.timers.setTime(Date.parse('2026-09-20T23:00:00Z'));return f;};
 
