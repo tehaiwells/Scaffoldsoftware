@@ -50,18 +50,20 @@ POST /api/commands/loadTruck takes {truck, containers:[ids]} and loads those sti
     npm.cmd run benchmark
     npm.cmd run test:e2e -- --list
 
+npm test preloads test/setup.js, which hashes the test users' passwords at a cheaper scrypt cost (the server keeps the production cost). To run one file the same way: `node --import ./test/setup.js --test test/crew.test.js` (without the preload it still passes, only slower). Shared test helpers live in plain modules such as test/fixture.js; a test file must not import another *.test.js file (each test file runs in its own process, so its tests would run again), and test/test-imports.test.js checks this.
+
 For independent Playwright browser testing:
 
     npx.cmd playwright install chromium
     npm.cmd run test:e2e
 
-To use the Edge that is already installed instead of downloading Chromium, and a port other than 3100 (for example while the app itself runs on 3100), set two variables first (PowerShell):
+To use the Edge that is already installed instead of downloading Chromium, and ports other than 3100 and 3101 (for example while the app itself runs on 3100), set two variables first (PowerShell); the tests use E2E_PORT and the port after it:
 
     $env:PW_CHANNEL='msedge'; $env:E2E_PORT='3417'; npm.cmd run test:e2e
 
-The browser tests start their own server with a throwaway database and backup folder in the system temp folder (never data/ or your live database) and use fresh demo emails.
+The browser tests start two servers of their own, each with a throwaway database and backup folder in the system temp folder (never data/ or your live database), and use fresh demo emails. Three tests run at once: the shape editor tests on one server and the other flows on the other, because the server accepts 10 sign-ups a minute from one address and every test signs up its own company.
 
-GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml): npm ci, npm run check and npm test on Node 24, then the browser tests with Playwright's bundled Chromium on Linux. The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
+GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml): npm ci, npm run check and npm test on Node 24, and at the same time, as a second job, the browser tests with Playwright's Chromium headless shell on Linux (the browser download is cached, keyed on the installed Playwright version). The workflow can also be started by hand on any branch from the Actions tab (CI, Run workflow). The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
 
 ## Configuration and maintenance
 

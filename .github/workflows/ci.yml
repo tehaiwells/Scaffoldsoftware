@@ -1,11 +1,14 @@
-# Automatic checks for every push and pull request to main: syntax check and the unit tests,
-# then the browser tests (Playwright's bundled Chromium on Linux, own throwaway database and port).
+# Automatic checks for every push and pull request to main: syntax check and the unit tests, and the browser tests
+# (Playwright's Chromium headless shell on Linux, own throwaway databases and ports). The two jobs run side by side and
+# both have to pass.
 name: CI
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  # Run the same checks by hand on any branch (Actions tab > CI > Run workflow), e.g. to time a change before a PR.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -22,13 +25,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm test
   e2e:
     name: Browser tests
     runs-on: ubuntu-latest
-    needs: test
+    # No "needs: test": the browser tests use nothing the unit-test job makes, so both start at once (the run takes as
+    # long as the slower job instead of the two added up). Both are still separate checks that must pass.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -36,14 +40,41 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npm ci --no-audit --no-fund
+      # The browser build is fixed by the installed Playwright, so the cache key is that exact version.
+      - name: Read the installed Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Restore the Playwright browser
+        id: browser-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-headless-shell-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      # Headless runs use Chromium's headless shell (playwright.config.js: headless, no channel in CI), so the full
+      # Chrome build (187 MiB) is never used: --only-shell skips it. On a cache hit Playwright finds the browser already
+      # installed and downloads nothing; the system libraries and fonts are still installed on every run, so the tests
+      # always see the same fonts and libraries whatever the runner image has.
+      - run: npx playwright install --with-deps --only-shell chromium
+      # Saved straight after the download (not at the end of the job), so a red test run still fills the cache.
+      - name: Save the Playwright browser
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.browser-cache.outputs.cache-primary-key }}
+      # list: every test with its time in the log; github: failures and flaky (passed on retry) tests as annotations on
+      # the run and the pull request. --forbid-only: a committed test.only fails the run instead of skipping the rest.
+      # --trace=on-first-retry: a test that has to be retried leaves a trace (costs nothing when everything passes).
+      - run: npm run test:e2e -- --reporter=list,github --forbid-only --trace=on-first-retry
         env:
           E2E_PORT: '3100'
+      # Also after a green run: a test that passed only on its retry leaves its first failure (screenshot and error
+      # context) and the retry's trace here. A run where everything passed first time leaves no files: nothing is uploaded.
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: ${{ !cancelled() }}
         with:
-          name: playwright-results
+          name: playwright-results-${{ github.run_attempt }}
           path: test-results/
           retention-days: 7
+          if-no-files-found: ignore
