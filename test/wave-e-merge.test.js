@@ -1,7 +1,7 @@
 process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 // Wave E merge: the four features working together. A scheduled return (collection) ends hire for what it loads and shows on the Hire page;
 // returns show on the Today page with their own buttons; the hire statement prints under the company's paperwork header (bdHead).
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hr,td:m.tdTest,prSheetHTML:m.prSheetHTML,bdHead:m.bdHead};};

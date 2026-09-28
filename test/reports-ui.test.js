@@ -2,7 +2,7 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 // Client side of the Reports page, rendered in node from a live report: the page, the SVG charts at a few widths, tooltips and the table twins.
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hc};};
 const acct=(f,user=f.user,perms=['operations.manage','stock.adjust','requests.create'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage'}],users:[],company:{id:'c',name:'Demo'},user:{id:user.id}});

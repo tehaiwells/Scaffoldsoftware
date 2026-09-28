@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { atomic } from '../src/database.js';
 import { route,carryRoute,ObstacleIndex,anyOverlap,overlap,fitsPolygon } from '../src/domain/geometry.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { flushJobTimers } from '../src/domain/jobs.js';
 
 // The breadth-first search route() used before A*: the reference for step counts, reachability and path length.

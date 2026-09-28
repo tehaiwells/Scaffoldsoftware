@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../src/server.js';
 import { bdAbnValid, bdSanitiseSvg, bdCheckLogo, bdDetails } from '../src/domain/brand.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 // Company details after review: ABNs typed with dashes or dots, bidi control characters, SVG logos without a size, CSS url() tricks in an SVG,
 // and the logo route refusing anonymous uploads before it reads the body.
 // A made-up ABN with valid check digits (the nine digits are arbitrary, the first two are solved for the checksum).

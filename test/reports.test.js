@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { addDays } from '../src/domain/schedule.js';
 
 const START=Date.parse('2026-08-03T00:00:00Z');// Monday 3 Aug 2026, 10:00 in Sydney

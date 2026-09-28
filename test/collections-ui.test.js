@@ -2,7 +2,7 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { __test, rtTest } from '../public/operations.js';
 // The collections UI in node (no DOM): the site card block and its form, the Schedule's return cards, the truck garage panel, from live snapshots.
 const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');

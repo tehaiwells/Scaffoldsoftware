@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 // The operations page in node, with no DOM: the view functions are pure string builders (see test/jobs.test.js).
 const ops=f=>({permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}});
 const supervisorOf=f=>({...ops(f),permissions:['requests.create']});

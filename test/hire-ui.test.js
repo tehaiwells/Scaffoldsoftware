@@ -2,7 +2,7 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 // Client side of the Hire page, rendered in node from a live /api/hire result: hero, sites, statement, rates, the A4 sheet, money parsing and the owner-only nav.
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hr,cents:m.hrCents,aud:m.hrAUD,prSheetHTML:m.prSheetHTML};};
 const acct=(f,perms=['company.manage','users.manage','operations.manage','sites.assigned','requests.create','finance.view','stock.adjust'])=>({permissions:perms,systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id,name:'Owner'}});

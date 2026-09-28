@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { polygonFromPoints,turnSpot } from '../src/domain/geometry.js';
 const at=(f,id)=>{const c=f.sim.repo.get(id);return [c.x,c.y,c.rotation,c.support?f.sim.repo.get(c.support).name:null];};
 const settle=(f,n=80)=>{f.tick(n);for(const t of f.sim.tasks().filter(t=>t.state==='BLOCKED'))throw new Error('BLOCKED: '+t.reason);};

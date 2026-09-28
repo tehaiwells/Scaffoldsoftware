@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 
 // Scheduled returns after review: a collection with nothing left to collect closes itself (no overdue alert for an empty site), and cancelling a
 // collection that is already loading is office work.

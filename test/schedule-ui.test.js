@@ -1,7 +1,7 @@
 process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 // Client side of dated yard lists: the Schedule page, the create form defaults, the truck runs strip and the Home pill, rendered in node from a live snapshot.
 const load=async()=>(await import('../public/operations.js')).__test;
 const acct=(f,perms=['operations.manage','stock.adjust','requests.create'])=>({permissions:perms,systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}});

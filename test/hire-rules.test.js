@@ -1,7 +1,7 @@
 process.env.TZ='Australia/Sydney';// the server's local day is Sydney's in this file
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { hireBook,hireArrive,hireLeave,hireReopen,hirePeriod,hireRateFor,hireCharge,hireTimeline,hireCost,hireVersions } from '../src/domain/hire.js';
 import { addDays } from '../src/domain/schedule.js';
 // Hire rules after review: negotiated prices, week + day rates, rate changes from a date, loads put back on the same site, transfers between sites,

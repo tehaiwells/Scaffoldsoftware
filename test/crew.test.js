@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
 // Crew phone view (cw*): the pure helpers (status label, likely-next ranking, today's history, the link), the crew-day records (src/domain/crew.js),

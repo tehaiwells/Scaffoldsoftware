@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { SKILLS,LADDER } from '../src/domain/jobs.js';
 
 const jobsOn=(f,extra={})=>f.cmd('jobsMode',{jobs:true,routineJobs:false,...extra});

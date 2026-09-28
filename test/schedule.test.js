@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { addDays,dayLabel,calendarNow,parseDay,weekdayOf,mondayOf,urgencyOf,ladderBucket,whenWords } from '../src/domain/schedule.js';
 
 const WED=Date.parse('2026-09-23T00:00:00Z');// Wednesday 23 Sep 2026, 10:00 in Sydney (AEST, UTC+10)

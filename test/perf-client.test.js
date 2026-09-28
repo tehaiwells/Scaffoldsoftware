@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { kg, num } from '../public/visual.js';
 import { stopOperations } from '../public/operations.js';
 // Browser-side efficiency changes: shared formatters and collators, the per-key change check, the catalogue cache, the poll cadence and the memoised stockpile.

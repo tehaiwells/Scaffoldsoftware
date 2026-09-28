@@ -2,7 +2,7 @@ process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { openDatabase } from '../src/database.js';
 import { createApp } from '../src/server.js';
 import { tdAppIcon } from '../public/art.js';

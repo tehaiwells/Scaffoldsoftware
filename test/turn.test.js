@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { yardSVG } from '../public/visual.js';
 
 // ---- Server: turns that meet a crowded yard, and turns the engine refuses ----

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fixture } from './simulation.test.js';
+import { fixture } from './helpers/fixture.js';
 import { readdirSync } from 'node:fs';
 import { materialFacts, materialCardHTML, tileLabels, tileCount } from '../public/operations.js';
 // The stockpile tiles' hover card: its content builders are pure (client state + product id -> facts -> HTML), so every case runs in node without a DOM.
