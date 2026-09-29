@@ -47,7 +47,12 @@ test('the Office holds every other page as a picture tile in three short groups,
   for(const g of ['Every day','Yard and fleet','Business'])assert.ok(html.includes('>'+g+'</h3>'),g);
   assert.match(html,/class="gm-tile current" data-view="STOCK" aria-current="page"/);assert.ok(!officeHTML({state:s,account:f.account,hire:false}).includes('data-view="HIRE"'));
   for(const v of ['TODAY','SCHEDULE','WORKERS','EQUIPMENT','TRUCK12','TRUCK2','STOCK','REPORTS','MATERIALS','SITES','HIRE','YARD','OVERVIEW','CONTROL'])assert.ok(OFFICE_TILES.some(x=>x[0]===v),'no page is lost: '+v);
-  assert.ok(!OFFICE_TILES.some(x=>x[0]==='HOME'),'Home is the game board itself, not a tile');
+  // The owner asked for a way back to the main page right in the Office: "Yard & sites" comes first, before Today.
+  assert.deepEqual(OFFICE_TILES.slice(0,2).map(x=>[x[0],x[1],x[4]]),[['HOME','Yard & sites','day'],['TODAY','Today','day']]);
+  assert.ok(html.indexOf('data-view="HOME"')<html.indexOf('data-view="TODAY"'),'Yard & sites is the first tile');
+  assert.match(officeHTML({state:s,account:f.account,hire:true,view:'HOME'}),/class="gm-tile current" data-view="HOME" aria-current="page" aria-label="Yard &amp; sites"/);
+  // Without operations.manage the main page is the Control room, the same place the Office bar's back button goes.
+  const other=officeHTML({state:s,account:{...f.account,permissions:[]},hire:false});assert.ok(!other.includes('data-view="HOME"'));assert.match(other,/data-view="CONTROL"[^>]*aria-label="Yard &amp; sites"/);
 });
 
 test('the inventory: the yard at a glance, the whole catalogue to add, free stock to send, a site\'s stock to bring back; one short number per slot',t=>{
