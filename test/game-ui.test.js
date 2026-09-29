@@ -51,6 +51,10 @@ test('the Office holds every other page as a picture tile in three short groups,
   assert.deepEqual(OFFICE_TILES.slice(0,2).map(x=>[x[0],x[1],x[4]]),[['HOME','Yard & sites','day'],['TODAY','Today','day']]);
   assert.ok(html.indexOf('data-view="HOME"')<html.indexOf('data-view="TODAY"'),'Yard & sites is the first tile');
   assert.match(officeHTML({state:s,account:f.account,hire:true,view:'HOME'}),/class="gm-tile current" data-view="HOME" aria-current="page" aria-label="Yard &amp; sites"/);
+  // The owner's order for each group: Client sites moved out of Every day to the front of Yard and fleet.
+  const group=g=>OFFICE_TILES.filter(x=>x[4]===g).map(x=>x[1]);
+  assert.deepEqual(group('day'),['Yard & sites','Today','Schedule','Stock ledger','Materials catalogue']);
+  assert.deepEqual(group('yard'),['Client sites','Yard layout','Workers','Equipment','Big trucks','Small trucks','Control room']);
   // Without operations.manage the main page is the Control room, the same place the Office bar's back button goes.
   const other=officeHTML({state:s,account:{...f.account,permissions:[]},hire:false});assert.ok(!other.includes('data-view="HOME"'));assert.match(other,/data-view="CONTROL"[^>]*aria-label="Yard &amp; sites"/);
 });
