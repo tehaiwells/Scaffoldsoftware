@@ -48,7 +48,9 @@ export const crewMethods={
     const moves=[];for(const t of tasks){const at=placed.get(t.id)??null;if(!at&&!(typeof t.createdAt==='string'&&t.createdAt>=since))continue;let title='Forklift move';try{title=this.taskInfo(t).title??title;}catch{}moves.push({id:t.id,title,type:t.type??null,at:at??t.createdAt,exact:!!at});}
     moves.sort((a,b)=>String(a.at).localeCompare(String(b.at)));
     const jobs=[...real.map(j=>item(j,j.completedAt,ms(j))),...(tally?.items??[])].sort((a,b)=>String(a.completedAt).localeCompare(String(b.completedAt)));
-    return {worker:w.id,name:w.name,day,since,recorded:true,
+    // the phone view's "Your messages" and the role under the name (src/domain/plan.js, team.js)
+    const role=typeof this.roleOf==='function'?this.roleOf(w):null,ops=this.auth.permissions(this.user).includes('operations.manage'),messages=(typeof this.personMessages==='function'?this.personMessages('worker',w.id):[]).filter(m=>{if(ops)return true;try{return !!m.site&&this.repo.get(m.site).supervisor===this.user.id;}catch{return false;}});
+    return {worker:w.id,name:w.name,role,roleWords:role?{YARDSMAN:'Yardsman',SCAFFOLDER:'Scaffolder',LEADING_HAND:'Leading hand'}[role]:null,messages,away:w.away?{site:w.location,since:w.away.since}:null,day,since,recorded:true,
       // partial: some of today's jobs came from the kept job records (the yard keeps the newest 100), so earlier ones may be missing.
       partial:done.some(j=>!tally||String(j.completedAt)<String(tally.firstAt)),tallySince:tally?.firstAt??null,
       jobs:jobs.slice(-KEEP_ITEMS),jobsDone:(tally?.jobsDone??0)+real.length,

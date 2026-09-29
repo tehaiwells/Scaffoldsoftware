@@ -28,7 +28,7 @@ const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
 const OPEN_RT=['REQUESTED','BOOKED','LOADING'];
 // Not free right now (being moved, loaded, or on its way back): a waiting order keeps waiting for it instead of being dropped.
 const notYet=(ok,message)=>{if(!ok)throw Object.assign(new AppError(409,message),{wait:true});};
-const lineList=lines=>{requireRule(Array.isArray(lines)&&lines.length>0&&lines.length<=60,'Pick at least one material.');const seen=new Map();for(const l of lines){requireRule(l&&typeof l.product==='string'&&l.product.length>0,'Pick a material.');seen.set(l.product,(seen.get(l.product)??0)+integer(l.quantity,'Amount',1,1000000));}return [...seen].map(([product,quantity])=>({product,quantity}));};
+export const lineList=lines=>{requireRule(Array.isArray(lines)&&lines.length>0&&lines.length<=60,'Pick at least one material.');const seen=new Map();for(const l of lines){requireRule(l&&typeof l.product==='string'&&l.product.length>0,'Pick a material.');seen.set(l.product,(seen.get(l.product)??0)+integer(l.quantity,'Amount',1,1000000));}return [...seen].map(([product,quantity])=>({product,quantity}));};
 const logError=(event,fields)=>{try{console.error(JSON.stringify({event,...fields}));}catch{}};
 export const gameMethods={
   gameYard(){const yard=this.repo.all('yard')[0];requireRule(yard,'Choose your yard size first.');return yard;},
@@ -98,7 +98,9 @@ export const gameMethods={
     const stored=this.containers().filter(c=>c.location===yard.id&&!c.retired),byId=new Map(stored.map(c=>[c.id,c])),onTop=new Set(stored.map(c=>c.support).filter(Boolean));
     const names=new Set(this.repo.all('container').map(c=>c.name));let k=1;while(names.has('S-'+String(k).padStart(3,'0')))k++;const name='S-'+String(k).padStart(3,'0');
     const level=c=>{let n=1;for(let cur=c;cur.support&&byId.has(cur.support)&&n<20;cur=byId.get(cur.support))n++;return n;},mine=c=>{const l=this.repo.lines(c.id);return l.length===1&&l[0].product_id===product;};
-    const piles=stored.filter(c=>c.type==='STILLAGE'&&c.condition==='SERVICEABLE'&&!onTop.has(c.id)&&mine(c)).map(c=>({c,n:level(c)})).sort((a,b)=>a.n-b.n||a.c.name.localeCompare(b.c.name,undefined,{numeric:true}));
+    // never on a stillage set aside for a list on the Today calendar (plan.js): it would ride along to that site
+    const held=new Set(this.repo.all('reservation').filter(r=>r.active&&r.plan).map(r=>r.container));
+    const piles=stored.filter(c=>c.type==='STILLAGE'&&c.condition==='SERVICEABLE'&&!onTop.has(c.id)&&!held.has(c.id)&&mine(c)).map(c=>({c,n:level(c)})).sort((a,b)=>a.n-b.n||a.c.name.localeCompare(b.c.name,undefined,{numeric:true}));
     const stack=max=>{for(const {c,n} of piles){if(n>=max)continue;const position={x:c.x,y:c.y,rotation:c.rotation??0,support:c.id};try{return savepoint(this.db,'game_stack',()=>{this.validatePlacement({...STILLAGE,rotation:position.rotation,support:c.id},yard.id,position);return this.container({name,location:yard.id,...STILLAGE,...position});});}catch(e){if(!e.status||/payload|unknown|stocktake/.test(e.message))throw e;}}return null;};
     const low=stack(3);if(low)return low;
     const A=1200,wide={...STILLAGE,envelopeLength:STILLAGE.envelopeLength+2*A,envelopeWidth:STILLAGE.envelopeWidth+2*A,length:STILLAGE.length+2*A,width:STILLAGE.width+2*A,rotation:0,support:null};
@@ -219,6 +221,7 @@ export function installGame(proto){
   // autopilot once after every engine tick either way.
   const tickJobs=proto.tickJobs,build=proto.buildSnapshot;if(typeof tickJobs!=='function'||typeof build!=='function')throw new AppError(500,'The game board needs tickJobs and buildSnapshot.');
   Object.assign(proto,gameMethods,siteFinishMethods);sfGuard(proto);
-  proto.tickJobs=function(elapsed){const r=tickJobs.call(this,elapsed);this.gameTick();return r;};
+  // then the Today planner (src/domain/plan.js planTick: at most one pass a second, never throws into the tick)
+  proto.tickJobs=function(elapsed){const r=tickJobs.call(this,elapsed);this.gameTick();if(typeof this.planTick==='function')this.planTick(elapsed);return r;};
   proto.buildSnapshot=function(page,opts){const result=build.call(this,page,opts);if(this.auth.permissions(this.user).includes('operations.manage'))this.gameSnapshot(result);return result;};
 }

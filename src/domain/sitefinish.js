@@ -30,7 +30,7 @@ const BUSY=['task','job','cargo','drive','walk','driver','claimedBy','mountedOn'
 export const SF_FINISH_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='site' AND json_type(data,'$.finishing')='object' LIMIT 1";
 // Anything that names the site (a truck, a trip, a stillage, a movement, a request, a collection, a yard list, a waiting order, a stocktake, a hire
 // rate, a layout ...), other than its own crew standing there, another site, a notification or a kept Undo copy.
-const USED="SELECT kind FROM objects WHERE company_id=?1 AND id<>?2 AND kind NOT IN ('site','notification','siteUndo') AND instr(data,?2)>0 AND NOT (kind='resource' AND json_extract(data,'$.location')=?2) LIMIT 1";
+const USED="SELECT kind FROM objects WHERE company_id=?1 AND id<>?2 AND kind NOT IN ('site','notification','siteUndo','planItem','message','paperwork') AND instr(data,?2)>0 AND NOT (kind='resource' AND json_extract(data,'$.location')=?2) LIMIT 1";
 // Stock history at the site in the ledger (the site's own admin events do not count).
 const HISTORY="SELECT event FROM ledger WHERE company_id=?1 AND (source=?2 OR destination=?2) AND (quantity<>0 OR event NOT IN ('COMMAND','SITE_MAP','SITE_DETAILS','SITE_ARCHIVED','SITE_FINISHING','SITE_KEPT_OPEN','SITE_REOPENED','SITE_RESTORED')) LIMIT 1";
 const INSERT='INSERT INTO objects(id,company_id,kind,data) VALUES(?,?,?,?)';
@@ -85,6 +85,8 @@ export const siteFinishMethods={
     // pressed again while removing: try again after a truck could load nothing
     if(site.finishing){if(site.finishing.stuck){this.sfNote(site.id,{stuck:null,problem:null,retryAt:null});this.sfCollect(site);}return {removing:true,site:brief(site),message:'Bringing everything back from '+site.name+'.'};}
     const block=this.sfBlockFor(site);if(block)throw new AppError(409,block.why);
+    // plans for it on the Today calendar are called off and people borrowed there go home first (so its crew below is only its own)
+    this.planSiteGone?.(site.id,'removed');
     // Sends still waiting for a truck no longer go there (inside the command: a refusal below puts them back)
     for(const o of this.repo.all('gameOrder'))if(o.site===site.id&&o.type==='SEND')this.repo.remove(o.id,'gameOrder');
     if(!this.sfUsed(site)){
@@ -128,6 +130,7 @@ export const siteFinishMethods={
     const map=this.sfLot(id,u.lot??data.map);cached(this.db,INSERT).run(id,this.repo.company,'site',JSON.stringify({...data,status:'ACTIVE',finishing:null,map}));this.repo.cache=null;
     for(const r of u.crew??[]){const {id:rid,kind:rk,version:rv,...rd}=r;if(!cached(this.db,'SELECT 1 FROM objects WHERE id=?').get(rid))cached(this.db,INSERT).run(rid,this.repo.company,'resource',JSON.stringify({...rd,task:null}));}
     this.repo.cache=null;this.repo.remove(u.id,'siteUndo');this.sfSettle(id);
+    if(this.repo.all('planItem').some(i=>i.site===id&&i.status==='CANCELLED'&&/^Site removed/.test(i.cancelReason??'')))this.notify('Plans cancelled','Plans for '+data.name+' were cancelled when it was removed. Plan them again if needed.',id);
     this.repo.event(this.user.id,'SITE_RESTORED',{destination:id,reason:data.name+' put back (Undo)',key:this.key});
     const s=this.repo.get(id,'site');return {ok:true,site:{...s},message:s.name+' is back on the map.'};},
   // ---------- after every engine tick ----------

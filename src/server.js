@@ -17,6 +17,7 @@ export function createApp(db,{backups=null}={}) {
   // The installable app (Today page): the web app manifest and its icons (PNG files made once by scripts/make-icons.js).
   Object.assign(assets,{'/manifest.webmanifest':['manifest.webmanifest','application/manifest+json'],...Object.fromEntries(['icon-32','icon-192','icon-512','icon-maskable-512','apple-touch-icon'].map(n=>['/icons/'+n+'.png',['icons/'+n+'.png','image/png']]))});
   Object.assign(assets,{'/game.js':['game.js','text/javascript'],'/game-art.js':['game-art.js','text/javascript'],'/game-pick.js':['game-pick.js','text/javascript'],'/game-finish.js':['game-finish.js','text/javascript'],'/game.css':['game.css','text/css']});// the game board
+  assets['/plan-cal.js']=['plan-cal.js','text/javascript'];// the Today calendar's grid and chips (shared with src/domain/today.js)
   return createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -51,6 +52,10 @@ export function createApp(db,{backups=null}={}) {
       else if(req.method==='GET'&&path==='/api/state') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.snapshot(Number(query.get('page')??0),{lean:true,catalogue:query.get('catalogue'),world:query.get('world')}));}
       else if(req.method==='GET'&&path==='/api/history') {const query=new URL(req.url,'http://localhost').searchParams;send(200,simulation.history(Number(query.get('limit')??100),Number(query.get('after')??0)));}
       else if(req.method==='GET'&&path==='/api/reports') {const days=new URL(req.url,'http://localhost').searchParams.get('days');send(200,simulation.reports(days===null?30:Number(days)));}
+      else if(req.method==='GET'&&path==='/api/plan') send(200,simulation.planMonth(new URL(req.url,'http://localhost').searchParams.get('month')));// the Today calendar (src/domain/today.js)
+      else if(req.method==='GET'&&path==='/api/today') send(200,simulation.todayView());
+      else if(req.method==='GET'&&path==='/api/person') {const q=new URL(req.url,'http://localhost').searchParams;send(200,simulation.personView(q.get('kind'),q.get('id')));}
+      else if(req.method==='GET'&&path==='/api/team') send(200,simulation.teamView());
       else if(req.method==='GET'&&path==='/api/crew-day') send(200,simulation.crewDay(new URL(req.url,'http://localhost').searchParams.get('worker')));
       else if(req.method==='GET'&&path==='/api/hire') send(200,simulation.hire(Object.fromEntries(new URL(req.url,'http://localhost').searchParams)));
       else if(req.method==='GET'&&path==='/api/game-items') send(200,simulation.gameItemsFor(new URL(req.url,'http://localhost').searchParams.get('loc')));// the game board's Send / Bring back slider (src/domain/game.js)

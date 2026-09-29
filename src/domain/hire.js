@@ -174,7 +174,7 @@ export const hireMethods={
  // a rate or the day changes; names, collections and the live count are read fresh each time.
  hire(query={}){this.hireRequire();const cal=calendarNow(),st=sync(this.db,this.user.company_id);return this.hireView(st,cal,{site:query.site||null,from:query.from||null,to:query.to||null});},
  hireView(st,cal,{site,from,to}){
-  const today=cal.today,weekStart=cal.weekStart,catalogue=this.catalogue().byId,sites=this.repo.all('site'),siteById=new Map(sites.map(s=>[s.id,s]));
+  const today=cal.today,weekStart=cal.weekStart,monthStart=today.slice(0,8)+'01',catalogue=this.catalogue().byId,sites=this.repo.all('site'),siteById=new Map(sites.map(s=>[s.id,s]));
   const rawRates=[...this.repo.all('hireRate'),...this.repo.all('hireSiteRate')],rates=rawRates.filter(r=>r.kind==='hireRate').map(stamp),siteRates=rawRates.filter(r=>r.kind==='hireSiteRate').map(stamp),std=new Map(rates.map(r=>[r.product,r])),over=new Map(siteRates.map(r=>[r.site+'|'+r.product,r]));
   // The key of every kept sum: the hire book's version, the day and every rate object's id and version.
   const rk=st.bv+'|'+today+'|'+weekStart+'|'+rawRates.map(r=>r.id+'@'+r.version).join(',');
@@ -184,18 +184,20 @@ export const hireMethods={
   const nextCollection=new Map();for(const c of this.repo.all('collection')){if(!['REQUESTED','BOOKED','LOADING'].includes(c.status))continue;const was=nextCollection.get(c.site);if(!was||(c.status==='LOADING'&&was.status!=='LOADING')||(was.status!=='LOADING'&&String(c.neededOn??'9')<String(was.neededOn??'9')))nextCollection.set(c.site,{id:c.id,status:c.status,neededOn:c.neededOn??null,slot:c.slot??'ANY',late:!!c.neededOn&&c.neededOn<today});}
   // The sums per site: pieces now, since, hire to date and this week (priced per rate period), run rate and unpriced materials.
   const sums=memo(st,'o|'+rk,()=>{const out=new Map(),onHire=new Map(),everOn=new Set(),unpricedNow=new Map();
-   for(const [sid,byProduct] of st.book){let n=0,since=null,accrued=0,week=0,missing=new Set(),rr=0,first=null,longest=null;
+   for(const [sid,byProduct] of st.book){let n=0,since=null,accrued=0,week=0,month=0,monthMissing=false,missing=new Set(),rr=0,first=null,longest=null;
     for(const [pid,lots] of byProduct){everOn.add(pid);const segs=timeline(sid,pid),now=segs.find(x=>inSeg(x,today))?.rate,openQ=lots.open.reduce((a,l)=>a+l.q,0);
      const start=[...lots.closed.map(l=>l.start),...lots.open.map(l=>l.start)].sort()[0];if(start&&(!first||start<first))first=start;
      if(openQ){n+=openQ;onHire.set(pid,(onHire.get(pid)??0)+openQ);const s0=lots.open[0].start;if(!since||s0<since)since=s0;if(!longest||s0<longest.since)longest={product:pid,since:s0,days:daysBetween(s0,today)+1};
       if(now?.priced)rr+=openQ*now.perWeek;else unpricedNow.set(pid,(unpricedNow.get(pid)??0)+openQ);}
      if(!start)continue;
      for(const c of hireCharge(lots,start,today,today,segs)){if(!c.pieceDays&&!c.topUp)continue;if(c.amount==null)missing.add(pid);else accrued+=c.amount+(c.topUpAmount??0);}
-     for(const c of hireCharge(lots,weekStart,today,today,segs))if(c.amount!=null)week+=c.amount+(c.topUpAmount??0);}
-    if(first)out.set(sid,{pieces:n,since,first,accrued,thisWeek:week,runRate:rr,missing:[...missing],longest});}
+     for(const c of hireCharge(lots,weekStart,today,today,segs))if(c.amount!=null)week+=c.amount+(c.topUpAmount??0);
+     // this month (the Today page's business card), priced like this week
+     for(const c of hireCharge(lots,monthStart,today,today,segs)){if(c.amount!=null)month+=c.amount+(c.topUpAmount??0);else if(c.pieceDays||c.topUp)monthMissing=true;}}
+    if(first)out.set(sid,{pieces:n,since,first,accrued,thisWeek:week,thisMonth:month,monthMissing,runRate:rr,missing:[...missing],longest});}
    return {sites:out,onHire,everOn,unpricedNow};});
-  const rows=[];let pieces=0,weekSum=0,weekMissing=0,runRate=0,longest=null,sitesOn=0;
-  for(const [sid,x] of sums.sites){const s=siteById.get(sid);if(!s)continue;if(x.pieces)sitesOn++;pieces+=x.pieces;weekSum+=x.thisWeek;runRate+=x.runRate;weekMissing+=x.missing.length?1:0;
+  const rows=[];let pieces=0,weekSum=0,weekMissing=0,monthSum=0,monthMissing=0,runRate=0,longest=null,sitesOn=0;
+  for(const [sid,x] of sums.sites){const s=siteById.get(sid);if(!s)continue;if(x.pieces)sitesOn++;pieces+=x.pieces;weekSum+=x.thisWeek;monthSum+=x.thisMonth;monthMissing+=x.monthMissing?1:0;runRate+=x.runRate;weekMissing+=x.missing.length?1:0;
    if(x.longest&&(!longest||x.longest.since<longest.since))longest={site:sid,siteName:s.name,product:x.longest.product,name:product(x.longest.product).name,since:x.longest.since,days:x.longest.days};
    rows.push({id:sid,name:s.name,client:s.client??null,address:s.address??null,status:s.status,pieces:x.pieces,since:x.since,days:x.since?daysBetween(x.since,today)+1:0,first:x.first,accrued:x.accrued,thisWeek:x.thisWeek,runRate:x.runRate,missing:x.missing,overrides:siteRates.filter(r=>r.site===sid).length,collection:nextCollection.get(sid)??null});}
   rows.sort((a,b)=>(b.pieces>0)-(a.pieces>0)||(a.since??'9').localeCompare(b.since??'9')||a.name.localeCompare(b.name,undefined,{numeric:true}));
@@ -204,7 +206,7 @@ export const hireMethods={
   const products=[...new Set([...sums.everOn,...rates.map(r=>r.product),...siteRates.map(r=>r.product)])].map(id=>({...product(id),onHire:sums.onHire.get(id)??0,everOnHire:sums.everOn.has(id)})).sort((a,b)=>b.onHire-a.onHire||(b.everOnHire-a.everOnHire)||a.name.localeCompare(b.name,undefined,{numeric:true}));
   const unpriced=[...sums.unpricedNow].map(([id,q])=>({...product(id),pieces:q})).sort((a,b)=>b.pieces-a.pieces);
   const result={seq:st.seq,today,weekStart,monthStart:today.slice(0,8)+'01',generatedAt:new Date().toISOString(),gstPercent:GST_PERCENT,firstDay:st.first,
-   totals:{pieces,sites:sitesOn,activeSites:sites.filter(s=>s.status==='ACTIVE').length,thisWeek:weekSum,runRate,weekMissing,longest},
+   totals:{pieces,sites:sitesOn,activeSites:sites.filter(s=>s.status==='ACTIVE').length,thisWeek:weekSum,thisMonth:monthSum,runRate,weekMissing,monthMissing,longest},
    check:{rebuilt:pieces,actual,ok:pieces===actual},sites:rows,unpriced,products,rates,siteRates,
    siteList:sites.map(s=>({id:s.id,name:s.name,status:s.status,onHire:rows.some(r=>r.id===s.id)})).sort((a,b)=>(b.onHire-a.onHire)||(a.status==='ACTIVE'?0:1)-(b.status==='ACTIVE'?0:1)||a.name.localeCompare(b.name,undefined,{numeric:true})),
    statement:null};

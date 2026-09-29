@@ -6,7 +6,7 @@ import { dayLabel } from './schedule.js';
 // alCheck keeps the set of materials below their minimum and adds one notification when a material first drops below it (never again until it recovers).
 // The yard figure is the free count: serviceable pieces in the yard (and on its machines) not reserved for a load, the same number the Home card shows as 'free'.
 export const AL_SEVERITY=['high','medium','low'];
-const RANK={high:0,medium:1,low:2},KIND_RANK={BLOCKED:0,OVERDUE:1,CLASH:2,LOW_STOCK:3,DUE_TODAY:4,DAMAGED:5};
+const RANK={high:0,medium:1,low:2},KIND_RANK={BLOCKED:0,OVERDUE:1,CLASH:2,LOW_STOCK:3,DUE_TODAY:4,PAPERWORK:5,ANSWER:6,DAMAGED:7};
 const plural=(n,one,many)=>n+' '+(n===1?one:many);
 // Free pieces per product over the yards, from a stockByLocation block map (each yard clamped at zero on its own, as the Home card adds them).
 export function alFreeInYards(stock,yardIds){const free=new Map();for(const id of yardIds)for(const r of stock?.[id]?.rows??[])free.set(r.product,(free.get(r.product)??0)+(r.free??Math.max(0,r.quantity-(r.reserved??0)-(r.unserviceable??0))));return free;}
@@ -57,6 +57,8 @@ export const alertMethods={
     const pieces=new Map();for(const l of allBalances)if(l.condition!=='SERVICEABLE'&&l.quantity>0)pieces.set(l.container,(pieces.get(l.container)??0)+l.quantity);
     if(pieces.size){const names=new Map([...result.yards,...result.sites,...result.trucks,...result.resources].map(o=>[o.id,o]));for(const [i,c] of allContainers.entries()){const n=pieces.get(c.id);if(!n)continue;const loc=names.get(c.location),machine=loc?.type&&loc.location?names.get(loc.location):null,where=machine??loc;
       items.push({id:'DAMAGED:'+c.id,kind:'DAMAGED',severity:'low',title:c.name+' is '+String(c.condition).toLowerCase(),detail:plural(n,'piece','pieces')+' held in it'+(where?' · '+(where.kind==='truck'?'on ':'at ')+where.name:'')+' · check it, repair or move the stock out',target:{view:where?.kind==='site'?'SITES':where?.kind==='truck'?(where.payload>=10000000?'TRUCK12':'TRUCK2'):'HOME',id:c.id,at:where?.id??null,page:Math.floor(i/100)},container:c.id,condition:c.condition,pieces:n});}}
+    // the Today planner: paperwork expiring or expired, people who can't make it or haven't answered (src/domain/today.js)
+    if(typeof this.planAlerts==='function'){try{items.push(...this.planAlerts({operations,sites:result.sites,today}));}catch(error){if(!error.status)console.error(JSON.stringify({event:'plan_alerts_error',message:error.message}));}}
     items.sort(alSort);const counts={high:0,medium:0,low:0};for(const a of items)counts[a.severity]++;
     return {count:items.length,counts,items:items.slice(0,200),below};
   }
