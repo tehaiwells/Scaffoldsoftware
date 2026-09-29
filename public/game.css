@@ -317,3 +317,79 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 @media (prefers-reduced-motion:reduce){.gm-bubble,.gm-pop,.gm-office-in,.gm-slot.bump,.gm-tick svg,.gm-trip,.gm-nw,.gm-trip-wait{animation:none!important}.gm-tick svg{stroke-dashoffset:0}.gm-hint.aimed{transition:none}}
 /* ---------- wide screens: a roomier inventory ---------- */
 @media (min-width:1600px){:root{--gm-cell:40px}.gm-body{grid-template-columns:minmax(0,1fr) 472px}.gm-n{font-size:11.5px}}
+/* ---------- Site undo and finish (public/game-finish.js): Remove site under each site tile, in the new-site window, the site window and the Office; the Undo pop; Removing ---------- */
+.gm-pop.sf-pop{pointer-events:auto;padding-right:8px}
+.sf-undo{flex:none;height:34px;padding:0 14px;margin-left:4px;border-radius:999px;border:2px solid #16382c;background:#16382c;color:#fff;font:inherit;font-size:14px;font-weight:800;cursor:pointer}
+.sf-undo:hover{background:#244c3b}
+.sf-undo:focus-visible,.sf-rm:focus-visible,.sf-link:focus-visible{outline:3px solid var(--gm-lime);outline-offset:2px}
+.sf-bin{width:15px;height:15px;flex:none}
+.sf-bin-big{width:26px;height:26px}
+/* a site tile with its Remove button under it */
+.sf-tile{flex:none;display:flex;flex-direction:column;gap:3px;width:80px}
+.sf-tile>.gm-site{width:100%;flex:1 0 auto}
+.gm .sf-rm{display:flex;align-items:center;justify-content:center;gap:5px;font:inherit;cursor:pointer;border:1px solid var(--gm-line);background:#ffffff08;color:#f1dccb}
+.gm .sf-rm:hover{background:#6b2f1d66;border-color:#b0644a;color:#fff}
+.gm .sf-rm[disabled]{opacity:.5;cursor:default}
+.gm .sf-rm-tile{height:26px;padding:0 6px;border-radius:7px;font-size:11.5px;font-weight:750}
+.gm .sf-rm-going{cursor:default;color:var(--gm-soft);font-style:italic;background:none}
+.gm .sf-rm-going:hover{background:none;border-color:var(--gm-line);color:var(--gm-soft)}
+.gm .sf-rm-win{width:100%;height:40px;margin-top:6px;border-radius:11px;font-size:14px;font-weight:800}
+.gm .sf-rm-win .sf-bin{width:17px;height:17px}
+/* the question, a reason, Removing */
+.sf-box{display:flex;flex-direction:column;gap:8px;margin-top:6px;padding:10px 12px;border-radius:12px;background:var(--gm-panel2);border:1px solid var(--gm-line);color:#fff}
+.gm .sf-box p{display:flex;align-items:center;gap:10px;margin:0;font-size:14.5px;font-weight:800;line-height:1.3;text-align:left;color:inherit;opacity:1}
+.gm .sf-box .sf-bin-big{color:#f1dccb}
+.sf-two{display:grid;grid-template-columns:1.35fr 1fr;gap:6px}
+.sf-two .gm-go{height:42px;padding:0 10px;font-size:14px;line-height:1.1}
+.sf-two>:only-child{grid-column:1/-1}
+/* a finger that tapped Remove rests where the answer appears: the answer keeps its own colour under it */
+.gm .sf-box .gm-go:not(.gm-go-alt):hover{background:linear-gradient(#d3f984,#ade342)}
+.gm .sf-box .gm-go-alt:hover{background:#34503f}
+.sf-why{background:#fff4e2;color:#5a3208;border:2px solid #a3550f}
+.sf-why p{font-weight:750}
+.sf-going{flex-direction:row;align-items:center;gap:10px}
+.sf-home{width:34px;height:34px;flex:none;color:#fff}
+.sf-txt{flex:1;min-width:0;text-align:left}
+.sf-txt b{display:block;font-size:14.5px}
+.sf-txt small{display:block;margin-top:2px;font-size:12.5px;color:var(--gm-soft)}
+.sf-txt .sf-stuck{color:#ffd29a}
+.gm .sf-link{flex:none;min-height:32px;padding:4px 8px;border:0;background:none;color:var(--gm-lime);font:inherit;font-size:13.5px;font-weight:800;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.gm .sf-link:hover{color:#fff}
+.gm .sf-link[disabled]{opacity:.5;cursor:default}
+.gm-acts.sf-acts>.sf-box{margin-top:0}
+/* the new-site window: the sites already on the map */
+.sf-nw{width:100%;margin-top:8px;padding-top:10px;border-top:1px solid var(--gm-line);text-align:left}
+.gm-nw p.sf-nw-h{margin:0 0 6px;font-size:12.5px;font-weight:750;color:var(--gm-soft)}
+.sf-nw-list{list-style:none;margin:0;padding:0;display:grid;gap:5px;max-height:188px;overflow-y:auto}
+.sf-nw-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 4px 10px;border-radius:9px;background:#ffffff08}
+.sf-nw-list li.sf-open{flex-direction:column;align-items:stretch;padding:6px}
+.sf-nw-list li.sf-open .sf-box{margin-top:0}
+.sf-nw-name{min-width:0;font-size:14px;font-weight:750;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-nw-list .sf-rm-tile{flex:none}
+.gm-nw .sf-box p{font-size:13.5px;color:inherit}
+/* a site being removed says so under its name on the map, even where the board hides the other tag lines */
+.gm-board .world-svg .wm-tag-sub.sf-sub:not([display="none"]),.world-svg .wm-tag-sub.sf-sub:not([display="none"]){display:inline!important}
+.world-svg .wm-tag-sub.sf-sub rect{fill:#fff4d6;stroke:#a3550f;stroke-opacity:1}
+.world-svg .wm-tag-sub.sf-sub text{fill:#5a3208;font-weight:750}
+/* the Office, Client sites: Remove site, its question, Removed / finished sites */
+.page-sites .si-actions .sf-office{margin-left:auto;display:flex}
+.page-sites .si-actions .sf-office .si-archive{margin-left:0;display:inline-flex;align-items:center;gap:6px}
+.page-sites .si-actions .sf-office:has(.sf-box){flex-basis:100%}
+.sf-office .sf-box{width:100%;margin:0;background:#f6f3e8;border-color:#e3dcc6;color:#16382c}
+.sf-office .sf-why{background:#fff4e2;border-color:#a3550f;color:#5a3208}
+.sf-office .sf-box .sf-bin-big{color:#8a4a36}
+.sf-office .sf-two{display:flex;flex-wrap:wrap;gap:8px}
+.sf-office .sf-home{color:#16382c}
+.sf-office .sf-txt small{color:#5b7466}
+.sf-office .sf-link{border:0;background:none;color:#16382c;font-weight:800;text-decoration:underline;cursor:pointer;padding:4px 8px}
+.sf-done-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.sf-done-head .sf-bin-big{color:#8a4a36}
+.sf-done-head h2{margin:0}
+.sf-done-head p{margin:2px 0 0;color:#5b7466;font-size:14px}
+.sf-done-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.sf-done-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:10px;background:#f6f3e8;border:1px solid #e3dcc6}
+.sf-done-name{min-width:0}
+.sf-done-name b{display:block;font-size:15px}
+.sf-done-name small{display:block;color:#5b7466;font-size:12.5px;overflow-wrap:anywhere}
+.sf-done-list button{flex:none;margin:0}
+@media (max-width:760px){.sf-box p{font-size:14px}.sf-done-list li{flex-wrap:wrap}.page-sites .si-actions .sf-office{margin-left:0}.page-sites .si-actions .sf-office .si-archive{width:100%;justify-content:center}}

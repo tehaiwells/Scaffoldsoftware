@@ -6,6 +6,7 @@
 //   gameSend      materials to a site: whole stillages onto the next free truck(s)                            -> loadTruck
 //   gameCollect   stuff back from a site: a collection for today on the next free truck, sent there empty    -> requestCollection, dispatch
 //   gameCancel    a Send or Bring back still waiting for a truck (gameOrder), taken off the waiting list
+//   gameRemoveSite, gameKeepOpen, gameReopen: remove a site (bringing everything home first), change your mind (src/domain/sitefinish.js)
 // When every truck is out, Send and Bring back wait as a gameOrder (oldest first) and go on the next truck that is back at the yard (gameTick).
 // A truck given a trip by gameSend / gameCollect carries truck.game = {kind, site, stage, ...}; after every engine tick the autopilot (gameTick)
 // takes the next step when the last one is finished: dispatch when loaded, unload at the site with its crane, drive home, load a collection,
@@ -18,7 +19,8 @@ import { active } from './inventory.js';
 import { cached,savepoint } from '../database.js';
 import { RT_EDITABLE } from './collections.js';
 import { gpChoose,gpPerStillage } from '../../public/game-pick.js';
-export const GAME_OPS=['gameStart','gameSite','gameCatalogue','gameAddStock','gameSend','gameCollect','gameStop','gameCancel'];
+import { siteFinishMethods,SF_OPS,SF_FINISH_PROBE } from './sitefinish.js';
+export const GAME_OPS=['gameStart','gameSite','gameCatalogue','gameAddStock','gameSend','gameCollect','gameStop','gameCancel',...SF_OPS];
 export const GAME_SIZES={S:{w:20000,d:16000,name:'Small yard'},M:{w:30000,d:20000,name:'Medium yard'},L:{w:40000,d:25000,name:'Large yard'}};
 const TRUCK_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='truck' AND json_type(data,'$.game')='object' LIMIT 1",ORDER_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='gameOrder' LIMIT 1";
 const HEAVY=10000000,RETRY_MS=4000,STILLAGE={type:'STILLAGE',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000};
@@ -105,7 +107,7 @@ export const gameMethods={
   // Materials to a site: the stillages holding them (game-pick.js, tops of piles first), loaded onto the next free truck; what does not fit goes
   // on the next one. Each truck then drives, unloads and comes home by itself (gameTick).
   gameSend(input){
-    const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');const lines=lineList(input.lines);
+    const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');requireRule(!site.finishing,site.name+' is being removed. Tap Keep it first.');const lines=lineList(input.lines);
     let trucks=this.gameFreeTrucks(yard);if(input.truck){const t=trucks.find(x=>x.id===input.truck);requireRule(t,'That truck is busy. Pick another one.');trucks=[t,...trucks.filter(x=>x!==t)];}
     if(!trucks.length){requireRule(!input.fromQueue,'Every truck is busy.');const here=this.containers().filter(c=>c.location===yard.id);requireRule(lines.some(l=>here.some(c=>this.repo.quantity(c.id,l.product)>0)),'None of that is in the yard.');return this.gameWait('SEND',site,{lines});}
     const items=this.gameItems([yard.id]).get(yard.id),pick=gpChoose(items,lines);notYet(pick.ids.length,'None of that is free in the yard right now.');
@@ -156,12 +158,12 @@ export const gameMethods={
   gameStop(input){const t=this.repo.get(input?.id,'truck');requireRule(t.game,t.name+' is not on an automatic trip.');t.game=null;this.repo.save(t);return {ok:true,message:t.name+' is now run by hand from its truck page.'};},
   // ---------- the autopilot, after every engine tick ----------
   gameTick(){
-    const trips=!!cached(this.db,TRUCK_PROBE).get(this.repo.company),orders=!!cached(this.db,ORDER_PROBE).get(this.repo.company);if(!trips&&!orders)return;const now=Date.now();if(trips)
+    const trips=!!cached(this.db,TRUCK_PROBE).get(this.repo.company),orders=!!cached(this.db,ORDER_PROBE).get(this.repo.company),finishing=!!cached(this.db,SF_FINISH_PROBE).get(this.repo.company);if(!trips&&!orders&&!finishing)return;const now=Date.now();if(trips)
     for(const t of this.repo.all('truck')){if(!t.game||t.retired||t.status==='IN_TRANSIT')continue;if(t.game.retryAt&&now<t.game.retryAt)continue;
       // rtSync as after every command (execute): a collection follows the trip the autopilot just started
       try{savepoint(this.db,'game_auto',()=>{this.gameStep(t);this.rtSync();});}
       catch(error){if(!error.status)logError('game_autopilot_error',{truck:t.id,message:error.message});const f=this.repo.get(t.id,'truck');if(f.game){f.game={...f.game,problem:error.status?error.message:'Something went wrong. The truck waits here; see its truck page.',retryAt:now+RETRY_MS};this.repo.save(f);}}}
-    if(orders)this.gameOrders();},
+    if(orders)this.gameOrders();if(finishing)this.sfTick();},
   gameStep(t){
     const g=t.game,tasks=this.tasks().filter(active),loading=tasks.some(x=>x.to===t.id),unloading=tasks.some(x=>x.from===t.id),cargo=this.containers().some(c=>c.location===t.id);
     const set=patch=>{const f=this.repo.get(t.id,'truck');f.game=patch===null?null:{...f.game,...patch,problem:null,retryAt:null};this.repo.save(f);};
@@ -169,11 +171,16 @@ export const gameMethods={
     const home=()=>this.dispatch({id:t.id,destination:t.yard});
     if(loading||unloading){if(g.problem)set({});return;}// the crew is on it
     if(g.kind==='SEND'){
-      if(g.stage==='LOADING'){if(t.status!=='AT_YARD')return set(null);if(!cargo){this.notify('Nothing to send',t.name+' had nothing loaded for '+siteName()+'.',g.site);return set(null);}this.dispatch({id:t.id,destination:g.site});
+      if(g.stage==='LOADING'){if(t.status!=='AT_YARD')return set(null);if(!cargo){this.notify('Nothing to send',t.name+' had nothing loaded for '+siteName()+'.',g.site);return set(null);}
+        // the site is being removed: the load never leaves; it is unloaded back into the yard (below)
+        if(this.sfFinishing(g.site)){const f=this.repo.get(t.id,'truck');f.destination=null;this.repo.save(f);return set({stage:'RETURNING'});}
+        this.dispatch({id:t.id,destination:g.site});
         // the run is the day's record of a board Send (it has no yard list): marked, with its pieces, for Today and the Schedule
         const d=this.repo.get(this.repo.get(t.id,'truck').delivery,'delivery');d.game='SEND';d.pieces=d.containers.reduce((n,id)=>n+this.repo.lines(id).reduce((k,l)=>k+l.quantity,0),0);this.repo.save(d);
         return set({stage:'DRIVING'});}
       if(g.stage==='DRIVING'||g.stage==='UNLOADING'){if(t.status!=='AT_SITE'||t.at!==g.site){if(t.status==='AT_YARD'&&!cargo)set(null);return;}
+        // arriving at a site that is being removed: the load comes straight home again
+        if(cargo&&g.stage==='DRIVING'&&this.sfFinishing(g.site)){home();return set({stage:'RETURNING'});}
         if(cargo){this.gameCrew(this.repo.get(g.site,'site'));this.unload({id:t.id});return set({stage:'UNLOADING'});}
         this.notify('Delivered','Delivered to '+siteName()+'! '+t.name+' is heading back to the yard.',g.site);home();return set({stage:'RETURNING'});}
     }else if(g.kind==='COLLECT'){
@@ -205,7 +212,7 @@ export function installGame(proto){
   // tick() (movement.js) ends with tickJobs(), and a quiet tick runs tickJobs() alone (simulation.js tickCompany): wrapping tickJobs runs the
   // autopilot once after every engine tick either way.
   const tickJobs=proto.tickJobs,build=proto.buildSnapshot;if(typeof tickJobs!=='function'||typeof build!=='function')throw new AppError(500,'The game board needs tickJobs and buildSnapshot.');
-  Object.assign(proto,gameMethods);
+  Object.assign(proto,gameMethods,siteFinishMethods);
   proto.tickJobs=function(elapsed){const r=tickJobs.call(this,elapsed);this.gameTick();return r;};
   proto.buildSnapshot=function(page,opts){const result=build.call(this,page,opts);if(this.auth.permissions(this.user).includes('operations.manage'))this.gameSnapshot(result);return result;};
 }
