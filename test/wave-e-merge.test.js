@@ -36,30 +36,28 @@ test('the Hire page shows the booked collection on the site row',async t=>{const
  clock(t,'2026-09-28T23:00:00Z');// Tue 29 Sep: the collection is late and nothing has left the site
  H.setData(f.sim.hire());assert.ok(H.view().includes('class="hr-coll late"'));});
 
-test('the Today page: a collection due today brings the Returns counter and card with its own buttons; an overdue one turns it red',async t=>{const f=setup(t),{T,td}=await load();
+test('the Today page: a collection due today shows in the day panel with its own buttons; an overdue one is marked late',async t=>{const f=setup(t),{T,td}=await load();td.reset();
  clock(t,'2026-09-24T23:00:00Z');// Fri 25 Sep
  const c=f.cmd('requestCollection',{site:f.site.id,neededOn:'2026-09-25',truck:f.truck.id});
  T.setState(f.sim.snapshot(),acct(f));T.setView('TODAY');let html=td.view();
- assert.match(html,/data-td-jump="returns"[\s\S]*?Returns today<\/span><b class="hud-num">1</,'the counter');assert.ok(!html.includes('data-td-jump="late"'),'no load is late: the returns counter takes the slot');
- assert.ok(html.includes('id="td-returns"')&&html.includes('data-rt="'+c.id+'"'),'the collection card');assert.match(html,/<div class="rt-row-title"><b>Site A<\/b>/,'headed by its site');
+ assert.ok(html.includes('Coming back today')&&html.includes('data-rt="'+c.id+'"'),'the collection card in the day panel');assert.match(html,/<div class="rt-row-title"><b>Site A<\/b>/,'headed by its site');
  assert.ok(html.includes('data-rt-load="'+c.id+'"')&&html.includes('Load collection onto T01'),'T01 is at the site: load it from Today');
  assert.ok(html.includes('data-sch-goto="'+c.id+'"'),'and open it on the Schedule');assert.ok(!/ style="/.test(html));assert.ok(ids(html),'ids are unique');
  T.setState(f.sim.snapshot(),acct(f,['requests.create','sites.assigned']));assert.ok(!td.view().includes('data-rt-load'),'a supervisor never loads a truck');
  // the next working day it has not been loaded: overdue at the site
  clock(t,'2026-09-27T23:00:00Z');// Mon 28 Sep
- const s=f.sim.snapshot();const d=td.day(s);assert.equal(d.returns.length,1);assert.equal(d.returns[0].late,true);
- T.setState(s,acct(f));html=td.view();assert.match(html,/td-stat alert" data-td-jump="returns"[\s\S]*?1 overdue at the site/);assert.ok(html.includes('td-returns is-late'));
+ td.reset();const s=f.sim.snapshot();const d=td.day(s);assert.equal(d.returns.length,1);assert.equal(d.returns[0].late,true);
+ T.setState(s,acct(f));html=td.view();assert.ok(html.includes('data-rt="'+c.id+'"'),'still on today, late');
  // loaded, sent home and unloaded: back in the yard, still listed today as done (needed today)
  f.cmd('reschedule',{id:c.id,neededOn:'2026-09-28'});f.cmd('loadCollection',{id:c.id});settle(f);
  assert.equal(td.day(f.sim.snapshot()).returns[0].moving,true,'loading: shown as in progress');
  f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f);
- const back=td.day(f.sim.snapshot()).returns;assert.equal(back[0].status,'RETURNED');assert.equal(back[0].done,true);
- T.setState(f.sim.snapshot(),acct(f));assert.ok(td.view().includes('Everything due back is in.'));});
+ const back=td.day(f.sim.snapshot()).returns;assert.equal(back[0].status,'RETURNED');assert.equal(back[0].done,true);});
 
-test('no collections today: the overdue-loads counter stays, and a cancelled collection never shows',async t=>{const f=setup(t),{T,td}=await load();
+test('no collections today: nothing coming back is listed, and a cancelled collection never shows',async t=>{const f=setup(t),{T,td}=await load();td.reset();
  const c=f.cmd('requestCollection',{site:f.site.id,neededOn:'2026-09-25'});f.cmd('cancelCollection',{id:c.id});
  T.setState(f.sim.snapshot(),acct(f));T.setView('TODAY');const html=td.view();assert.equal(td.day(f.sim.snapshot()).returns,null);
- assert.ok(html.includes('data-td-jump="late"')&&!html.includes('id="td-returns"'));});
+ assert.ok(!html.includes('Coming back today')&&!html.includes('data-rt="'+c.id+'"'));});
 
 test('the hire statement prints under the paperwork header (bdHead): logo, name and ABN when set, the plain mark when not',async t=>{const f=setup(t),{prSheetHTML}=await load();
  clock(t,'2026-09-27T23:00:00Z');f.cmd('hireRate',{product:f.products[0].id,day:100});

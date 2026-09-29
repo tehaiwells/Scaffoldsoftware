@@ -43,31 +43,28 @@ test('the day: loads due today (live first, AM before PM), overdue oldest first,
  assert.equal(d.alerts,s.alerts);assert.equal(d.returns,null);
  const empty=tdTest.day({});assert.deepEqual([empty.due,empty.late,empty.crew,empty.trucks],[[],[],[],[]]);assert.equal(empty.alerts.count,0);});
 
-test('the Today page: hero with the date and four counters, a card per part of the day, one-tap actions, no inline styles',async t=>{const f=setup(t),{__test,tdTest}=await load();
+test('the Today page: a planner. The date, a 42-day calendar with today marked, the day panel with today\'s loads and their buttons; no simulation words, no inline styles',async t=>{const f=setup(t),{__test,tdTest}=await load();tdTest.reset();
  const booked=list(f,{name:'Level 3 handrails',neededOn:'2026-09-23',slot:'AM'}),open=list(f,{name:'Ground lift',neededOn:'2026-09-23'});f.cmd('bookTruck',{id:booked.id,truck:f.truck.id});
  const s=f.sim.snapshot();__test.setState(s,acct(f));__test.setView('TODAY');const html=tdTest.view();
- assert.ok(html.includes('<h1>Today</h1>'));assert.ok(html.includes('Wednesday 23 September 2026'),'the long date');assert.ok(html.includes('SCAFFOLD / Today'),'the eyebrow names the page');
- assert.match(html,/data-td-jump="loads"[\s\S]*?Due today<\/span><b class="hud-num">2</);
- for(const k of ['late','alerts','crew'])assert.ok(html.includes('data-td-jump="'+k+'"'),'counter '+k);
- for(const id of ['loads','alerts','trucks','crew','quick'])assert.ok(html.includes('id="td-'+id+'"'),'card '+id);
- assert.ok(!html.includes('id="td-late"'),'no overdue card when nothing is late');assert.ok(!html.includes('id="td-returns"'),'no returns card without returns in the snapshot');
+ assert.ok(html.includes('<h1>Today</h1>'));assert.ok(html.includes('Wednesday 23 September 2026'),'the long date');
+ for(const gone of ['td-hero','Live simulation','Pause simulation','SIMULATION / DEMONSTRATION','Not real lifting operations','data-td-jump'])assert.ok(!html.includes(gone),'no '+gone);
+ assert.equal((html.match(/class="tdh-cell/g)??[]).length,42,'a steady 6-week month');assert.match(html,/class="tdh-cell today sel[^"]*" data-tdh-day="2026-09-23"/,'today is marked and chosen');
+ assert.ok(html.includes('aria-label="Previous month"')&&html.includes('aria-label="Next month"'));assert.ok(html.includes('September 2026'));
+ assert.ok(html.includes('id="tdh-day"')&&html.includes('Wednesday 23 September'),'the day panel opens on today');
  assert.ok(html.includes('data-sch-reserve="'+booked.id+'"'),'Reserve on the load booked on a truck at the yard');
  assert.match(html,new RegExp('class="td-btn td-primary" data-sch-goto="'+open.id+'"[^>]*>[\\s\\S]*?Book a truck'),'Book a truck for the one without');
  assert.ok(html.includes('data-pr-print="pick" data-pr-id="'+booked.id+'"')&&html.includes('data-pr-print="pick" data-pr-id="'+open.id+'"'),'Print pick list on each');
- assert.ok(html.includes('data-sch-goto="'+booked.id+'" data-day="2026-09-23"'),'Open goes to the card on the Schedule');
- for(const a of s.alerts.items.slice(0,5))assert.ok(html.includes('data-al-go="'+a.id+'"'),'alert '+a.id);
- assert.ok(html.includes('data-td-crew="next"')&&html.includes('data-td-crew="auto"'),'crew bulk orders');assert.ok(html.includes('data-td-go="stock"')&&html.includes('data-sch-create')&&html.includes('data-td-go="search"'),'quick actions');
- assert.ok(html.includes('data-view="TRUCK12"'),'a truck opens its garage');
+ for(const id of ['tdh-sites','tdh-who','tdh-yt','tdh-paper','tdh-biz'])assert.ok(html.includes('id="'+id+'"'),'card '+id);
  assert.ok(!/\sstyle="/.test(html),'no inline style attributes (the CSP drops them)');
  const ids=[...html.matchAll(/\sid="([^"]+)"/g)].map(m=>m[1]);assert.equal(new Set(ids).size,ids.length,'ids are unique');
  __test.setState(f.sim.snapshot(),acct(f,['requests.create','sites.assigned']));const sup=tdTest.view();
- assert.ok(!sup.includes('data-sch-reserve')&&!sup.includes('data-td-crew')&&!sup.includes('data-td-go="stock"'),'a supervisor sees the day without the yard controls');assert.ok(sup.includes('data-td-go="search"'));});
+ assert.ok(!sup.includes('data-sch-reserve')&&!sup.includes('data-tdh-add')&&!sup.includes('id="tdh-biz"'),'a supervisor sees the day without the yard controls or the business');});
 
-test('an overdue load gets its own card and counter; an empty day says what comes next',async t=>{const f=setup(t),{__test,tdTest}=await load();
+test('an overdue load shows on today under Still to go from before, with its Move or open button',async t=>{const f=setup(t),{__test,tdTest}=await load();tdTest.reset();
  const late=list(f,{name:'Old gantry return',neededOn:'2026-09-24'});list(f,{name:'Next',neededOn:'2026-09-28'});t.mock.timers.setTime(Date.parse('2026-09-24T22:00:00Z'));
  __test.setState(f.sim.snapshot(),acct(f));__test.setView('TODAY');const html=tdTest.view();
- assert.ok(html.includes('id="td-late"')&&html.includes('data-td-load="'+late.id+'"'));assert.match(html,/Overdue<\/span><b class="hud-num">1<\/b><span class="hud-sub">Oldest 24 Sep/);
- assert.ok(html.includes('Nothing due out today.')&&html.includes('Next: 1 load on Mon 28 Sep'),'the empty loads card points at the next booked day');});
+ assert.ok(html.includes('Still to go from before')&&html.includes('data-td-load="'+late.id+'"'));assert.match(html,/Move or open/);
+ assert.match(html,/class="tdh-cell today sel[^"]*" data-tdh-day="2026-09-25"/,'Friday is today');});
 
 test('the design has one Today block in design.css, scoped to the page, with phone rules and 44 px targets',()=>{
  const at=css.indexOf('/* ===== TODAY PAGE (td-)');assert.ok(at>0);const next=css.indexOf('/* ===== ',at+10),block=css.slice(at,next<0?undefined:next);// the merge appends later features' blocks after it
@@ -75,6 +72,13 @@ test('the design has one Today block in design.css, scoped to the page, with pho
  const selectors=[...flat.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap(m=>m[1].split(',').map(x=>x.trim())).filter(Boolean);
  assert.ok(selectors.length>80);for(const sel of selectors)assert.ok(/^(\.content )?\.page-today\b/.test(sel),'scoped to the page: '+sel);
  assert.match(block,/@media\(max-width:650px\)/);assert.match(block,/\.td-btn\{[^}]*min-height:44px/);});
+
+test('the Today hub block is the last one in design.css, scoped to its pages, with phone rules and 44 px targets',()=>{
+ const at=css.indexOf('/* ===== TODAY HUB (tdh-)');assert.ok(at>0,'block present');assert.equal(css.indexOf('/* ===== ',at+10),-1,'nothing after it');const block=css.slice(at);
+ const flat=block.replace(/\/\*[\s\S]*?\*\//g,'').replace(/@keyframes [\w-]+\{(?:[^{}]*\{[^{}]*\})*\s*\}/g,'').replace(/@media[^{]*\{/g,'');
+ const selectors=[...flat.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap(m=>m[1].split(',').map(x=>x.trim())).filter(Boolean);assert.ok(selectors.length>150);
+ for(const sel of selectors)assert.ok(/^(\.page-today\b|\.page-crew\b|\.tm-team\b|\.tdh-layer\b|body\.tdh-sheet-open|\.home-hero \.tdh-replies)/.test(sel),'scoped: '+sel);
+ assert.match(block,/@media\(max-width:750px\)/);assert.match(block,/\.page-today \.tdh-btn\{[^}]*min-height:44px/);assert.ok(!/style=/.test(block));});
 
 test('the installable app: manifest, icons and the page links, served with the right types',async t=>{
  const manifest=JSON.parse(readFileSync(new URL('../public/manifest.webmanifest',import.meta.url),'utf8'));

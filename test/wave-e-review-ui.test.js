@@ -22,14 +22,12 @@ test('Schedule: collections are counted apart from loads, and a Return card says
  assert.match(html,new RegExp('data-sch-card="'+c.id+'"[\\s\\S]*?<span class="sch-l2 rt-l2"><span class="sch-kind rt-kind"[^>]*>[\\s\\S]*?Return</span><span>All on site</span></span>'),'short: All on site');
  assert.ok(!/ style="/.test(html));});
 
-test('Today: undated loads are named when nothing is due; a busy crew greys out Allocate; a truck at the site waits to load its collection',async t=>{const f=setup(t),{T,td}=await load();
+test('Today: the yard crew is on Who\'s in today with their phone views; undated loads are still counted for the day',async t=>{const f=setup(t),{T,td}=await load();td.reset();
  f.cmd('requestCollection',{site:f.site.id,neededOn:'2026-09-24',truck:f.truck.id});
  f.cmd('createLoadList',{site:f.site.id,name:'No date yet',lines:[{product:f.products[0].id,quantity:5}]});
  T.setState(f.sim.snapshot(),acct(f));T.setView('TODAY');const d=td.day(f.sim.snapshot());assert.equal(d.undated,1);
- const html=td.view();assert.ok(!html.includes('No loads are booked ahead'),'never says nothing is booked while a load waits for a date');
- assert.ok(/1 with no date yet|1 load has no date yet/.test(html));
- assert.ok(html.includes('>Waiting to load<'),'T01 is parked at Site A with a collection booked there');
- const idle=d.idle;if(!idle)assert.match(html,/data-td-crew="next" disabled>[\s\S]*?Everyone busy/);else assert.ok(html.includes('Allocate all idle'));});
+ const html=td.view();for(const w of d.crew)assert.ok(html.includes('data-cw-open="'+w.id+'"'),'crew chip for '+w.name);
+ assert.ok(!html.includes('Allocate all idle')&&!html.includes('data-td-crew'),'the old crew orders left Today (they are on the Workers page)');});
 
 test('alerts: an overdue collection shows the return picture; the Today icon is a sunrise, not the Schedule calendar',async t=>{const f=setup(t),{T,al}=await load();
  f.cmd('requestCollection',{site:f.site.id,neededOn:'2026-09-24'});t.mock.timers.setTime(WED+3*86400000);

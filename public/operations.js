@@ -64,7 +64,7 @@ const changedKeys=(a,b)=>{const out=new Set();for(const [k,v] of b)if(!a.has(k)|
 // The catalogue is sent once per revision: later polls pass ?catalogue=REV and the server leaves products out while it still matches. A company, user or page change starts again from a full copy.
 const catalogueParam=()=>catalogue&&catalogue.page===containerPage&&catalogue.company===account?.company?.id&&catalogue.user===account?.user?.id?'&catalogue='+encodeURIComponent(catalogue.rev):'';
 async function fetchState(){const sent=catalogueParam();let next=await api(`state?page=${containerPage}`+sent+wmParam());if(next&&next.products===undefined){if(sent&&catalogue)next.products=catalogue.products;else{catalogue=null;next=await api(`state?page=${containerPage}`+wmParam());}}if(next?.world)next.world=wmWorldMerge(next.world,wmWho());if(next&&typeof next.catalogueRev==='string'&&Array.isArray(next.products)){if(catalogue?.products!==next.products)catalogue={rev:next.catalogueRev,products:next.products,page:containerPage,company:account?.company?.id,user:account?.user?.id};}else catalogue=null;return next;}
-function patchVolatile(){document.querySelectorAll('[data-progress]').forEach(el=>{const id=el.dataset.progress,j=(state.jobs??[]).find(j=>j.id===id),w=state.resources.find(r=>r.id===id),p=j?j.progress:w?.board?.now?.progress;if(p==null)return;const bar=el.firstElementChild;if(bar)bar.style.width=p+'%';const t=document.querySelector('[data-progress-text="'+id+'"]');if(t)t.textContent=p+'%';});if(view==='CREW')cwTick();wmEtaTick();}
+function patchVolatile(){if(view==='TODAY'){tdFetch(false);if(tdDirty&&!tdHold())setTimeout(tdRedraw,0);}document.querySelectorAll('[data-progress]').forEach(el=>{const id=el.dataset.progress,j=(state.jobs??[]).find(j=>j.id===id),w=state.resources.find(r=>r.id===id),p=j?j.progress:w?.board?.now?.progress;if(p==null)return;const bar=el.firstElementChild;if(bar)bar.style.width=p+'%';const t=document.querySelector('[data-progress-text="'+id+'"]');if(t)t.textContent=p+'%';});if(view==='CREW')cwTick();wmEtaTick();}
 async function refresh(force){if(refreshing&&!force)return;refreshing=true;try{let next=await fetchState();const last=Math.max(0,Math.ceil((next.containerCount??0)/100)-1);if(containerPage<0||containerPage>last){containerPage=Math.min(Math.max(0,containerPage),last);next=await fetchState();}if(!live)return;if(typeof document==='undefined'){state=next;return;}if(shapeEditor&&typeof document!=='undefined'&&document.getElementById('shape-host')){state=next;projMap=null;shapeEditor.update(state);patchWhileEditing();return;}
   // A forced refresh always rebuilds, so it skips the change check; the next poll measures against the state it rendered.
   if(view==='HOME'&&!force&&app.querySelector(':scope>.game-mode')){state=next;projMap=null;gmUpdate(gameCtx());return;}// the game board patches itself (game.js)
@@ -99,7 +99,7 @@ const HERO_ART='<svg class="hero-diorama" viewBox="-14 -12 588 230" aria-hidden=
  '<use href="#spr-tree" x="4" y="78" width="70" height="82"/><use href="#spr-tree" x="474" y="56" width="60" height="70"/><use href="#spr-tree" x="226" y="0" width="50" height="58"/>'+
  '<use href="#spr-stillage" x="168" y="64" width="74" height="49"/><use href="#spr-stillage" x="168" y="96" width="74" height="49"/><use href="#spr-stillage" x="232" y="92" width="74" height="49"/><use href="#spr-cage" x="282" y="120" width="60" height="40"/><use href="#spr-stillage" x="118" y="122" width="74" height="49"/>'+
  '<use href="#spr-forklift-load" x="330" y="124" width="92" height="71"/><use href="#spr-worker" x="262" y="150" width="26" height="48"/><use href="#spr-worker-busy" x="408" y="96" width="24" height="44"/><use href="#spr-truck12" x="372" y="32" width="176" height="94"/></svg>';
-const homeHero=()=>'<div class="home-hero"><div class="hero-art">'+HERO_ART+'</div><div class="hero-top"><div class="hero-title"><div class="eyebrow">SCAFFOLD / HOME &middot; '+esc(account.company?.name??'')+'</div><h1>Control room</h1><p class="hero-sub">'+esc(state.yards[0].name)+': run the crew, forklifts and trucks by hand.</p></div><div class="hero-actions">'+part('live','.home-hero .hero-live',heroLive)+part('pause','#pause',pauseButton)+part('due','.home-hero .hero-due',homeDue)+'</div></div>'+part('hud','.home-hero .hud-stats',hudStats)+'<div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div></div>';
+const homeHero=()=>'<div class="home-hero"><div class="hero-art">'+HERO_ART+'</div><div class="hero-top"><div class="hero-title"><div class="eyebrow">SCAFFOLD / HOME &middot; '+esc(account.company?.name??'')+'</div><h1>Control room</h1><p class="hero-sub">'+esc(state.yards[0].name)+': run the crew, forklifts and trucks by hand.</p></div><div class="hero-actions">'+part('live','.home-hero .hero-live',heroLive)+part('pause','#pause',pauseButton)+part('replies','#tdh-replies',tdhRepliesButton)+part('due','.home-hero .hero-due',homeDue)+'</div></div>'+part('hud','.home-hero .hud-stats',hudStats)+'<div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div></div>';
 // The live state in words next to the Pause button (the button is the control, this pill is the status).
 const heroLive=()=>'<span class="hero-live'+(state.config?.paused?' paused':'')+'">'+(state.config?.paused?'Simulation paused':'Live simulation')+'</span>';
 // Page heroes (Overview, Workers, Equipment, both truck pages, Stock) open the way Home does: the eyebrow, the page's one h1, the live pill with the Pause button, and the simulation strip along the bottom. A view that draws one calls heroActions(), and render() then leaves out the generic header.
@@ -180,6 +180,7 @@ function patchPage(keys){
   if(view==='REPORTS')return hcPatch();
   if(view==='HIRE')return hrPatch();
   if(view==='CREW')return cwPatch();
+  if(view==='TODAY')return tdPatch();
   if(!parts||!['CONTROL','YARD'].includes(view)||shapeEditor||layoutDraft||workerMoveMode||placementDraft||deferRender||planDragging||!onPage())return false;
   for(const k of keys)if(!LIVE_KEYS.has(k))return false;
   const todo=[];for(const p of parts.values()){const html=p.fn();if(html===p.html)continue;if(!p.sel||!html||!p.html)return false;let els;try{els=document.querySelectorAll(p.sel);}catch{return false;}if(els.length!==1)return false;todo.push([p,els[0],html]);}
@@ -260,7 +261,7 @@ function workersView(){
  const waiting=openJobs.length;
  const hero=wkHero(crew,tally,badge+(yard?' &middot; '+waiting+' job'+(waiting===1?'':'s')+' waiting':''),cfg,'')+(ladder?'<section class="panel wk-ladder-card" aria-label="Priority ladder">'+ladder+'</section>':'');
  const crewPanel='<section class="panel workers-board wk-crew">'+wkHead('Your yard crew',crew.length?'What every worker is doing now and what comes next. Open a card for more orders.':'',yard?wkStepper(crew.length):'')+(yard?'':'<p class="notice">Draw your yard first; workers are added to it.</p>')+'<div class="wk-crew-bar"><div class="subtabs wk-tabs" role="tablist">'+['All','Working','On jobs','Standing by','Holding','Driving'].map(chip).join('')+'</div>'+(yard?'<div class="wk-cmds"><button type="button" class="secondary" data-allocate-all>'+wkIcon('next')+'Allocate all idle</button><button type="button" class="secondary" data-all-auto>'+wkIcon('check')+'All automatic</button><button type="button" class="secondary" data-hold-all>'+wkIcon('hand')+'Hold all</button></div>':'')+'</div>'+(crew.length?'<div class="wk-list crew" data-keep-scroll="crew">'+crew.map(card).join('')+'</div>':'<div class="wk-empty"><span class="wk-portrait">'+sprite('spr-worker')+'</span><p>No workers yet. Use + to add your crew.</p></div>')+'</section>';
- return '<div class="page-workers">'+wkDefs()+hero+crewPanel+(yard?jobBoardPanel(yard,crew)+addJobPanel(yard,crew):'')+(siteCrew.length?'<section class="panel wk-site">'+wkHead('Site crews','Site crews work the cranes at their sites; yard jobs and skills apply to the yard crew.','<span class="badge">'+siteCrew.length+' on sites</span>')+crewTable(siteCrew)+'</section>':'')+'</div>';
+ return '<div class="page-workers">'+wkDefs()+hero+tmTeam()+crewPanel+(yard?jobBoardPanel(yard,crew)+addJobPanel(yard,crew):'')+(siteCrew.length?'<section class="panel wk-site">'+wkHead('Site crews','Site crews work the cranes at their sites; yard jobs and skills apply to the yard crew.','<span class="badge">'+siteCrew.length+' on sites</span>')+crewTable(siteCrew)+'</section>':'')+'</div>';
 }
 function jobBoardPanel(yard,crew){
  const jobs=(state.jobs??[]).filter(j=>j.yard===yard.id&&j.origin!=='ROUTINE'),tasks=state.tasks.filter(t=>t.handling===yard.id),labels=Object.fromEntries((state.ladder?.[yard.id]??[]).map(l=>[l.priority,l.label]));
@@ -1899,6 +1900,7 @@ async function alGo(id){const a=alData(state).items.find(x=>x.id===id);alShow(fa
  if(t.id&&t.page!=null&&t.page!==containerPage&&!state.containers.some(c=>c.id===t.id)){if(!leaveEditor())return;containerPage=t.page;await refresh(true);}// a stillage on another page of 100: load that page first
  if(t.view==='MATERIALS'){const p=state.products.find(x=>x.id===t.id);componentTab='ALL';mlGaps=false;mlSearch='';if(p)mlFold.set(mlKey(p.category||'Other'),true);if(!schGo('MATERIALS'))return;alFlash(document.querySelector('[data-ml-row="'+t.id+'"]'));}
  else if(t.view==='SCHEDULE'){schedWeek=t.day?dMonday(t.day):null;schedOpen.clear();schedOpen.add(t.id);schedX=null;if(!schGo('SCHEDULE'))return;alFlash(schVisible('[data-sch-card="'+t.id+'"]'));}
+ else if(t.view==='TODAY'){tdGoDay(t.day,a.kind);}
  else if(t.view==='ACTIVITY'){alFlash(document.querySelector('.activity [data-retry="'+t.id+'"]')?.closest('.task')??document.querySelector('section.activity'));}
  else if(t.id){if(!leaveEditor())return;view=!t.view||t.view==='HOME'?'CONTROL':t.view;selected=t.id;pinnedSite=null;heldSite=null;returnView=null;layoutDraft=null;layoutCheck=null;render();if(poll)schedulePoll();alFlash(document.querySelector('.selected-detail')??document.querySelector('[data-select="'+t.id+'"]'));}}
 // ---- The minimum-level editor: one modal dialog (its open state pauses the poll, so a refresh never rebuilds it mid-typing). ----
@@ -2445,21 +2447,393 @@ export function tdDay(s){const c=s?.calendar??null,today=c?.today??null,sites=ne
  const alerts=s?.alerts??{count:0,counts:{high:0,medium:0,low:0},items:[]};
  return {today,tomorrow:c?.tomorrow??null,due,dueLive,reserved:dueLive.filter(r=>r.reserved).length,noTruck:dueLive.filter(r=>!r.runTruck).length,gone:due.length-dueLive.length,late,next,nextCount:next?upcoming.filter(r=>r.neededOn===next).length:0,nextNoTruck:next?upcoming.filter(r=>r.neededOn===next&&!r.runTruck).length:0,undated,
   returns:tdReturns(s,today),alerts,crew,busy,idle:crew.length-busy,trucks:[...(s?.trucks??[])].sort((a,b)=>(heavyTruck(b)-heavyTruck(a))||byName(a.name,b.name))};}
-// ---- Hero ----
-const tdScene=()=>trkScenePic('today','<path d="M-10 138 214 30 450 128 226 236Z" fill="#8fa866"/><path d="M-10 170 330 6h70L-10 196Z" fill="#55595b" opacity=".92"/><path d="M26 164 346 10" stroke="#e8e3cf" stroke-width="2.4" stroke-dasharray="14 12" opacity=".7"/><path d="M150 150 280 88 430 142 300 206Z" fill="#d8d1c1"/><path d="M150 150 300 206 430 142v6L300 212 150 156Z" fill="#a79f8b"/><path d="M204 138 314 86M254 160 364 108" stroke="#e3bd2c" stroke-width="2" opacity=".85"/>'+
- '<use href="#spr-tree" x="388" y="36" width="48" height="58"/><g transform="translate(40 58) scale(.78)">'+tdBoard()+'</g><use href="#spr-truck12" x="244" y="44" width="180" height="96"/><use href="#spr-stillage" x="190" y="118" width="58" height="38"/><use href="#spr-stillage" x="190" y="98" width="58" height="38"/><use href="#spr-forklift-load" x="242" y="124" width="70" height="54"/><use href="#spr-worker" x="164" y="120" width="22" height="41"/><use href="#spr-worker-busy" x="344" y="140" width="22" height="41"/>');
-// A counter is a button: it scrolls to its card (on a phone the cards are below the fold).
-const tdStat=(jump,art,label,value,sub,fill=null,cls='')=>'<button type="button" class="hud-stat td-stat'+cls+'" data-td-jump="'+jump+'"><span class="hud-icon">'+art+'</span><span class="hud-text"><span class="hud-label">'+label+'</span><b class="hud-num">'+value+'</b>'+(fill==null?'':'<i class="hud-bar" aria-hidden="true"><b data-style="width:'+fill+'%"></b></i>')+'<span class="hud-sub">'+sub+'</span></span></button>';
-function tdHero(d){const w=tdDateWords(d.today),yard=state.yards[0],a=d.alerts,n=d.dueLive.length,late=d.late.length;
- const loads=tdStat('loads',trkPic('spr-forklift-load'),'Due today',num(n),n?(d.noTruck?d.noTruck+' need'+(d.noTruck===1?'s':'')+' a truck':d.reserved===n?'All reserved':d.reserved+' of '+n+' reserved'):d.gone?num(d.gone)+' already gone':'Nothing due out',null,n?' td-hot':'');
- const rOpen=d.returns?d.returns.filter(r=>!r.done):[],rLate=rOpen.filter(r=>r.late).length;
- const second=d.returns&&!late?tdStat('returns',trkPic('spr-truck2'),'Returns today',num(rOpen.length),rLate?rLate+' overdue at the site':rOpen.some(r=>r.moving)?rOpen.filter(r=>r.moving).length+' on the way back':d.returns.some(r=>r.done)?d.returns.filter(r=>r.done).length+' back already':'Coming back today',null,rLate?' alert':rOpen.length?' td-hot':'')
-  :tdStat('late',trkPic('spr-worker-busy'),'Overdue',num(late),late?'Oldest '+tdDateWords(d.late[0].neededOn).day+' '+tdDateWords(d.late[0].neededOn).mon:'Nothing late',null,late?' alert':'');
- const alerts=tdStat('alerts',alImg('al-bell'),'Alerts',num(a.count),a.count?[a.counts?.high?a.counts.high+' urgent':'',a.counts?.medium?a.counts.medium+' soon':'',a.counts?.low?a.counts.low+' to check':''].filter(Boolean).slice(0,2).join(' &middot; '):'All clear',null,a.counts?.high?' alert':'');
- const crew=tdStat('crew',trkPic(d.busy?'spr-worker-busy':'spr-worker'),'Crew working',num(d.busy)+'<small>/ '+num(d.crew.length)+'</small>',d.crew.length?(d.idle?num(d.idle)+' idle':'Everyone busy'):'Nobody on the yard',share(d.busy,d.crew.length));
- return '<div class="tk-band page-hero td-hero"><div class="tk-band-top">'+heroEyebrow()+'<div class="td-title">'+(w?'<span class="td-date" aria-hidden="true"><small>'+w.short+'</small><b>'+w.day+'</b><small>'+w.mon+'</small></span>':'')+'<div class="td-title-text"><h1>Today</h1><p class="hero-sub">'+(w?w.weekday+' '+w.day+' '+w.month+' '+w.year:'The day at the yard')+(yard?' &middot; '+esc(yard.name):'')+'</p></div></div>'+heroActions()+'</div><div class="tk-band-art" aria-hidden="true">'+tdScene()+'</div><div class="tk-hud td-hud" role="group" aria-label="Today at a glance">'+loads+second+alerts+crew+'</div>'+heroBanner()+'</div>';}
-// ---- Cards ----
-const tdCard=(id,art,title,sub,count,body,extra='',cls='')=>'<section class="panel td-card td-'+id+cls+'" id="td-'+id+'" aria-labelledby="td-'+id+'-h"><div class="td-head"><span class="td-badge">'+art+'</span><div class="td-head-text"><h2 id="td-'+id+'-h">'+title+(count==null?'':' <span class="td-count">'+count+'</span>')+'</h2>'+(sub?'<p>'+sub+'</p>':'')+'</div>'+extra+'</div>'+body+'</section>';
+// ===== Today hub (tdh-): the page where the day happens. A cream head (the date and one calm sentence), a big month calendar (a chip per thing on
+// a day, an amber dot when someone still has to answer, a red one when something needs sorting), the chosen day's panel with its four Add forms
+// (Truck, Materials, Workers, Re-stack), then the daily updates: Sites today, Who's in today, Yesterday & today, Paperwork and The business.
+// Data: GET /api/plan?month= and GET /api/today (src/domain/today.js), fetched on opening, when state.plan.rev or the day changes, after the page's
+// own commands and every 20 s. A poll morphs the page (tdPatch) so an open form, its draft (tdForm), focus and the scroll position all stay. =====
+import {monthGrid,monthAdd,monthTitle,WEEKDAYS,WEEKDAY_LETTERS,chipOf,PLAN_TIMES,planTimeWords} from './plan-cal.js';
+import {gmPlanPicker,gmPlanPickerOpen} from './game.js';
+import {gaItem,gaSprite} from './game-art.js';
+let tdData={plan:null,today:null},tdAsk={month:null,rev:null,day:null,at:0},tdFetching=false,tdAgain=false,tdErr=null,tdStarted=false,tdMonth=null,tdSel=null,tdForm=null,tdMini=null,tdLast='',tdViewHTML='',tdBound=false,tdBusy=false,tdDirty=false,tdFlash=null;
+const tdOpen=new Set();
+const TDH_SLOT={AM:'07:00',ANY:'12:00',PM:'13:00'},TDH_TONE={TRUCK:'truck',MATERIALS:'mat',WORKERS:'crew',RESTACK:'restack'},TDH_REASONS=['Crook','Another job',"Something's come up"];
+const tdhUTC=d=>Date.UTC(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8,10));
+const tdhDiff=(a,b)=>Math.round((tdhUTC(b)-tdhUTC(a))/864e5);
+const tdhAdd=(d,n)=>{const x=new Date(tdhUTC(d)+n*864e5);return x.getUTCFullYear()+'-'+String(x.getUTCMonth()+1).padStart(2,'0')+'-'+String(x.getUTCDate()).padStart(2,'0');};
+const tdhShort=d=>{const w=tdDateWords(d);return w?w.short+' '+w.day+' '+w.mon:'';};
+const tdhRel=(d,today)=>{const n=tdhDiff(today,d);return n===0?'Today':n===1?'Tomorrow':n===-1?'Yesterday':n>1&&n<15?'In '+n+' days':n<0&&n>-15?-n+' days ago':'';};
+const tdhPlural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
+const tdhMoney=c=>'$'+Math.round((Number(c)||0)/100).toLocaleString('en-AU');
+const tdhTick=(cls='tdh-tick')=>'<svg class="'+cls+'" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const tdhChev=d=>'<svg class="tdh-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="'+(d<0?'M15 5l-7 7 7 7':'M9 5l7 7-7 7')+'" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const tdhPhone='<svg class="tdh-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 18.2h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const tdhIcon=(icon,cls)=>icon==='tick'?tdhTick(cls+' tdh-tick'):icon.startsWith('rt-')?rtImg(icon,cls):trkPic(icon,cls);
+const tdhP=()=>tdData.plan,tdhT=()=>tdData.today;
+const tdhToday=()=>tdhP()?.today??state?.calendar?.today??null;
+const tdhSelLoad=()=>{try{return sessionStorage.getItem('tdh-sel');}catch{return null;}};
+const tdhSelSave=d=>{try{sessionStorage.setItem('tdh-sel',d);}catch{}};
+function tdhSelDay(){const t=tdhToday();if(!tdSel){const s=tdhSelLoad();tdSel=s&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&t&&Math.abs(tdhDiff(t,s))<=366?s:t;}return tdSel;}
+const tdhMonth=()=>tdMonth??(tdhSelDay()??'').slice(0,7);
+const tdhCanPlan=()=>!!tdhP()?.canPlan;
+const tdhTaken=day=>tdhP()?.taken?.[day]??{trucks:[],drivers:[],people:[],restack:false,workers:[]};
+// ---- data ----
+function tdFetch(force=false){if(typeof document==='undefined'||!api)return;if(tdFetching){if(force)tdAgain=true;return;}const month=tdhMonth(),rev=state?.plan?.rev??null,day=state?.calendar?.today??null;if(!/^\d{4}-\d{2}$/.test(month))return;
+ if(!force&&tdData.plan&&tdData.plan.month===month&&tdAsk.rev===rev&&tdAsk.day===day&&Date.now()-tdAsk.at<20000)return;
+ tdFetching=true;tdAsk={month,rev,day,at:Date.now()};
+ Promise.all([api('plan?month='+month),api('today')]).then(([plan,today])=>{tdData={plan,today};tdErr=null;
+   if(plan?.team?.needsStart&&plan.canPlan&&!tdStarted){tdStarted=true;command('teamStart',{}).then(()=>{tdAgain=true;}).catch(()=>{});}})
+  .catch(e=>{if(e?.status===401){stopOperations();return;}tdErr=e?.message||'The calendar could not be loaded.';if(tdMonth){tdMonth=null;}})
+  .finally(()=>{tdFetching=false;if(tdAgain){tdAgain=false;tdFetch(true);}tdRedraw();});}
+const tdHold=()=>pointerHeld||gmPlanPickerOpen()||!!document.activeElement?.matches?.('.page-today :is(input,select,textarea)');
+function tdRedraw(){if(typeof document==='undefined'||view!=='TODAY'||!onPage())return;if(tdHold()){tdDirty=true;return;}tdDirty=false;let ok=false;try{ok=tdPatch();}catch{ok=false;}if(!ok)render();}
+// A poll or a fetch: rebuild the page's HTML and morph it in (only the changed nodes are touched).
+function tdPatch(){if(view!=='TODAY'||!onPage()||deferRender)return false;const el=document.querySelector('#view > .page-today');if(!el)return false;if(tdHold()){tdDirty=true;return true;}
+ const prev=tdLast,html=tdView();if(html===prev)return true;const tpl=document.createElement('template');tpl.innerHTML=html;const node=tpl.content.firstElementChild;if(!node||tpl.content.childNodes.length!==1)return false;
+ const focus=saveFocus();morph(el,node);tdLast=html;tdSync(el);applyStyles(el);bindPage(true,new Map());restoreFocus(focus);return true;}
+// Form controls follow their markup after a morph (a select keeps a stale choice otherwise).
+function tdSync(root){for(const s of root.querySelectorAll('select')){const o=[...s.options].find(x=>x.defaultSelected);if(o&&s.value!==o.value)s.value=o.value;}
+ for(const i of root.querySelectorAll('input')){if(i===document.activeElement)continue;if(i.type==='checkbox'||i.type==='radio'){if(i.checked!==i.defaultChecked)i.checked=i.defaultChecked;}else if(i.value!==i.defaultValue)i.value=i.defaultValue;}}
+function tdBind(){tdLast=tdViewHTML;tdBindOnce();}
+// ---- the page ----
+function tdView(){pageHeroShown=true;tdFetch(false);tdBindOnce();const p=tdhP(),t=tdhT(),today=tdhToday(),sel=tdhSelDay();
+ const html='<div class="page-today tdh">'+tdhHead(p,t,today)+'<div class="tdh-top">'+tdhCal(p,today,sel)+tdhDay(p,today,sel)+'</div>'+tdhCards(p,t,today)+'</div>';tdViewHTML=html;return html;}
+function tdhHead(p,t,today){const w=tdDateWords(today),yard=state.yards[0],paused=p?p.paused:!!state.config?.paused;
+ const sentence=t?.summary?.sentence??(tdErr?'':'Getting the day ready…');
+ const tz=p?.timeZone&&p.timeZone!=='Australia/Sydney'?'<p class="tdh-tz">Times are '+esc(String(p.timeZone).split('/').pop().replaceAll('_',' '))+' time</p>':'';
+ const art='<span class="tdh-head-art" aria-hidden="true">'+trkPic('spr-truck12','tdh-head-truck')+trkPic('spr-stillage','tdh-head-still')+trkPic('spr-worker','tdh-head-man')+'</span>';
+ return '<div class="tdh-head">'+(w?'<span class="tdh-date" aria-hidden="true"><small>'+w.short+'</small><b>'+w.day+'</b><small>'+w.mon+'</small></span>':'')+'<div class="tdh-head-text"><h1>Today</h1><p class="tdh-long">'+(w?w.weekday+' '+w.day+' '+w.month+' '+w.year:'The day at the yard')+(yard?' &middot; '+esc(yard.name):'')+'</p>'+(sentence?'<p class="tdh-sentence">'+esc(sentence)+'</p>':'')+tz+'</div>'+art+'</div>'
+  +(paused?'<div class="tdh-banner" role="status"><span>The yard is paused, so planned jobs are waiting.</span>'+(isOps()?'<button type="button" class="secondary tdh-btn" data-view="CONTROL">Resume in the Control room</button>':'')+'</div>':'')
+  +(tdErr?'<div class="tdh-banner is-err" role="alert"><span>'+esc(tdErr)+'</span><button type="button" class="secondary tdh-btn" data-tdh-retry>Try again</button></div>':'');}
+// ---- the calendar ----
+function tdhEntries(p){const m=new Map(),add=(d,e)=>{if(!d)return;let l=m.get(d);if(!l)m.set(d,l=[]);l.push(e);};
+ for(const i of p?.items??[])if(i.status!=='CANCELLED')add(i.day,{src:'item',v:i,sort:i.time});
+ for(const r of p?.runs??[])add(r.day,{src:'run',v:r,sort:TDH_SLOT[r.slot]??'12:00'});
+ const seen=new Set();for(const d of p?.delivered??[]){const k=d.day+'|'+d.site;if(seen.has(k))continue;seen.add(k);add(d.day,{src:'done',v:d,sort:'23:59'});}
+ for(const l of m.values())l.sort((a,b)=>Number(a.src==='done')-Number(b.src==='done')||a.sort.localeCompare(b.sort));return m;}
+const tdhFlag=(e,today)=>e.src==='item'?(e.v.flags?.red?'red':e.v.flags?.needsAnswer?'amber':null):e.src==='run'?(e.v.open&&today&&e.v.day<today?'red':null):null;
+const tdhDone=e=>e.src==='done'||(e.src==='item'&&e.v.status==='DONE')||(e.src==='run'&&e.v.done);
+function tdhChip(e){const c=chipOf(e.v);return '<span class="tdh-chip tone-'+c.tone+(tdhDone(e)?' done':'')+'">'+tdhIcon(c.icon,'tdh-chip-img')+'<span class="tdh-chip-t">'+esc(c.label)+'</span></span>';}
+function tdhCell(day,list,{today,month,sel}){const w=tdDateWords(day),other=day.slice(0,7)!==month,past=!!today&&day<today,wk=w.short==='Sat'||w.short==='Sun';
+ const flags=list.map(e=>tdhFlag(e,today)),red=flags.includes('red'),amber=!red&&flags.includes('amber'),waiting=flags.filter(f=>f==='amber').length;
+ const chips=list.slice(0,3).map(tdhChip).join('')+(list.length>3?'<span class="tdh-more">+'+(list.length-3)+' more</span>':'');
+ const dots=list.slice(0,4).map(e=>'<i class="tdh-dot tone-'+chipOf(e.v).tone+(tdhDone(e)?' done':'')+'"></i>').join('');
+ const label=w.weekday+' '+w.day+' '+w.month+': '+(list.length?tdhPlural(list.length,'thing'):'nothing planned')+(red?', needs sorting':waiting?', '+waiting+' waiting for an answer':'')+(day===today?', today':'');
+ return '<button type="button" class="tdh-cell'+(day===today?' today':'')+(day===sel?' sel':'')+(other?' other':'')+(past?' past':'')+(wk?' wkend':'')+(list.length?' has':'')+'" data-tdh-day="'+day+'" aria-label="'+esc(label)+'" aria-pressed="'+(day===sel)+'" tabindex="'+(day===sel?'0':'-1')+'"><span class="tdh-num">'+w.day+'</span>'
+  +(red?'<span class="tdh-flag red" aria-hidden="true"></span>':amber?'<span class="tdh-flag amber" aria-hidden="true"></span>':'')+(list.length?'<span class="tdh-chips">'+chips+'</span><span class="tdh-dots" aria-hidden="true">'+dots+'</span>':'')+'</button>';}
+function tdhCal(p,today,sel){const month=tdhMonth(),mine=p?.month===month,grid=mine?p.grid:monthGrid(month),by=mine?tdhEntries(p):new Map(),now=today?.slice(0,7);
+ const prevOk=!now||month>monthAdd(now,-12),nextOk=!now||month<monthAdd(now,12);
+ const head='<div class="tdh-cal-head"><button type="button" class="tdh-nav" data-tdh-month="-1" aria-label="Previous month"'+(prevOk?'':' disabled')+'>'+tdhChev(-1)+'</button><h2 id="tdh-cal-h" class="tdh-month">'+esc(monthTitle(month))+'</h2><button type="button" class="tdh-nav" data-tdh-month="1" aria-label="Next month"'+(nextOk?'':' disabled')+'>'+tdhChev(1)+'</button>'
+  +'<button type="button" class="tdh-pill-btn" data-tdh-month="today"'+(month===now&&sel===today?' disabled':'')+'>Today</button></div>';
+ const wk='<div class="tdh-wk" aria-hidden="true">'+WEEKDAYS.map((d,i)=>'<span><b class="tdh-wk-long">'+d+'</b><b class="tdh-wk-short">'+WEEKDAY_LETTERS[i]+'</b></span>').join('')+'</div>';
+ const cells='<div class="tdh-grid" role="group" aria-label="Days of '+esc(monthTitle(month))+'">'+grid.map(d=>tdhCell(d,by.get(d)??[],{today,month,sel})).join('')+'</div>';
+ const legend='<div class="tdh-legend" aria-hidden="true">'+[['truck','Truck'],['mat','Materials'],['crew','Workers'],['restack','Re-stack'],['load','Yard list'],['back','Collection']].map(([t,w])=>'<span><i class="tdh-dot tone-'+t+'"></i>'+w+'</span>').join('')+'<span><i class="tdh-key amber"></i>Waiting for an answer</span><span><i class="tdh-key red"></i>Needs sorting</span>'+(mine||!api?'':'<span class="tdh-loading">Loading…</span>')+'</div>';
+ return '<section class="panel tdh-cal" aria-labelledby="tdh-cal-h">'+head+wk+cells+legend+'</section>';}
+// ---- the day panel ----
+function tdhDay(p,today,sel){if(!sel)return '<section class="panel tdh-day" id="tdh-day"></section>';const w=tdDateWords(sel),rel=today?tdhRel(sel,today):'',past=!!today&&sel<today;
+ const canAdd=tdhCanPlan()&&!!today&&!past&&sel<=(p?.lastDay??'9999-12-31');
+ const items=(p?.items??[]).filter(i=>i.day===sel&&i.status!=='CANCELLED').sort((a,b)=>a.time.localeCompare(b.time)||a.type.localeCompare(b.type));
+ const body=items.map(tdhItem).join('')+tdhRunsFor(p,sel,today),loaded=!!p?.grid?.includes(sel);
+ const empty=body?'':'<div class="tdh-empty">'+trkPic(past?'spr-stillage':'spr-truck2','tdh-empty-img')+'<p>'+(p&&!loaded&&api?'Loading this day…':past?'Nothing happened on this day.':'Nothing planned for this day yet.')+(canAdd?' <span>Add something below.</span>':'')+'</p></div>';
+ const form=tdForm&&tdForm.kind!=='PAPER'&&tdForm.day===sel&&canAdd?tdhForm(p,sel):'';
+ return '<section class="panel tdh-day" id="tdh-day" aria-labelledby="tdh-day-h"><div class="tdh-day-head"><h2 id="tdh-day-h">'+esc(w.weekday+' '+w.day+' '+w.month)+'</h2>'+(rel?'<span class="tdh-tag'+(sel===today?' is-today':'')+'">'+rel+'</span>':'')+'</div>'
+  +'<div class="tdh-items">'+body+empty+'</div>'+(canAdd?tdhAdds(sel):past&&tdhCanPlan()?'<p class="tdh-quiet">Past days are for looking back. Plan on today or a later day.</p>':'')+form+'</section>';}
+function tdhRunsFor(p,sel,today){let h='';
+ if(sel===today&&state?.calendar?.today===today){const d=tdDay(state),mine=new Set();
+  // a planner list's own trip is already its card above: not listed again as a board trip
+  for(const i of p?.items??[])if(i.type==='MATERIALS')for(const x of i.trips??[]){if(x.delivery)mine.add('trip:'+x.delivery);}
+  for(const t of state.trucks??[])if(t.game?.plan)mine.add('trip:'+t.id);
+  d.due=d.due.filter(i=>!(i.kind==='trip'&&mine.has(i.id)));
+  if(d.due.length)h+='<h3 class="tdh-sub">Yard lists for today</h3><div class="td-list tdh-loads">'+d.due.map(i=>tdLoad(i)).join('')+'</div>';
+  if(d.late.length)h+='<h3 class="tdh-sub is-late">Still to go from before</h3><div class="td-list tdh-loads">'+d.late.map(i=>tdLoad(i,true)).join('')+'</div>';
+  const cards=(d.returns??[]).filter(r=>r.rt);if(cards.length){rtBindOnce();h+='<h3 class="tdh-sub">Coming back today</h3><div class="td-rt-list">'+cards.map(r=>rtCard(r.rt,'today')).join('')+'</div>';}
+  const rows=(d.returns??[]).filter(r=>!r.rt);if(rows.length)h+='<ul class="tdh-runs">'+rows.map(r=>tdhRun({id:r.id,kind:'collection',day:r.neededOn,slot:r.slot,siteName:r.siteName,name:r.name,pieces:r.pieces,done:r.done,open:!r.done})).join('')+'</ul>';
+  return h+tdhDelivered(p,sel);}
+ const runs=(p?.runs??[]).filter(r=>r.day===sel);if(runs.length)h+='<h3 class="tdh-sub">Yard lists and collections</h3><ul class="tdh-runs">'+runs.map(tdhRun).join('')+'</ul>';
+ return h+tdhDelivered(p,sel);}
+const tdhRun=r=>'<li class="tdh-run'+(r.done?' done':'')+(r.open&&r.day<tdhToday()?' late':'')+'"><span class="tdh-run-art">'+(r.kind==='collection'?rtImg('rt-collect','tdh-run-img'):trkPic('spr-forklift-load','tdh-run-img'))+'</span><span class="tdh-run-text"><b>'+(r.kind==='collection'?'Bring back from ':'Load for ')+esc(r.siteName??'a site')+'</b><small>'+esc(r.name??'')+' &middot; '+num(r.pieces??0)+' pcs'+(r.runTruckName?' &middot; '+esc(r.runTruckName):'')+(r.done?' &middot; done':'')+'</small></span>'+slotTag(r.slot)+(r.id?'<button type="button" class="secondary tdh-btn" data-sch-goto="'+esc(r.id)+'" data-day="'+esc(r.day??'')+'">Open</button>':'')+'</li>';
+function tdhDelivered(p,sel){const l=(p?.delivered??[]).filter(d=>d.day===sel);if(!l.length)return '';const by=new Map();for(const d of l){const e=by.get(d.siteName)??{n:0,st:0};e.n++;e.st+=d.stillages??0;by.set(d.siteName,e);}
+ return '<ul class="tdh-runs tdh-done-list">'+[...by].map(([s,e])=>'<li class="tdh-run done"><span class="tdh-run-art tdh-okmark">'+tdhTick()+'</span><span class="tdh-run-text"><b>Delivered to '+esc(s??'a site')+'</b><small>'+(e.n===1?'1 truckload':e.n+' truckloads')+(e.st?' &middot; '+tdhPlural(e.st,'stillage'):'')+'</small></span></li>').join('')+'</ul>';}
+// One card per plan item: its picture, a title with the time, one status line, the people and their answers, then the few things to do.
+function tdhTitle(v){const at=' &middot; '+esc(v.timeWords);
+ if(v.type==='TRUCK')return esc(v.hire?(v.hire.size==='SMALL'?'Small hire truck':'Big hire truck'):(v.truckName??'Truck')+(v.big==null?'':v.big?' (big truck)':' (small truck)'))+at;
+ if(v.type==='MATERIALS')return 'List for '+esc(v.siteName??'a site')+at;
+ if(v.type==='WORKERS')return tdhPlural(v.count,'worker')+' &rarr; '+esc(v.siteName??'a site')+at;
+ return 'Re-stack the yard'+at;}
+function tdhItem(v){const tone=TDH_TONE[v.type],done=v.status==='DONE',red=!!v.flags?.red,wait=!!v.flags?.needsAnswer,ops=isOps();
+ const icon=v.type==='TRUCK'?(v.big===false||v.hire?.size==='SMALL'?'spr-truck2':'spr-truck12'):v.type==='MATERIALS'?'spr-stillage':v.type==='WORKERS'?'spr-worker':'spr-forklift';
+ const [sk,sw]=done?['done','Done']:red?['red','Needs sorting']:wait?['wait','Waiting for an answer']:v.status==='ACTIVE'?['on','Under way']:['ok','Booked'];
+ let body='';
+ if(v.problem)body+='<p class="tdh-problem">'+esc(v.problem)+'</p>';else if(v.flags?.late&&!done)body+='<p class="tdh-problem">This day has passed and it isn’t finished yet.</p>';
+ if(v.type==='TRUCK'){if(v.driverRow)body+='<ul class="tdh-people">'+tdhPerson(v.driverRow,v,'driver')+'</ul>';
+  if(v.loads?.length)body+='<p class="tdh-meta">Takes: '+v.loads.map(l=>'the list for '+esc(l.siteName??'a site')).join(', ')+'</p>';}
+ if(v.type==='MATERIALS'){const ps=new Map((state.products??[]).map(p=>[p.id,p]));
+  body+='<div class="tdh-slots">'+v.lines.slice(0,6).map(l=>{const p=ps.get(l.product);return '<span class="gm-slot gm-mini tdh-slot" title="'+esc(l.name)+'">'+(p?gaItem(p):'')+'<b class="gm-n">'+gpCountTd(l.quantity)+'</b></span>';}).join('')+(v.lines.length>6?'<span class="tdh-more-slots">+'+(v.lines.length-6)+' more</span>':'')+'<span class="tdh-pcs">'+tdhPlural(v.pieces,'piece')+'</span></div>';
+  const pack=!v.packerName?'No yardsman in your team, so the crew packs it':v.packAnswer==='NOT_SENT'?v.packerName+' gets the list '+(v.packDay===v.day?'that morning':esc(v.packDayLabel))+' at 6:00 am':v.packAnswer==='SEEN'?v.packerName+' has seen the list':v.packAnswer==='SENT'?v.packerName+' has the list':v.packerName+' packs it';
+  body+='<p class="tdh-meta">'+esc(pack)+' &middot; '+(v.truckPlanName?'goes on '+esc(v.truckPlanName):'goes on the next free truck')+'</p>';
+  for(const s of v.short??[])body+='<p class="tdh-problem">Short: '+num(s.missing)+' &times; '+esc(s.name)+' weren’t in the yard</p>';
+  if(v.trips?.length)body+='<ul class="tdh-trips">'+v.trips.map(x=>'<li'+(x.delivered?' class="ok"':'')+'>'+(x.delivered?tdhTick():'')+esc(x.truckName??'Truck')+' took '+tdhPlural(x.stillages??0,'stillage')+(x.delivered?' &middot; delivered':x.done?' &middot; came back':'')+'</li>').join('')+'</ul>';}
+ if(v.type==='WORKERS'){body+='<ul class="tdh-people">'+v.people.map(r=>tdhPerson(r,v,'worker')).join('')+(v.gaps?'<li class="tdh-person no gap"><span class="tdh-av">'+trkPic('spr-worker','tdh-av-img')+'</span><span class="tdh-person-text"><b>Short by '+v.gaps+'</b><span class="tdh-pill no">Nobody free yet</span></span>'+(v.canAsk?'<span class="tdh-person-acts"><button type="button" class="secondary tdh-btn" data-tdh-mini="'+esc(v.id)+'|add">Ask someone</button></span>':'')+'</li>':'')+'</ul>';
+}
+ if(v.type==='RESTACK')body+='<p class="tdh-meta">'+[v.consolidate?'Top up part-full stillages':'',v.stackEmpties?'stack the empties':''].filter(Boolean).join(' and ')+'. Nothing leaves the yard.</p>';
+ if(v.note)body+='<p class="tdh-note-line">&ldquo;'+esc(v.note)+'&rdquo;</p>';
+ const b=(attr,words,cls='secondary')=>'<button type="button" class="'+cls+' tdh-btn" '+attr+'>'+words+'</button>',acts=[],id=esc(v.id);
+ if(ops&&v.type==='MATERIALS'&&v.canEdit)acts.push(b('data-tdh-edit="'+id+'"','Change the parts'),b('data-tdh-mini="'+id+'|truck"','Change truck'));
+ if(ops&&v.type==='MATERIALS'&&v.short?.length&&v.status!=='CANCELLED')acts.push(b('data-tdh-rest="'+id+'"','Plan the rest','tdh-soft'));
+ if(v.type==='TRUCK'&&v.canAsk&&!v.driverRow)acts.push(b('data-tdh-mini="'+id+'|driver"','Name a driver','tdh-soft'));
+ else if(v.type==='TRUCK'&&v.canAsk&&v.driverRow?.answer==='YES')acts.push(b('data-tdh-mini="'+id+'|driver"','Change driver'));
+ if(v.canMove)acts.push(b('data-tdh-mini="'+id+'|move"','Move'));
+ if(v.canCancel)acts.push(b('data-tdh-cancel="'+id+'"','Cancel','secondary tdh-quietbtn'));
+ if(v.log?.length)acts.push(b('data-tdh-log="'+id+'" aria-expanded="'+tdOpen.has('log:'+v.id)+'"',tdOpen.has('log:'+v.id)?'Hide what happened':'What happened','tdh-link'));
+ const log=tdOpen.has('log:'+v.id)&&v.log?.length?'<ol class="tdh-log">'+v.log.slice().reverse().slice(0,8).map(l=>'<li><time>'+esc(tdhWhen(l.at))+'</time>'+esc(l.text)+'</li>').join('')+'</ol>':'';
+ const flash=tdFlash&&tdFlash.id===v.id&&Date.now()<tdFlash.until;
+ return '<article class="tdh-item tone-'+tone+' st-'+sk+(flash?' is-new':'')+'" id="tdh-item-'+id+'" data-tdh-item="'+id+'"><div class="tdh-item-top"><span class="tdh-item-art">'+trkPic(icon,'tdh-item-img')+'</span><div class="tdh-item-text"><b class="tdh-item-title">'+tdhTitle(v)+'</b><span class="tdh-status">'+(done?tdhTick():'')+esc(v.words||'')+'</span></div>'+(['done','red','on'].includes(sk)?'<span class="tdh-state '+sk+'">'+sw+'</span>':'')+'</div>'
+  +body+(acts.length?'<div class="tdh-acts">'+acts.join('')+'</div>':'')+tdhMiniHTML(v)+log+'</article>';}
+const gpCountTd=n=>{n=Math.max(0,Math.floor(Number(n)||0));return n<1000?String(n):n<1e4?(Math.floor(n/100)/10)+'k':Math.floor(n/1000)+'k';};
+const tdhWhen=iso=>{try{const d=new Date(iso);if(Number.isNaN(d.getTime()))return '';const day=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');return (day===tdhToday()?'':tdhShort(day)+' ')+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});}catch{return '';}};
+// A person on an item (a driver, or one of the workers): their answer as a pill, and the few buttons that help.
+function tdhPerson(r,v,kind){const site=v.siteName??'the site';let cls='off',words='';
+ if(r.moved){cls='yes';words='At '+site;}
+ else if(r.gone){cls='off';words='Left the team';}
+ else if(r.answer==='YES'){cls='yes';words=r.via==='OFFICE'?'Said yes on the phone':kind==='driver'?'Said yes':'I’ll be there';}
+ else if(r.answer==='WAITING'){cls='wait';words='Waiting for an answer';}
+ else if(r.answer==='NO'){cls='no';words='Can’t make it'+(r.reason?': '+r.reason:'');}
+ else if(r.answer==='NO_ANSWER'){cls='no';words='No answer';}
+ else if(r.answer==='NOT_SENT'){cls='off';words=kind==='worker'?'Message goes the day before at 3 pm':'Not asked yet';}
+ else if(r.answer==='CALLED_OFF'){cls='off';words='Called off';}
+ const id=esc(v.id),btns=[],open=!r.moved&&!r.gone;
+ if(open&&r.canConfirm&&r.answer!=='YES')btns.push('<button type="button" class="tdh-btn tdh-yes" data-tdh-yes="'+esc(r.message)+'">They said yes on the phone</button>');
+ if(open&&r.smsHref&&r.answer!=='YES')btns.push('<a class="secondary tdh-btn tdh-sms" href="'+esc(r.smsHref)+'">Text them</a>');
+ if(v.canAsk&&(r.gone||(open&&['NO','NO_ANSWER','CALLED_OFF'].includes(r.answer))))btns.push('<button type="button" class="secondary tdh-btn" data-tdh-mini="'+id+'|'+(kind==='driver'?'driver':'ask:'+esc(r.person))+'">'+(kind==='driver'?'Pick another driver':'Ask someone else')+'</button>');
+ const phone=isOps()&&!r.gone?'<button type="button" class="tdh-icon-btn" '+(kind==='driver'?'data-cw-driver':'data-cw-open')+'="'+esc(r.person)+'" aria-label="'+esc(r.name)+'’s phone view" title="Their phone view">'+tdhPhone+'</button>':'';
+ return '<li class="tdh-person '+cls+'"><span class="tdh-av">'+trkPic(kind==='driver'?'spr-truck2':r.moved?'spr-worker-busy':'spr-worker','tdh-av-img')+'</span><span class="tdh-person-text"><b>'+esc(r.name)+'</b><span class="tdh-pill '+cls+'">'+esc(words)+'</span></span>'+phone+(btns.length?'<span class="tdh-person-acts">'+btns.join('')+'</span>':'')+'</li>';}
+// The small forms under an item: Move, Change driver, Change truck, Ask someone (else).
+const tdhOpt=(value,label,sel,dis=false)=>'<option value="'+esc(value)+'"'+(sel?' selected':'')+(dis?' disabled':'')+'>'+esc(label)+'</option>';
+const tdhTimes=v=>PLAN_TIMES.map(t=>tdhOpt(t,planTimeWords(t),t===v)).join('');
+function tdhFreeWorkers(day,except=[]){const taken=new Set([...tdhTaken(day).people,...except]),rank={SCAFFOLDER:0,LEADING_HAND:0,YARDSMAN:1};
+ return (tdhP()?.team?.people??[]).filter(x=>x.kind==='worker'&&x.active&&!taken.has(x.id)).sort((a,b)=>(rank[a.role]??2)-(rank[b.role]??2)||byName(a.name,b.name));}
+function tdhMiniHTML(v){if(!tdMini||tdMini.id!==v.id)return '';const k=tdMini.kind,p=tdhP(),x='<button type="button" class="tdh-link" data-tdh-mini-x>Never mind</button>',err=tdMini.err?'<p class="tdh-form-err" role="alert">'+esc(tdMini.err)+'</p>':'';
+ const wrap=(kind,title,fields,go)=>'<form class="tdh-mini" data-tdh-mini-form="'+kind+'" data-id="'+esc(v.id)+'"><p class="tdh-mini-title">'+title+'</p><div class="tdh-fields">'+fields+'</div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(tdBusy?' disabled':'')+'>'+go+'</button>'+x+'</div>'+err+'</form>';
+ if(k==='move')return wrap('move','Move to another day or time','<label class="tdh-field"><span>Day</span><input type="date" name="day" value="'+esc(v.day)+'" min="'+esc(p?.firstDay??'')+'" max="'+esc(p?.lastDay??'')+'" required></label><label class="tdh-field"><span>Time</span><select name="time">'+tdhTimes(v.time)+'</select></label>','Move it');
+ if(k==='driver'){const taken=tdhTaken(v.day).drivers,list=(p?.drivers??[]).filter(d=>!taken.includes(d.id)||d.id===v.driver);
+  const opts=list.map(d=>tdhOpt(d.id,d.id===v.driver?'Ask '+d.name+' again':d.name,d.id!==v.driver&&d===list.find(z=>z.id!==v.driver))).join('');
+  return list.length?wrap('driver',v.driver?'Pick another driver':'Name a driver','<label class="tdh-field"><span>Driver</span><select name="person">'+opts+'</select></label>','Send them a message'):'<div class="tdh-mini"><p class="tdh-mini-title">No other driver is free that day.</p><div class="tdh-form-acts"><button type="button" class="secondary tdh-btn" data-tdh-team>Add a driver to your team</button>'+x+'</div></div>';}
+ if(k==='truck'){const trucks=(p?.items??[]).filter(i=>i.type==='TRUCK'&&i.day===v.day&&i.status!=='CANCELLED'&&i.status!=='DONE');
+  return wrap('truck','Which truck takes this list?','<label class="tdh-field"><span>Truck</span><select name="truckPlan">'+trucks.map(i=>tdhOpt(i.id,tdhTruckLabel(i),i.id===v.truckPlan)).join('')+tdhOpt('','Next free truck',!v.truckPlan)+'</select></label>','Save');}
+ if(k==='add'||k.startsWith('ask:')){const replace=k.startsWith('ask:')?k.slice(4):null,row=replace?v.people.find(r=>r.person===replace):null,free=tdhFreeWorkers(v.day,v.people.map(r=>r.person));
+  const opts=(row&&!row.gone?tdhOpt(replace,'Ask '+row.name+' again',false):'')+free.map((w,i)=>tdhOpt(w.id,w.name+' · '+w.roleWords+(w.where?' · '+w.where:''),i===0)).join('');
+  return opts?wrap('ask',replace?'Who instead of '+esc(row?.name??'them')+'?':'Who else can go?','<label class="tdh-field"><span>Person</span><select name="person">'+opts+'</select></label>'+(replace?'<input type="hidden" name="replace" value="'+esc(replace)+'">':''),'Send them a message'):'<div class="tdh-mini"><p class="tdh-mini-title">Nobody else is free that day.</p><div class="tdh-form-acts"><button type="button" class="secondary tdh-btn" data-tdh-team>Add a person to your team</button>'+x+'</div></div>';}
+ return '';}
+const tdhTruckLabel=i=>(i.hire?(i.hire.size==='SMALL'?'Small hire truck':'Big hire truck'):(i.truckName??'Truck'))+(i.driverName?' · '+i.driverName:'')+', '+i.timeWords;
+// ---- the four Add forms (one open at a time; the draft lives in tdForm so a poll never loses it) ----
+function tdhAdds(sel){const b=(k,icon,w,sub)=>'<button type="button" class="tdh-add'+(tdForm?.kind===k&&tdForm.day===sel?' on':'')+'" data-tdh-add="'+k+'" aria-pressed="'+(tdForm?.kind===k&&tdForm.day===sel)+'">'+trkPic(icon,'tdh-add-img')+'<span class="tdh-add-t"><b>+ '+w+'</b><small>'+sub+'</small></span></button>';
+ return '<div class="tdh-adds" role="group" aria-label="Add to this day">'+b('TRUCK','spr-truck12','Truck','Book one, with a driver')+b('MATERIALS','spr-stillage','Materials','A list for a site')+b('WORKERS','spr-worker','Workers','People to a site')+b('RESTACK','spr-forklift','Re-stack','Tidy the yard')+'</div>';}
+function tdhNewForm(kind,day,extra={}){const p=tdhP(),taken=tdhTaken(day),sites=(p?.sites??[]).filter(s=>!s.finishing),f={time:'07:00'};
+ if(kind==='TRUCK'){const t=(p?.trucks??[]).find(x=>!taken.trucks.includes(x.id)),d=(p?.drivers??[]).find(x=>!taken.drivers.includes(x.id));f.truck=t?'T:'+t.id:'HIRE:BIG';f.driver=d?.id??'';}
+ if(kind==='MATERIALS'){const tr=(p?.items??[]).find(i=>i.type==='TRUCK'&&i.day===day&&i.status==='PLANNED');f.site=sites[0]?.id??'';f.lines=[];f.truckPlan=tr?.id??'';f.pack='SAME_DAY';f.packer='';f.note='';if(tr)f.time=tr.time;}
+ if(kind==='WORKERS'){f.count=2;f.site=sites[0]?.id??'';f.who='ANY';f.people=[];}
+ if(kind==='RESTACK'){f.consolidate=true;f.stackEmpties=true;}
+ if(kind==='PAPER'){f.type='SWMS';f.site=sites[0]?.id??'';f.expiresOn='';f.title='';f.reference='';}
+ return {kind,day,f:{...f,...extra},err:null};}
+function tdhForm(p,day){const f=tdForm.f,k=tdForm.kind,taken=tdhTaken(day),dl=tdhShort(day),sites=(p?.sites??[]).filter(s=>!s.finishing);
+ const field=(label,html,cls='')=>'<label class="tdh-field'+cls+'"><span>'+label+'</span>'+html+'</label>';
+ const siteSel=field('Which site','<select name="site">'+(sites.length?sites.map(s=>tdhOpt(s.id,s.name,s.id===f.site)).join(''):tdhOpt('','No sites yet',true,true))+'</select>',' tdh-wide');
+ const siteName=sites.find(s=>s.id===f.site)?.name??'the site';let body='',go='',note='',ok=true,head='',icon='';
+ if(k==='TRUCK'){icon='spr-truck12';head='Book a truck';const trucks=p?.trucks??[],drivers=p?.drivers??[];
+  const tOpts=trucks.map(t=>tdhOpt('T:'+t.id,t.name+(t.big?' (big truck)':' (small truck)')+(taken.trucks.includes(t.id)?' (booked)':''),f.truck==='T:'+t.id,taken.trucks.includes(t.id))).join('')+tdhOpt('HIRE:BIG','Hire in a big truck',f.truck==='HIRE:BIG')+tdhOpt('HIRE:SMALL','Hire in a small truck',f.truck==='HIRE:SMALL');
+  const dOpts=drivers.map(d=>tdhOpt(d.id,d.name+(taken.drivers.includes(d.id)?' (driving that day)':''),f.driver===d.id,taken.drivers.includes(d.id))).join('')+tdhOpt('','No driver named',!f.driver)+tdhOpt('+new','+ Add a driver…',f.driver==='+new');
+  body=field('Which truck','<select name="truck">'+tOpts+'</select>')+field('Driver','<select name="driver">'+dOpts+'</select>')
+   +(f.driver==='+new'?field('Driver’s name','<input name="newName" maxlength="60" autocomplete="off" value="'+esc(f.newName??'')+'" placeholder="Their first name">')+field('Mobile (if you have it)','<input name="newMobile" inputmode="tel" maxlength="30" autocomplete="off" value="'+esc(f.newMobile??'')+'" placeholder="0412 345 678">'):'')
+   +field('From','<select name="time">'+tdhTimes(f.time)+'</select>');
+  const tn=f.truck?.startsWith('T:')?trucks.find(t=>'T:'+t.id===f.truck)?.name??'the truck':f.truck==='HIRE:SMALL'?'a small hire truck':'a big hire truck';go='Book '+tn+' for '+dl;
+  const dn=drivers.find(d=>d.id===f.driver)?.name;note=dn?dn+' gets a message now and answers yes or no.':f.driver==='+new'?'They get a message now and answer yes or no.':'You can name a driver later.';
+  if(f.truck?.startsWith('HIRE'))note+=' The hire truck turns up at the yard at 6:00 am that day.';
+  ok=!!f.truck&&(f.driver!=='+new'||!!String(f.newName??'').trim());}
+ else if(k==='MATERIALS'){icon='spr-stillage';head='Plan a materials list';const trucks=(p?.items??[]).filter(i=>i.type==='TRUCK'&&i.day===day&&i.status!=='CANCELLED'&&i.status!=='DONE'),ps=new Map((state.products??[]).map(x=>[x.id,x]));
+  const picked=f.lines.length?'<div class="tdh-slots tdh-slots-form">'+f.lines.slice(0,8).map(l=>{const pr=ps.get(l.product);return pr?'<span class="gm-slot gm-mini tdh-slot" title="'+esc(pr.name)+'">'+gaItem(pr)+'<b class="gm-n">'+gpCountTd(l.quantity)+'</b></span>':'';}).join('')+(f.lines.length>8?'<span class="tdh-more-slots">+'+(f.lines.length-8)+'</span>':'')+'</div>':'';
+  body=siteSel+'<div class="tdh-field tdh-field-parts"><span>What goes</span>'+picked+'<button type="button" class="tdh-pick'+(f.lines.length?' has':'')+'" data-tdh-pick>'+trkPic('spr-bundle','tdh-pick-img')+'<b>'+(f.lines.length?'Change the parts ('+tdhPlural(f.lines.length,'part')+')':'Pick the parts')+'</b></button></div>'
+   +field('Truck','<select name="truckPlan">'+trucks.map(i=>tdhOpt(i.id,tdhTruckLabel(i),i.id===f.truckPlan)).join('')+tdhOpt('','Next free truck',!f.truckPlan)+'</select>')+field('Leaves the yard at','<select name="time">'+tdhTimes(f.time)+'</select>');
+  const more=tdOpen.has('more:MATERIALS'),yardsmen=(p?.team?.people??[]).filter(x=>x.kind==='worker'&&x.active&&x.role==='YARDSMAN'&&!x.away);
+  body+='<button type="button" class="tdh-link tdh-more-btn" data-tdh-toggle="more:MATERIALS" aria-expanded="'+more+'">'+(more?'Fewer options':'More options')+'</button>'
+   +(more?'<div class="tdh-fields tdh-more-fields">'+field('Packed','<select name="pack">'+tdhOpt('SAME_DAY','On the day',f.pack==='SAME_DAY')+tdhOpt('DAY_BEFORE','The day before',f.pack==='DAY_BEFORE')+'</select>')+field('Who packs it','<select name="packer">'+tdhOpt('','The first yardsman',!f.packer)+yardsmen.map(w=>tdhOpt(w.id,w.name,w.id===f.packer)).join('')+'</select>')+field('Note (optional)','<input name="note" maxlength="200" value="'+esc(f.note??'')+'" placeholder="Back gate, ask for Jim">','tdh-wide')+'</div>':'');
+  go='Plan the list for '+siteName+' on '+dl;ok=!!f.site&&f.lines.length>0;
+  const packer=yardsmen.find(w=>w.id===f.packer)?.name??yardsmen[0]?.name??'The yardsman';note=packer+' gets a message to pack it '+(f.pack==='DAY_BEFORE'?'the day before':'that morning')+'. When the truck comes, the crew loads it and it drives to '+esc(siteName)+'.';}
+ else if(k==='WORKERS'){icon='spr-worker';head='Send workers to a site';const free=tdhFreeWorkers(day);
+  body='<div class="tdh-field"><span>How many</span><div class="tdh-stepper"><button type="button" class="tdh-step" data-tdh-step="-1" aria-label="One less"'+(f.count<=1?' disabled':'')+'>&minus;</button><output class="tdh-count" aria-live="polite">'+f.count+'</output><button type="button" class="tdh-step" data-tdh-step="1" aria-label="One more"'+(f.count>=20?' disabled':'')+'>+</button></div></div>'
+   +siteSel+field('Start at','<select name="time">'+tdhTimes(f.time)+'</select>')+field('Who','<select name="who">'+tdhOpt('ANY','Anyone free',f.who==='ANY')+tdhOpt('PICK','Pick people…',f.who==='PICK')+'</select>');
+  if(f.who==='PICK'){const all=(p?.team?.people??[]).filter(x=>x.kind==='worker'&&x.active),busy=new Set(taken.people);
+   body+='<fieldset class="tdh-who"><legend>Pick up to '+f.count+'</legend>'+all.sort((a,b)=>Number(busy.has(a.id))-Number(busy.has(b.id))||byName(a.name,b.name)).map(w=>{const on=f.people.includes(w.id),dis=busy.has(w.id)||(!on&&f.people.length>=f.count);return '<label class="tdh-check'+(dis?' dis':'')+'"><input type="checkbox" data-tdh-person="'+esc(w.id)+'"'+(on?' checked':'')+(dis?' disabled':'')+'><span><b>'+esc(w.name)+'</b><small>'+esc(w.roleWords)+(busy.has(w.id)?' · booked that day':w.where?' · '+esc(w.where):'')+'</small></span></label>';}).join('')+'</fieldset>';}
+  go='Book '+tdhPlural(f.count,'worker')+' for '+siteName+' on '+dl;ok=!!f.site;
+  const today=tdhToday(),now=Date.parse(p?.now??'')||Date.now(),late=day===today||(day===tdhAdd(today,1)&&new Date(now).getHours()>=15);
+  note=(late?'They get a message now':'They get a message the day before at 3 pm')+' and must say yes.'+(f.who==='ANY'&&free.length<f.count?' Only '+free.length+' free that day: the rest show as short.':'');}
+ else if(k==='RESTACK'){icon='spr-forklift';head='Re-stack the yard';
+  body='<label class="tdh-check big"><input type="checkbox" name="consolidate"'+(f.consolidate?' checked':'')+'><span><b>Top up part-full stillages</b><small>Of the same part, so there are fewer, fuller stillages</small></span></label><label class="tdh-check big"><input type="checkbox" name="stackEmpties"'+(f.stackEmpties?' checked':'')+'><span><b>Stack the empty stillages</b><small>Out of the way, in neat piles</small></span></label>'+field('Start at','<select name="time">'+tdhTimes(f.time)+'</select>');
+  go='Book a re-stack for '+dl;ok=!!(f.consolidate||f.stackEmpties);note=taken.restack?'A re-stack is already booked that day.':'The yard crew does it between their other jobs. Nothing leaves the yard.';if(taken.restack)ok=false;}
+ return '<form class="tdh-form tone-'+(TDH_TONE[k]??'truck')+'" data-tdh-form="'+k+'" id="tdh-form" novalidate><div class="tdh-form-head">'+trkPic(icon,'tdh-form-img')+'<h3>'+head+'<small>'+esc(tdDateWords(day)?.weekday+' '+tdDateWords(day)?.day+' '+tdDateWords(day)?.month)+'</small></h3><button type="button" class="tdh-x" data-tdh-form-x aria-label="Close">&times;</button></div><div class="tdh-fields">'+body+'</div>'
+  +(note?'<p class="tdh-note">'+note+'</p>':'')+'<div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(ok&&!tdBusy?'':' disabled')+'>'+esc(go)+'</button><button type="button" class="tdh-link" data-tdh-form-x>Cancel</button></div>'+(tdForm.err?'<p class="tdh-form-err" role="alert">'+esc(tdForm.err)+'</p>':'')+'</form>';}
+// Can the open form be sent? (the button greys out until it can; the server checks everything again)
+function tdhFormOk(){if(!tdForm)return false;const f=tdForm.f,k=tdForm.kind;
+ if(k==='TRUCK')return !!f.truck&&(f.driver!=='+new'||!!String(f.newName??'').trim());
+ if(k==='MATERIALS')return !!f.site&&f.lines.length>0;
+ if(k==='WORKERS')return !!f.site;
+ if(k==='RESTACK')return !!(f.consolidate||f.stackEmpties)&&!tdhTaken(tdForm.day).restack;
+ if(k==='PAPER')return !!f.expiresOn&&(!['PERMIT','OTHER'].includes(f.type)||!!String(f.title??'').trim())&&(!!f.site||!!tdhT()?.paperwork?.canAddCompany);
+ return false;}
+// ---- the daily updates ----
+const tdhCard=(id,art,title,sub,body,extra='')=>'<section class="panel tdh-card tdh-card-'+id+'" id="tdh-'+id+'" aria-labelledby="tdh-'+id+'-h"><div class="tdh-card-head"><span class="tdh-badge">'+art+'</span><div class="tdh-card-title"><h2 id="tdh-'+id+'-h">'+title+'</h2>'+(sub?'<p>'+sub+'</p>':'')+'</div>'+extra+'</div>'+body+'</section>';
+const tdhWait='<p class="tdh-quiet">Loading…</p>';
+function tdhCards(p,t,today){return '<div class="tdh-cards"><div class="tdh-col tdh-col-a">'+tdhSites(t)+tdhYesterday(t,today)+'</div><div class="tdh-col tdh-col-b">'+tdhWho(t,p,today)+tdhPaper(t,p)+tdhBusiness(t)+'</div></div>';}
+function tdhSites(t){const rows=t?.sites,art=trkPic('spr-truck12','tdh-badge-img');if(!rows)return tdhCard('sites',art,'Sites today','',tdhWait);
+ if(!rows.length)return tdhCard('sites',art,'Sites today','','<p class="tdh-quiet">No sites yet. Start one from the yard with <b>Send</b>.</p>');
+ const slug=s=>String(s).toLowerCase().replace(/[^a-z]+/g,'-');
+ return tdhCard('sites',art,'Sites today',rows.filter(s=>s.today).length?tdhPlural(rows.filter(s=>s.today).length,'site')+' with something on today':'How each site is going','<ul class="tdh-sites">'+rows.map(s=>'<li class="tdh-site'+(s.today?' busy':'')+'"><div class="tdh-site-top"><b>'+esc(s.name)+'</b><span class="tdh-stage st-'+slug(s.stage)+'">'+esc(s.stage)+'</span><button type="button" class="tdh-icon-btn" data-sch-open-site="'+esc(s.id)+'" aria-label="Open '+esc(s.name)+'" title="Open the site">'+tdhChev(1)+'</button></div>'
+  +(s.bar!=null?'<i class="tdh-bar" role="img" aria-label="'+(s.bar>=1?'All the gear is on site':s.bar>=.5?'Most of the gear is on site':s.bar>0?'Some of the gear is on site':'No gear on site yet')+'"><b data-style="width:'+Math.max(3,Math.round(s.bar*100))+'%"></b></i>':'')
+  +'<p class="tdh-site-meta">'+[s.dayWords,s.whoWords].filter(Boolean).map(esc).join(' &middot; ')+'</p>'+(s.next?'<p class="tdh-site-next">'+esc(s.next.words)+'</p>':'')+'</li>').join('')+'</ul>');}
+function tdhYesterday(t,today){const art=trkPic('spr-forklift-load','tdh-badge-img');if(!t)return tdhCard('yt',art,'Yesterday &amp; today','',tdhWait);const y=t.yesterdayDone,b=t.beginToday;
+ const yes=y.quiet?'<p class="tdh-quiet">'+esc(y.words)+'</p>':'<ul class="tdh-lines">'+y.lines.map(l=>'<li>'+tdhTick()+'<span>'+esc(l.words)+'</span></li>').join('')+(y.more?'<li class="more"><span>and '+y.more+' more</span></li>':'')+'</ul>';
+ const pretty=s=>{s=String(s??'');return /^[A-Z_ ]+$/.test(s)?s.charAt(0)+s.slice(1).toLowerCase().replaceAll('_',' '):s;};
+ const begin=b.items.length?'<ol class="tdh-begin">'+b.items.map(i=>'<li><button type="button" class="tdh-begin-btn'+(i.done?' done':'')+(i.red?' red':'')+'" data-tdh-goto="'+esc(i.id)+'" data-tdh-day="'+esc(today??'')+'"><time>'+esc(i.when)+'</time><span><b>'+esc(i.words)+'</b><small>'+esc(pretty(i.status))+'</small></span></button></li>').join('')+'</ol>'+(b.more?'<p class="tdh-quiet">and '+b.more+' more</p>':''):'<p class="tdh-quiet">'+esc(b.words)+'</p>';
+ return tdhCard('yt',art,'Yesterday &amp; today','','<div class="tdh-yt"><div class="tdh-yt-col"><h3>Yesterday <small>'+esc(y.dayLabel)+'</small></h3>'+yes+'</div><div class="tdh-yt-col"><h3>Where we begin today</h3>'+begin+'</div></div>');}
+function tdhWho(t,p,today){const ops=isOps(),r=t?.roster,yard=state.yards[0],crew=ops&&yard?(state.resources??[]).filter(x=>x.type==='WORKER'&&x.location===yard.id).sort((a,b)=>byName(a.name,b.name)):[];
+ const row=(x,cls,words,extra='')=>'<li class="tdh-person '+cls+'"><span class="tdh-av">'+trkPic(x.kind==='driver'||x.truckName||/^Driving/.test(x.what??'')?'spr-truck2':'spr-worker','tdh-av-img')+'</span><span class="tdh-person-text"><b>'+esc(x.name)+'</b><span class="tdh-pill '+cls+'">'+esc(words)+'</span></span>'+extra+'</li>';
+ let body='';
+ if(r?.waiting?.length)body+='<ul class="tdh-people tdh-flags">'+r.waiting.map(x=>row(x,x.answer==='WAITING'?'wait':'no',x.words+' · '+x.what,'<span class="tdh-person-acts"><button type="button" class="secondary tdh-btn" data-tdh-goto="'+esc(x.item)+'" data-tdh-day="'+esc(today??'')+'">Sort it</button></span>')).join('')+'</ul>';
+ if(r?.onSite?.length)body+='<h3 class="tdh-sub">On site</h3><ul class="tdh-people">'+r.onSite.map(x=>row(x,'yes',x.here?'At '+x.siteName+' now':x.wentHome?'Was at '+x.siteName:x.siteName+' from '+x.timeWords)).join('')+'</ul>';
+ if(r?.driving?.length)body+='<h3 class="tdh-sub">Driving</h3><ul class="tdh-people">'+r.driving.map(x=>row({...x,kind:'driver'},x.answer==='YES'?'yes':x.answer==='WAITING'?'wait':['NO','NO_ANSWER'].includes(x.answer)?'no':'off',x.truckName+' from '+planTimeWords(x.time))).join('')+'</ul>';
+ if(crew.length)body+='<h3 class="tdh-sub">At the yard</h3><ul class="td-crew-list tdh-crew">'+crew.map(w=>'<li class="td-crew-chip'+(crewBusy(w)?' busy':'')+'" data-cw-open="'+esc(w.id)+'"><span class="td-crew-art">'+trkPic(w.task?'spr-worker-busy':'spr-worker')+'</span><span class="td-crew-text"><b>'+cwNameLink(w)+'</b>'+pill(crewState(w))+'</span></li>').join('')+'</ul>';
+ if(r?.notBooked?.length){const on=tdOpen.has('notbooked');body+='<button type="button" class="tdh-link tdh-fold" data-tdh-toggle="notbooked" aria-expanded="'+on+'">'+(on?'Hide':'Not booked today: '+r.notBooked.length)+'</button>'+(on?'<ul class="tdh-names">'+r.notBooked.map(x=>'<li><b>'+esc(x.name)+'</b> <small>'+esc(x.roleWords)+(x.where?' · '+esc(x.where):'')+'</small></li>').join('')+'</ul>':'');}
+ if(r?.tomorrow?.words)body+='<p class="tdh-tomorrow">'+esc(r.tomorrow.words)+' <button type="button" class="tdh-link" data-tdh-day="'+esc(t.tomorrow)+'">See tomorrow</button></p>';
+ if(!t)body+=tdhWait;else if(!body)body='<p class="tdh-quiet">Nobody is booked today.</p>';
+ const sub=!r?'':r.waiting.length?r.words:'Everyone who is booked has said yes';
+ return tdhCard('who',trkPic('spr-worker','tdh-badge-img'),'Who’s in today',esc(sub),body,ops?'<button type="button" class="secondary tdh-btn tdh-head-btn" data-tdh-team>Your team</button>':'');}
+function tdhPaper(t,p){const pw=t?.paperwork,art=gaSprite('sg-list','tdh-badge-img');if(!pw)return tdhCard('paper',art,'Paperwork','',tdhWait);
+ const form=tdForm?.kind==='PAPER'?tdhPaperForm(p,pw):'';
+ const row=x=>{const cls=x.status==='EXPIRED'?'no':x.status==='SOON'?'wait':'yes',renew=tdMini?.id==='paper:'+x.id;
+  return '<li class="tdh-paper '+cls+'"><span class="tdh-ptype">'+esc(x.typeWords)+'</span><span class="tdh-paper-text"><b>'+esc(x.title)+'</b><small>'+esc(x.wholeCompany?'Whole company':x.siteName??'A site')+(x.reference?' · '+esc(x.reference):'')+'</small></span><span class="tdh-pill '+cls+'">'+(cls==='yes'?tdhTick():'')+esc(x.words)+'</span>'
+   +(pw.canAdd&&(!x.wholeCompany||pw.canAddCompany)?'<span class="tdh-paper-acts"><button type="button" class="'+(cls==='yes'?'secondary ':'')+'tdh-btn'+(cls==='yes'?'':' tdh-soft')+'" data-tdh-mini="paper:'+esc(x.id)+'|renew">Renew</button><button type="button" class="tdh-link" data-tdh-paper-x="'+esc(x.id)+'">Remove</button></span>':'')
+   +(renew?'<form class="tdh-mini" data-tdh-mini-form="renew" data-id="'+esc(x.id)+'"><div class="tdh-fields"><label class="tdh-field"><span>Good until</span><input type="date" name="expiresOn" value="" min="'+esc(t.today)+'" required></label></div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(tdBusy?' disabled':'')+'>Save the new date</button><button type="button" class="tdh-link" data-tdh-mini-x>Never mind</button></div>'+(tdMini.err?'<p class="tdh-form-err" role="alert">'+esc(tdMini.err)+'</p>':'')+'</form>':'')+'</li>';};
+ const urgent=pw.items.filter(x=>x.status!=='OK'),good=pw.items.filter(x=>x.status==='OK'),all=tdOpen.has('paper-all');
+ let body=urgent.length||good.length?'<ul class="tdh-papers">'+urgent.map(row).join('')+(all||!urgent.length?good.map(row).join(''):'')+'</ul>':'<p class="tdh-quiet">Nothing on file yet. Add your SWMS, JHSAs and permits with their expiry dates, and the app will warn you before they run out.</p>';
+ if(urgent.length&&good.length)body+='<button type="button" class="tdh-link tdh-fold" data-tdh-toggle="paper-all" aria-expanded="'+all+'">'+(all?'Show only what needs doing':'All good: '+good.length+' more')+'</button>';
+ if(pw.missing?.length)body+='<p class="tdh-missing">'+tdhDot('amber')+'<span>No SWMS on file for '+pw.missing.map(m=>esc(m.siteName)).join(', ')+'</span>'+(pw.canAdd?'<button type="button" class="secondary tdh-btn" data-tdh-paper-add="SWMS" data-site="'+esc(pw.missing[0].site)+'">+ Add</button>':'')+'</p>';
+ const add=pw.canAdd&&!form?'<button type="button" class="secondary tdh-btn tdh-head-btn" data-tdh-paper-add="SWMS">+ Add paperwork</button>':'';
+ return tdhCard('paper',art,'Paperwork',esc(pw.words),body+form,add);}
+const tdhDot=c=>'<i class="tdh-key '+c+'" aria-hidden="true"></i>';
+function tdhPaperForm(p,pw){const f=tdForm.f,sites=(p?.sites??[]).filter(s=>!s.finishing),named=f.type==='PERMIT'||f.type==='OTHER';
+ const field=(label,html)=>'<label class="tdh-field"><span>'+label+'</span>'+html+'</label>';
+ const ok=!!f.expiresOn&&(!named||!!String(f.title??'').trim())&&(!!f.site||pw.canAddCompany);
+ return '<form class="tdh-form tone-paper" data-tdh-form="PAPER" id="tdh-form" novalidate><div class="tdh-form-head">'+gaSprite('sg-list','tdh-form-img')+'<h3>Add paperwork<small>It warns you 14 days before it runs out</small></h3><button type="button" class="tdh-x" data-tdh-form-x aria-label="Close">&times;</button></div><div class="tdh-fields">'
+  +field('What','<select name="type">'+tdhOpt('SWMS','SWMS',f.type==='SWMS')+tdhOpt('JHSA','JHSA',f.type==='JHSA')+tdhOpt('PERMIT','Permit',f.type==='PERMIT')+tdhOpt('OTHER','Other paperwork',f.type==='OTHER')+'</select>')
+  +field('For','<select name="site">'+sites.map(s=>tdhOpt(s.id,s.name,s.id===f.site)).join('')+(pw.canAddCompany?tdhOpt('','The whole company',!f.site):'')+'</select>')
+  +field('Runs out on','<input type="date" name="expiresOn" value="'+esc(f.expiresOn??'')+'" required>')
+  +(named?field('Name','<input name="title" maxlength="80" value="'+esc(f.title??'')+'" placeholder="Council footpath permit">'):field('Reference (optional)','<input name="reference" maxlength="60" value="'+esc(f.reference??'')+'" placeholder="SWMS-014">'))
+  +'</div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(ok&&!tdBusy?'':' disabled')+'>Save it</button><button type="button" class="tdh-link" data-tdh-form-x>Cancel</button></div>'+(tdForm.err?'<p class="tdh-form-err" role="alert">'+esc(tdForm.err)+'</p>':'')+'</form>';}
+function tdhBusiness(t){if(!isOps())return '';const b=t?.business,art=gaSprite('hr-tag','tdh-badge-img');if(!b)return t?'':tdhCard('biz',art,'The business','',tdhWait);
+ const stat=(icon,big,words)=>'<li><span class="tdh-stat-art">'+trkPic(icon,'tdh-stat-img')+'</span><span><b>'+big+'</b><small>'+words+'</small></span></li>';
+ let body='<ul class="tdh-stats">'+stat('spr-bundle',b.gear.pieces?num(b.gear.pieces):'None',b.gear.pieces?'pieces out on hire at '+tdhPlural(b.gear.sites,'site'):'No gear out on hire')+stat('spr-truck12',b.trucks.busy+' of '+b.trucks.all,'trucks busy now')+stat('spr-worker',b.crew.busy+' of '+b.crew.all,'yard crew busy now')+'</ul>';
+ const m=hrOK()?b.money:null;// dollars only with finance.view (the server already leaves them out)
+ if(m?.noRates)body+='<div class="tdh-money none"><p>'+esc(m.words)+'.</p><button type="button" class="tdh-btn tdh-soft" data-view="HIRE">Set your prices</button></div>';
+ else if(m){body+='<div class="tdh-money"><div class="tdh-m"><span>Hire earned this week</span><b>'+tdhMoney(m.thisWeek)+'</b></div><div class="tdh-m"><span>Hire earned this month</span><b>'+tdhMoney(m.thisMonth)+'</b></div><div class="tdh-m is-total"><span>Built up this month, to invoice (incl. GST)</span><b>'+tdhMoney(m.toInvoice)+'</b></div></div>'
+  +(m.missingWords?'<p class="tdh-missing">'+tdhDot('amber')+'<span>'+esc(m.missingWords)+'</span><button type="button" class="secondary tdh-btn" data-view="HIRE">Set your prices</button></p>':'')+'<p class="tdh-foot">'+esc(m.footnote)+'</p>';}
+ return tdhCard('biz',art,'The business',m?'Where the company stands today':'Gear, trucks and crew right now',body);}
+// ---- actions ----
+function tdSelect(day,{scroll=false}={}){if(!/^\d{4}-\d{2}-\d{2}$/.test(String(day??'')))return;tdSel=day;tdhSelSave(day);const g=tdhP()?.month===tdhMonth()?tdhP().grid:monthGrid(tdhMonth());if(!g.includes(day))tdMonth=day.slice(0,7);
+ if(tdForm&&tdForm.kind!=='PAPER'){const today=tdhToday();if(today&&day<today)tdForm=null;else{tdForm.day=day;tdForm.err=null;}}tdMini=null;tdRedraw();tdFetch(false);
+ if(scroll&&typeof requestAnimationFrame==='function')requestAnimationFrame(()=>{const el=document.getElementById('tdh-day');if(!el)return;const r=el.getBoundingClientRect();if(r.top<0||r.top>innerHeight*.6)el.scrollIntoView({block:'start',behavior:tdCalm()?'auto':'smooth'});});}
+const tdCalm=()=>typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+const tdNarrow=()=>typeof matchMedia==='function'&&matchMedia('(max-width:1023px)').matches;
+function tdGoItem(id,day){tdSelect(day);requestAnimationFrame(()=>{const el=document.getElementById('tdh-item-'+id)??document.getElementById('tdh-day');if(!el)return;el.scrollIntoView({block:'center',behavior:tdCalm()?'auto':'smooth'});el.classList.add('is-new');setTimeout(()=>el.classList.remove('is-new'),1800);});}
+// From an alert (Paperwork, No answer): open Today on that day.
+function tdGoDay(day,kind){if(!schGo('TODAY'))return;if(day)tdSelect(day);requestAnimationFrame(()=>document.getElementById(kind==='PAPERWORK'?'tdh-paper':'tdh-day')?.scrollIntoView({block:'start'}));}
+async function tdRun(fn,{flash=true,keep=false}={}){if(tdBusy)return null;tdBusy=true;tdRedraw();try{const r=await fn();if(r?.message)notify(r.message);if(flash&&r?.item?.id){tdFlash={id:r.item.id,until:Date.now()+2600};}if(!keep)tdMini=null;return r;}
+ catch(e){if(tdMini)tdMini.err=e.message;else if(tdForm)tdForm.err=e.message;else notify(e.message);return null;}finally{tdBusy=false;tdFetch(true);tdRedraw();refresh(false).catch(()=>{});}}
+async function tdSubmit(){const f=tdForm.f,k=tdForm.kind,day=tdForm.day;tdForm.err=null;
+ const r=await tdRun(async()=>{if(k==='TRUCK'){if(f.driver==='+new'){const a=await command('teamAdd',{name:f.newName,role:'DRIVER',mobile:f.newMobile||null});f.driver=a.person.id;}
+   const [kind,val]=String(f.truck).split(':');return command('planTruck',{day,time:f.time,...(kind==='T'?{truck:val}:{hire:{size:val}}),driver:f.driver||null});}
+  if(k==='MATERIALS')return command('planMaterials',{day,time:f.time,site:f.site,lines:f.lines,pack:f.pack,truckPlan:f.truckPlan||null,packer:f.packer||null,note:f.note||null});
+  if(k==='WORKERS')return command('planWorkers',{day,time:f.time,site:f.site,count:f.count,people:f.who==='PICK'?f.people:null});
+  if(k==='RESTACK')return command('planRestack',{day,time:f.time,consolidate:!!f.consolidate,stackEmpties:!!f.stackEmpties});
+  if(k==='PAPER')return command('paperworkAdd',{type:f.type,site:f.site||null,expiresOn:f.expiresOn,title:f.title||null,reference:f.reference||null});},{keep:true});
+ if(r){tdForm=null;tdRedraw();if(r.item?.id)requestAnimationFrame(()=>document.getElementById('tdh-item-'+r.item.id)?.scrollIntoView({block:'nearest',behavior:tdCalm()?'auto':'smooth'}));}}
+function tdPick(title,lines,done){if(typeof document==='undefined')return;const layer=document.createElement('div');layer.className='tdh-layer';layer.setAttribute('role','dialog');layer.setAttribute('aria-modal','true');layer.setAttribute('aria-label',title);
+ const sheet=document.createElement('div');sheet.className='tdh-sheet';layer.append(sheet);document.body.append(layer);document.body.classList.add('tdh-sheet-open');
+ const close=()=>{layer.remove();document.body.classList.remove('tdh-sheet-open');tdRedraw();};layer.addEventListener('click',e=>{if(e.target===layer)gmPlanPickerOpen()&&sheet.querySelector('[data-pp-cancel]')?.click();});
+ gmPlanPicker(sheet,{state,lift:tdhP()?.pickerLift??null},{title,lines,onDone:l=>{close();done(l);},onCancel:close});}
+function tdBindOnce(){if(tdBound||typeof document==='undefined')return;tdBound=true;
+ document.addEventListener('click',e=>{const t=e.target?.closest?.('[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]');
+  if(!t||!onPage()||t.disabled)return;const d=t.dataset;
+  if(d.cwDriver!==undefined){e.preventDefault();e.stopPropagation();cwOpenDriver(d.cwDriver);return;}
+  if(t.id==='tdh-replies'){const on=state.config?.planReplies!==false;t.disabled=true;command('planReplies',{on:!on}).then(r=>{notify(r.message);return refresh(true);}).catch(err=>{notify(err.message);t.disabled=false;});return;}
+  if(d.tmRemove!==undefined){tmRemove(d.tmRemove,t);return;}
+  if(view==='CREW'){cwMsgClick(t);return;}
+  if(d.tdhTeam!==undefined){tmGo();return;}
+  if(view!=='TODAY')return;
+  if(d.tdhGoto!==undefined){tdGoItem(d.tdhGoto,d.tdhDay||tdhToday());return;}
+  if(d.tdhDay!==undefined){tdSelect(d.tdhDay,{scroll:tdNarrow()});return;}
+  if(d.tdhMonth!==undefined){if(d.tdhMonth==='today'){tdMonth=null;tdSelect(tdhToday());}else{tdMonth=monthAdd(tdhMonth(),Number(d.tdhMonth));tdMini=null;tdRedraw();tdFetch(false);}return;}
+  if(d.tdhRetry!==undefined){tdErr=null;tdFetch(true);tdRedraw();return;}
+  if(d.tdhAdd!==undefined){const k=d.tdhAdd,day=tdhSelDay();tdForm=tdForm?.kind===k&&tdForm.day===day?null:tdhNewForm(k,day);tdMini=null;tdRedraw();if(tdForm)requestAnimationFrame(()=>{const f=document.getElementById('tdh-form');f?.scrollIntoView({block:'nearest',behavior:tdCalm()?'auto':'smooth'});f?.querySelector('select,input,button.tdh-pick')?.focus({preventScroll:true});});return;}
+  if(d.tdhFormX!==undefined){tdForm=null;tdRedraw();return;}
+  if(d.tdhPick!==undefined&&tdForm?.kind==='MATERIALS'){const site=(tdhP()?.sites??[]).find(s=>s.id===tdForm.f.site)?.name;tdPick('Parts for '+(site??'the site'),tdForm.f.lines,l=>{if(tdForm?.kind==='MATERIALS'){tdForm.f.lines=l;tdRedraw();}});return;}
+  if(d.tdhStep!==undefined&&tdForm?.kind==='WORKERS'){tdForm.f.count=Math.max(1,Math.min(20,tdForm.f.count+Number(d.tdhStep)));tdForm.f.people=tdForm.f.people.slice(0,tdForm.f.count);tdRedraw();return;}
+  if(d.tdhMini!==undefined){const [id,kind]=d.tdhMini.split('|');tdMini=tdMini?.id===id&&tdMini.kind===kind?null:{id,kind,err:null};tdRedraw();requestAnimationFrame(()=>document.querySelector('.tdh-mini select,.tdh-mini input:not([type=hidden])')?.focus({preventScroll:true}));return;}
+  if(d.tdhMiniX!==undefined){tdMini=null;tdRedraw();return;}
+  if(d.tdhYes!==undefined){tdRun(()=>command('messageAnswer',{id:d.tdhYes,yes:true,via:'OFFICE'}));return;}
+  if(d.tdhCancel!==undefined){const v=(tdhP()?.items??[]).find(i=>i.id===d.tdhCancel);if(!confirm('Cancel '+(v?tdhTitle(v).replace(/ &middot; .*/,'').replace('&rarr;','to'):'this')+' on '+tdhShort(v?.day??tdhSelDay())+'? Anyone asked is told it is off.'))return;tdRun(()=>command('planCancel',{id:d.tdhCancel}),{flash:false});return;}
+  if(d.tdhLog!==undefined){const k='log:'+d.tdhLog;if(tdOpen.has(k))tdOpen.delete(k);else tdOpen.add(k);tdRedraw();return;}
+  if(d.tdhToggle!==undefined){if(tdOpen.has(d.tdhToggle))tdOpen.delete(d.tdhToggle);else tdOpen.add(d.tdhToggle);tdRedraw();return;}
+  if(d.tdhEdit!==undefined){const v=(tdhP()?.items??[]).find(i=>i.id===d.tdhEdit);if(!v)return;tdPick('Parts for '+(v.siteName??'the site'),v.lines.map(l=>({product:l.product,quantity:l.quantity})),l=>{if(!l.length){notify('A list needs at least one part. Cancel it instead.');return;}tdRun(()=>command('planMove',{id:v.id,lines:l}));});return;}
+  if(d.tdhRest!==undefined){const v=(tdhP()?.items??[]).find(i=>i.id===d.tdhRest);if(!v)return;const today=tdhToday(),day=v.day>=today?v.day:today;tdSelect(day);tdForm=tdhNewForm('MATERIALS',day,{site:v.site,lines:v.short.map(s=>({product:s.product,quantity:s.missing})),truckPlan:''});tdRedraw();requestAnimationFrame(()=>document.getElementById('tdh-form')?.scrollIntoView({block:'nearest'}));return;}
+  if(d.tdhPaperAdd!==undefined){tdForm=tdhNewForm('PAPER',tdhSelDay(),{type:d.tdhPaperAdd||'SWMS',...(d.site?{site:d.site}:{})});tdMini=null;tdRedraw();requestAnimationFrame(()=>{const f=document.getElementById('tdh-form');f?.scrollIntoView({block:'nearest',behavior:tdCalm()?'auto':'smooth'});f?.querySelector('select')?.focus({preventScroll:true});});return;}
+  if(d.tdhPaperX!==undefined){const x=tdhT()?.paperwork?.items?.find(i=>i.id===d.tdhPaperX);if(!confirm('Remove '+(x?.title??'this paperwork')+' from the list?'))return;tdRun(()=>command('paperworkRemove',{id:d.tdhPaperX}),{flash:false});}});
+ const draft=e=>{const t=e.target;if(!t?.closest)return false;
+  const mini=t.closest('[data-tdh-mini-form]');if(mini)return false;
+  const form=t.closest('[data-tdh-form]');if(!form||!tdForm)return false;
+  if(t.dataset.tdhPerson!==undefined){const id=t.dataset.tdhPerson,l=tdForm.f.people.filter(x=>x!==id);if(t.checked)l.push(id);tdForm.f.people=l.slice(0,tdForm.f.count);return true;}
+  if(!t.name)return false;tdForm.f[t.name]=t.type==='checkbox'?t.checked:t.value;tdForm.err=null;return true;};
+ document.addEventListener('input',e=>{if(view!=='TODAY'||!onPage())return;if(!draft(e))return;const go=e.target.closest('form')?.querySelector('.tdh-go');if(go&&tdForm)go.disabled=tdBusy||!tdhFormOk();});
+ document.addEventListener('change',e=>{if(view==='WORKERS'&&e.target?.closest?.('.tm-team')){tmChange(e.target);return;}if(view!=='TODAY'||!onPage())return;if(draft(e)){const t=e.target;if(t.tagName==='SELECT'||t.type==='checkbox'){t.blur();tdRedraw();}else{const go=t.closest('form')?.querySelector('.tdh-go');if(go&&tdForm)go.disabled=tdBusy||!tdhFormOk();}}});
+ document.addEventListener('focusout',e=>{if(view!=='TODAY'||!e.target?.closest?.('[data-tdh-form]'))return;setTimeout(()=>{if(tdDirty&&!tdHold())tdRedraw();},0);});
+ document.addEventListener('submit',e=>{const f=e.target;if(view==='WORKERS'&&f?.matches?.('[data-tm-add]')){e.preventDefault();tmAdd(f);return;}if(view!=='TODAY'||!onPage())return;
+  if(f?.matches?.('[data-tdh-form]')){e.preventDefault();if(!tdForm||tdBusy)return;for(const el of f.elements)if(el.name&&el.type!=='checkbox')tdForm.f[el.name]=el.value;document.activeElement?.blur?.();tdSubmit();return;}
+  if(f?.matches?.('[data-tdh-mini-form]')){e.preventDefault();if(tdBusy)return;const v=Object.fromEntries(new FormData(f)),id=f.dataset.id,kind=f.dataset.tdhMiniForm;document.activeElement?.blur?.();
+   if(kind==='move')tdRun(()=>command('planMove',{id,day:v.day,time:v.time}),{keep:true}).then(r=>{if(r){tdMini=null;if(v.day&&v.day!==tdhSelDay())tdSelect(v.day);else tdRedraw();}});
+   else if(kind==='driver')tdRun(()=>command('planAsk',{item:id,person:v.person}),{keep:true}).then(r=>{if(r){tdMini=null;tdRedraw();}});
+   else if(kind==='truck')tdRun(()=>command('planMove',{id,truckPlan:v.truckPlan||null}),{keep:true}).then(r=>{if(r){tdMini=null;tdRedraw();}});
+   else if(kind==='ask')tdRun(()=>command('planAsk',{item:id,person:v.person,...(v.replace?{replace:v.replace}:{})}),{keep:true}).then(r=>{if(r){tdMini=null;tdRedraw();}});
+   else if(kind==='renew')tdRun(()=>command('paperworkUpdate',{id,expiresOn:v.expiresOn}),{keep:true,flash:false}).then(r=>{if(r){tdMini=null;tdRedraw();}});}});
+ document.addEventListener('keydown',e=>{const c=e.target;if(view!=='TODAY'||!c?.matches?.('.tdh-cell')||!onPage())return;const step={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[e.key];if(!step)return;e.preventDefault();const day=tdhAdd(c.dataset.tdhDay,step);tdSelect(day);requestAnimationFrame(()=>document.querySelector('.tdh-cell[data-tdh-day="'+day+'"]')?.focus());});}
+// ---- Team (the Office Workers page, "Your team"): names, jobs and mobiles; messages go to these people. Data: GET /api/team. ----
+let tmData=null,tmAt=0,tmBusyLoad=false,tmRev=null,tmErr=null,tmAddDraft={name:'',role:'SCAFFOLDER',mobile:''};
+function tmLoad(force){if(typeof document==='undefined'||!api||tmBusyLoad)return;const rev=state?.plan?.rev??null;if(!force&&tmData&&rev===tmRev&&Date.now()-tmAt<30000)return;tmBusyLoad=true;tmRev=rev;
+ api('team').then(d=>{tmData=d;tmErr=null;}).catch(e=>{tmErr=e.message;}).finally(()=>{tmBusyLoad=false;tmAt=Date.now();if(view==='WORKERS'&&onPage()&&!document.activeElement?.matches?.('.tm-team :is(input,select)'))render();});}
+function tmTeam(){if(!isOps())return '';tmLoad(false);tdBindOnce();const d=tmData;
+ const head='<div class="tm-head"><span class="tm-badge">'+trkPic('spr-worker','tm-badge-img')+'</span><div class="tm-head-text"><h2 id="tm-team-h">Your team</h2><p>Names, jobs and mobiles. Messages go to these people.</p></div>'+(d?'<span class="badge">'+tdhPlural(d.people.length,'person','people')+'</span>':'')+'</div>';
+ if(!d)return '<section class="panel tm-team" id="tm-team" aria-labelledby="tm-team-h">'+head+'<p class="tm-quiet">'+(tmErr?esc(tmErr):'Loading your team…')+'</p></section>';
+ const roles=d.roles??[];
+ const row=x=>{const drv=x.kind==='driver',opts=roles.filter(r=>drv?r.code==='DRIVER':r.code!=='DRIVER').map(r=>'<option value="'+r.code+'"'+(r.code===x.role?' selected':'')+'>'+esc(r.words)+'</option>').join('');
+  return '<li class="tm-row'+(x.away?' away':'')+'" data-tm-row="'+esc(x.id)+'"><span class="tm-art">'+trkPic(drv?'spr-truck2':'spr-worker','tm-art-img')+'</span>'
+   +'<label class="tm-f tm-name"><span>Name</span><input data-tm-field="name" data-id="'+esc(x.id)+'" value="'+esc(x.name)+'" maxlength="60" autocomplete="off"></label>'
+   +'<label class="tm-f tm-role"><span>Job</span><select data-tm-field="role" data-id="'+esc(x.id)+'"'+(drv?' disabled':'')+'>'+opts+'</select></label>'
+   +'<label class="tm-f tm-mobile"><span>Mobile</span><input data-tm-field="mobile" data-id="'+esc(x.id)+'" value="'+esc(x.mobileWords??'')+'" inputmode="tel" maxlength="30" placeholder="No mobile yet" autocomplete="off"></label>'
+   +'<span class="tm-where">'+(x.away?'At '+esc(x.away.siteName??'a site')+' today':drv?'Driver':x.where?esc(x.where):'')+(x.demoName?'<small class="tm-demo">Demo name: tap to rename</small>':x.demo?'<small class="tm-demo">Demo driver: rename or remove</small>':'')+'</span>'
+   +'<span class="tm-acts"><button type="button" class="secondary tdh-btn" '+(drv?'data-cw-driver':'data-cw-open')+'="'+esc(x.id)+'">'+tdhPhone+'<span>Phone view</span></button><button type="button" class="tdh-link" data-tm-remove="'+esc(x.id)+'"'+(x.away?' disabled title="Away at a site today"':'')+'>Remove</button></span></li>';};
+ const add='<form class="tm-add" data-tm-add><b class="tm-add-title">Add a person</b><label class="tm-f"><span>Name</span><input name="name" maxlength="60" value="'+esc(tmAddDraft.name)+'" autocomplete="off" required></label><label class="tm-f"><span>Job</span><select name="role">'+roles.map(r=>'<option value="'+r.code+'"'+(r.code===tmAddDraft.role?' selected':'')+'>'+esc(r.words)+'</option>').join('')+'</select></label><label class="tm-f"><span>Mobile (optional)</span><input name="mobile" inputmode="tel" maxlength="30" placeholder="0412 345 678" value="'+esc(tmAddDraft.mobile)+'" autocomplete="off"></label><button type="submit" class="tdh-go">Add to the team</button></form>';
+ return '<section class="panel tm-team" id="tm-team" aria-labelledby="tm-team-h">'+head+'<ul class="tm-list">'+d.people.map(row).join('')+'</ul>'+add+'</section>';}
+async function tmChange(el){const id=el.dataset.id,f=el.dataset.tmField;if(!id||!f)return;const x=tmData?.people.find(p=>p.id===id);const v=el.value;if(!x)return;
+ if(f==='name'&&v.trim()===x.name)return;if(f==='mobile'&&v.trim()===(x.mobileWords??''))return;if(f==='role'&&v===x.role)return;
+ try{const r=await command('teamUpdate',{id,[f]:f==='mobile'?(v.trim()||null):v});notify(r.message);}catch(e){notify(e.message);el.value=f==='name'?x.name:f==='mobile'?x.mobileWords??'':x.role;}tmLoad(true);}
+async function tmAdd(form){const v=Object.fromEntries(new FormData(form));tmAddDraft={name:v.name??'',role:v.role??'SCAFFOLDER',mobile:v.mobile??''};const b=form.querySelector('button[type=submit]');if(b)b.disabled=true;
+ try{const r=await command('teamAdd',{name:v.name,role:v.role,mobile:v.mobile||null});notify(r.message);tmAddDraft={name:'',role:v.role,mobile:''};await refresh(true);}catch(e){notify(e.message);if(b)b.disabled=false;}tmLoad(true);}
+async function tmRemove(id,btn){const x=tmData?.people.find(p=>p.id===id);if(!confirm('Remove '+(x?.name??'this person')+' from your team? Anything booked for them is called off.'))return;btn.disabled=true;
+ try{const r=await command('teamRemove',{id});notify(r.message);await refresh(true);}catch(e){notify(e.message);btn.disabled=false;}tmLoad(true);}
+function tmGo(){if(!schGo('WORKERS'))return;requestAnimationFrame(()=>document.getElementById('tm-team')?.scrollIntoView({block:'start',behavior:tdCalm()?'auto':'smooth'}));}
+const tdhRepliesButton=()=>(tdBindOnce(),state.config&&isOps())?'<button type="button" class="secondary tdh-replies'+(state.config.planReplies!==false?' on':'')+'" id="tdh-replies" aria-pressed="'+(state.config.planReplies!==false)+'" title="In this demo the team answers their messages by themselves after a minute or so">People answer by themselves (demo): '+(state.config.planReplies!==false?'On':'Off')+'</button>':'';
+export const tdTest={day:s=>tdDay(s),view:()=>tdView(),viewFrom:v=>tdViewFrom(v),returns:(s,t)=>tdReturns(s,t),date:d=>tdDateWords(d),
+ setData(plan,today){tdData={plan:plan??null,today:today??null};},reset(){tdData={plan:null,today:null};tdSel=null;tdMonth=null;tdForm=null;tdMini=null;tdOpen.clear();},select(d){tdSel=d;},month(m){tdMonth=m;},
+ openForm(kind,day,extra){tdForm=tdhNewForm(kind,day??tdhSelDay(),extra);return tdForm;},form:()=>tdForm,mini(id,kind){tdMini=id?{id,kind,err:null}:null;},toggle(k){if(tdOpen.has(k))tdOpen.delete(k);else tdOpen.add(k);},
+ team(d){tmData=d;},teamView:()=>tmTeam(),replies:()=>tdhRepliesButton()};
+// ---- kept from the first Today page: the load card (yard lists due today, inside the day panel) and a truck in words ----
 const TD_GLYPHS={open:'M9 6l6 6-6 6',lock:'M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3',truck:'M2 7h11v9H2zM13 10h4l3 3v3h-7M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4',auto:'M4 12a8 8 0 0 1 14-5.3M20 4v4h-4M20 12a8 8 0 0 1-14 5.3M4 20v-4h4',next:'M5 5l7 7-7 7M13 5l7 7-7 7',search:'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13M15.5 15.5l5 5'};
 const tdGlyph=k=>'<svg class="td-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+(TD_GLYPHS[k]??TD_GLYPHS.open)+'"/></svg>';
 const TD_GONE={IN_TRANSIT:'On the road',AT_SITE:'At the site',ARRIVED:'At the site',DELIVERED:'Delivered',LOADED:'Loaded',LOADING:'Loading at the yard'};
@@ -2471,40 +2845,7 @@ function tdLoad(i,late=false){const ops=isOps(),t=i.runTruck?state.trucks.find(x
  if(live)btns+=prButton('pick',i.id,'Print pick list',' td-btn');
  btns+='<button type="button" class="secondary td-btn td-open" data-sch-goto="'+esc(i.id)+'" data-day="'+esc(i.neededOn??'')+'"><span>'+(late&&live?'Move or open':'Open')+'</span>'+tdGlyph('open')+'</button>';
  return '<article class="td-load'+(live?'':' done')+(late?' late':'')+'" data-td-load="'+esc(i.id)+'"><div class="td-load-top"><span class="td-load-art">'+trkPic(live?'spr-stillage':'spr-truck12')+'</span><div class="td-load-text"><b class="td-site">'+esc(i.siteName)+'</b><span class="td-name">'+(i.kind==='request'?'Single request &middot; ':'')+esc(i.name)+'</span><span class="td-tags"><span class="td-pcs">'+num(i.pieces)+' pcs</span>'+(late?whenBadge(i):'')+slotTag(i.slot)+'<span class="badge '+schBadge(i.status)+'">'+esc(String(i.status).replaceAll('_',' '))+'</span>'+schClash(i)+'</span></div></div><div class="td-load-truck">'+truck+'<span class="td-where'+(live&&!i.runTruck?' warn':'')+'">'+where+'</span></div><div class="td-actions">'+btns+'</div></article>';}
-function tdLoadsCard(d){const n=d.dueLive.length,w=d.next?tdDateWords(d.next):null;
- const empty='<div class="td-empty">'+trkPic('spr-truck12')+'<div><b>Nothing due out today.</b><p>'+(d.next?'Next: '+num(d.nextCount)+(d.nextCount===1?' load':' loads')+' '+(d.next===d.tomorrow?'tomorrow':'on '+w.short+' '+w.day+' '+w.mon)+(d.nextNoTruck?' &middot; '+d.nextNoTruck+' without a truck':'')+(d.undated?' &middot; '+num(d.undated)+' with no date yet':''):d.undated?num(d.undated)+(d.undated===1?' load has':' loads have')+' no date yet. Give '+(d.undated===1?'it':'them')+' a day on the schedule.':'No loads are booked ahead.')+'</p><button type="button" class="secondary td-btn" data-view="SCHEDULE"><span>Open the schedule</span>'+tdGlyph('open')+'</button></div></div>';
- return tdCard('loads',trkPic('spr-forklift-load'),'Loads due today',n?(d.reserved===n?'Every load is reserved.':d.reserved?num(d.reserved)+' of '+num(n)+' reserved. Reserve the rest and print the pick lists.':'Reserve each load onto its truck and print the pick list.'):d.gone?'Today’s loads have left the yard.':'',n||null,d.due.length?'<div class="td-list">'+d.due.map(i=>tdLoad(i)).join('')+'</div>':empty,'<button type="button" class="secondary td-more" data-view="SCHEDULE"><span>Schedule</span>'+tdGlyph('open')+'</button>');}
-function tdLateCard(d){if(!d.late.length)return '';return tdCard('late',trkPic('spr-worker-busy'),'Overdue','Needed before today and still at the yard. Move each one to a new day.',d.late.length,'<div class="td-list">'+d.late.map(i=>tdLoad(i,true)).join('')+'</div>','',' is-late');}
-function tdReturnsCard(d){if(!d.returns)return '';const open=d.returns.filter(r=>!r.done).length,late=d.returns.filter(r=>r.late).length,rows=d.returns.filter(r=>!r.rt),cards=d.returns.filter(r=>r.rt);if(cards.length)rtBindOnce();
- return tdCard('returns',rtImg('rt-collect'),'Returns today',d.returns.length?(open?num(open)+' still to come back to the yard'+(late?' &middot; '+num(late)+' overdue':'')+'.':'Everything due back is in.'):'Nothing is due back today.',open||null,
-  (cards.length?'<div class="td-rt-list">'+cards.map(r=>rtCard(r.rt,'today')).join('')+'</div>':'')+(rows.length?'<ul class="td-rows">'+rows.map(r=>'<li class="td-row'+(r.done?' done':'')+'"><span class="td-row-art">'+trkPic('spr-truck2')+'</span><span class="td-row-text"><b>'+esc(r.siteName)+'</b><small>'+esc(r.name)+' &middot; '+num(r.pieces)+' pcs</small></span>'+slotTag(r.slot)+'<span class="badge '+(r.done?'available':'busy')+'">'+esc(r.status.replaceAll('_',' '))+'</span>'+(r.site?'<button type="button" class="secondary td-btn td-icon-btn" data-sch-open-site="'+esc(r.site)+'" aria-label="Open '+esc(r.siteName)+'">'+tdGlyph('open')+'</button>':'')+'</li>').join('')+'</ul>':''),'',late?' is-late':'');}
-function tdAlertsCard(d){const a=d.alerts,top=(a.items??[]).slice(0,5);
- const body=a.count?'<ul class="al-list td-al-list">'+top.map(alItemHTML).join('')+'</ul>'+(a.count>top.length?'<button type="button" class="secondary td-btn td-wide" data-al-open><span>See all '+num(a.count)+' alerts</span>'+tdGlyph('open')+'</button>':''):'<div class="td-empty td-clear">'+alImg('al-clear','td-clear-art')+'<div><b>All clear.</b><p>Late or unreserved loads, blocked moves, damaged stillages and low stock show up here.</p></div></div>';
- return tdCard('alerts',alImg('al-bell'),'Alerts',a.count?(a.count>top.length?'The '+top.length+' most urgent of '+num(a.count)+'.':'Tap one to go straight to it.'):'',a.count||null,body,a.count?'<button type="button" class="secondary td-more" data-al-open><span>All</span>'+tdGlyph('open')+'</button>':'',a.counts?.high?' sev-high':a.count?' sev-medium':'');}
 function tdTruckWhere(t){return t.status==='IN_TRANSIT'?['road','On the road'+(t.destination?' to '+esc(name(t.destination)):'')+wmArrives(t)]:t.status==='AT_SITE'?['site','At '+esc(name(t.at))]:['yard','At the yard'+(t.destination&&t.destination!==t.at?' &middot; set for '+esc(name(t.destination)):'')];}
-function tdTrucksCard(d){if(!d.trucks.length)return tdCard('trucks',trkPic('spr-truck12'),'Trucks now','',null,'<div class="td-empty">'+trkPic('spr-truck2')+'<div><b>No trucks yet.</b><p>Add your trucks on the Equipment page.</p>'+(isOps()?'<button type="button" class="secondary td-btn" data-view="EQUIPMENT"><span>Equipment</span>'+tdGlyph('open')+'</button>':'')+'</div></div>');
- const road=d.trucks.filter(t=>t.status==='IN_TRANSIT').length,yard=d.trucks.filter(t=>t.status==='AT_YARD').length;
- const row=t=>{const [wc,ww]=tdTruckWhere(t),r=Array.isArray(t.nextRuns)?t.nextRuns[0]:null,heavy=heavyTruck(t),waits=r?.kind==='collection'&&t.status==='AT_SITE'&&t.at===r.site&&['REQUESTED','BOOKED'].includes(r.status)&&!t.deckArea,[dc,dw]=waits?['job','Waiting to load']:trkDoing(t);
-  const next=r?'<button type="button" class="td-next" data-sch-goto="'+esc(r.id)+'" data-day="'+esc(r.neededOn??'')+'"><span class="td-next-label">Next run</span><span class="td-next-main">'+whenBadge(r)+slotTag(r.slot)+'<b>'+esc(r.siteName)+'</b></span><small>'+esc(r.name)+' &middot; '+num(r.pieces)+' pcs'+((t.runsBooked??0)>1?' &middot; +'+(t.runsBooked-1)+' more':'')+'</small>'+tdGlyph('open')+'</button>':'<span class="td-next none"><span class="td-next-label">Next run</span><span class="td-next-main">Nothing booked</span></span>';
-  return '<li class="td-truck-row at-'+wc+'"><button type="button" class="td-truck-id" data-view="'+(heavy?'TRUCK12':'TRUCK2')+'" aria-label="Open '+esc(t.name)+' in the truck garage"><span class="td-truck-art">'+trkPic(heavy?'spr-truck12':'spr-truck2')+'</span><span class="td-truck-text"><b>'+esc(t.name)+'</b><span class="td-truck-where">'+ww+'</span><span class="state-pill '+dc+'">'+dw+'</span></span></button>'+next+'</li>';};
- return tdCard('trucks',trkPic('spr-truck12'),'Trucks now',num(yard)+' at the yard'+(road?' &middot; '+num(road)+' on the road':''),d.trucks.length,'<ul class="td-truck-list">'+d.trucks.map(row).join('')+'</ul>');}
-function tdCrewCard(d){const ops=isOps(),yard=state.yards[0],shown=d.crew.slice().sort((a,b)=>Number(crewBusy(b))-Number(crewBusy(a))||byName(a.name,b.name)),max=8;
- const chips=shown.slice(0,max).map(r=>'<li class="td-crew-chip'+(crewBusy(r)?' busy':'')+'" data-cw-open="'+esc(r.id)+'"><span class="td-crew-art">'+trkPic(r.task?'spr-worker-busy':'spr-worker')+'</span><span class="td-crew-text"><b>'+cwNameLink(r)+'</b>'+pill(crewState(r))+'</span></li>').join('')+(shown.length>max?'<li class="td-crew-more"><button type="button" class="secondary" data-view="WORKERS">+'+(shown.length-max)+' more</button></li>':'');
- const cmds=ops&&yard&&d.crew.length?'<div class="td-crew-cmds"><button type="button" class="td-btn '+(d.idle?'td-primary':'secondary')+'" data-td-crew="next"'+(d.idle?'':' disabled')+'>'+tdGlyph('next')+'<span>'+(d.idle?'Allocate all idle':'Everyone busy')+'</span></button><button type="button" class="secondary td-btn" data-td-crew="auto">'+tdGlyph('auto')+'<span>All automatic</span></button></div>':'';
- return tdCard('crew',trkPic('spr-worker'),'Crew now',d.crew.length?num(d.busy)+' working &middot; '+num(d.idle)+' idle':'',d.crew.length||null,d.crew.length?'<ul class="td-crew-list">'+chips+'</ul>'+cmds:'<div class="td-empty">'+trkPic('spr-worker')+'<div><b>Nobody on the yard.</b><p>'+(ops?'Add workers with the + button on Home or the Workers page.':'The office sets up the crew.')+'</p></div></div>','<button type="button" class="secondary td-more" data-view="WORKERS"><span>Workers</span>'+tdGlyph('open')+'</button>');}
-function tdQuick(){const can=p=>account.permissions.includes(p),yard=state.yards[0],sites=state.sites.some(s=>s.status==='ACTIVE');
- const tile=(go,art,title,sub,attr='data-td-go="'+go+'"')=>'<button type="button" class="td-quick-tile" '+attr+'><span class="td-quick-art">'+art+'</span><span class="td-quick-text"><b>'+title+'</b><small>'+sub+'</small></span></button>';
- const tiles=(can('stock.adjust')&&yard?tile('stock',trkPic('spr-bundle'),'Add stock','Receive material into the yard'):'')+(can('requests.create')&&sites?tile('load',trkPic('spr-truck12'),'Book a load','A yard list for a site','data-sch-create'):'')+tile('search','<span class="td-quick-glass">'+tdGlyph('search')+'</span>','Search','Stillages, materials, sites…');
- return '<section class="panel td-card td-quick" id="td-quick" aria-labelledby="td-quick-h"><h2 id="td-quick-h" class="td-quick-h">Quick actions</h2><div class="td-quick-grid">'+tiles+'</div></section>';}
-function tdView(){const d=tdDay(state);return '<div class="page-today">'+tdHero(d)+'<div class="td-grid"><div class="td-col td-main">'+tdLoadsCard(d)+tdLateCard(d)+tdReturnsCard(d)+tdTrucksCard(d)+'</div><div class="td-col td-side">'+tdQuick()+tdAlertsCard(d)+tdCrewCard(d)+'</div></div></div>';}
-function tdGo(k){if(k==='search'){if(gsPhone())document.querySelector('#gs .gs-open')?.click();else{const i=document.getElementById('gs-input');if(i){i.focus();i.select();}}return;}
- if(k==='stock'&&schGo('MATERIALS')){const el=document.getElementById('intake');if(el){el.scrollIntoView({block:'start'});alFlash(el);}}}
-function tdBind(){const calm=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
- document.querySelectorAll('[data-td-jump]').forEach(b=>b.onclick=()=>{const el=document.getElementById('td-'+b.dataset.tdJump);if(!el)return;el.scrollIntoView({block:'start',behavior:calm?'auto':'smooth'});el.classList.add('td-flash');setTimeout(()=>el.classList.remove('td-flash'),1400);});
- document.querySelectorAll('[data-td-go]').forEach(b=>b.onclick=()=>tdGo(b.dataset.tdGo));
- action('[data-td-crew="next"]',()=>command('nextJob',{yard:state.yards[0].id}).then(r=>notify(r.message)));
- action('[data-td-crew="auto"]',async()=>{const list=state.resources.filter(r=>r.type==='WORKER'&&r.location===state.yards[0].id&&!r.mountedOn&&!r.task&&(r.workerMode==='HOLD'||r.workerMode==='MOVING'));for(const w of list)await command('workerCommand',{id:w.id,order:'AUTO'});notify(list.length?(list.length===1?'1 worker is':list.length+' workers are')+' back on automatic.':'Everyone is already on automatic.');});}
-export const tdTest={day:s=>tdDay(s),view:()=>tdView(),viewFrom:v=>tdViewFrom(v),returns:(s,t)=>tdReturns(s,t),date:d=>tdDateWords(d)};
 
 // ----- Company details for paperwork (bd*): the owner's card on the Account page (bdCard / bdBind, hooked from app.js), the header every printed sheet carries
 // (bdHead, called by prHead), and the logo in the top bar. The details come from GET /api/company-details (any member may read them; only an owner saves them,
@@ -2703,7 +3044,7 @@ function cwHero(){const w=cwW(),yard=state.yards.find(y=>y.id===w?.location),cre
  const time=loading?stat('cw-s-time','Job time','…','Time on yard jobs'):t.workMs==null?stat('cw-s-time','Job time','–','Not recorded here'):stat('cw-s-time','Job time',cwDur(t.workMs),'Time on yard jobs today');
  const onJob=n?.kind==='job'||n?.kind==='move',lab=onJob?'This job':'Now';
  const prog=n?.progress!=null?stat('cw-s-prog',lab,n.progress+'%',esc(cwLeftText(n)),n.progress):n?.walking?stat('cw-s-prog',lab,'Walking',esc(cwLeftText(n)),null,true):stat('cw-s-prog',lab,n?.kind==='drive'?'Driving':n?.kind==='hold'?'On hold':'Idle',n?.kind==='drive'?'Manual driving':n?.kind==='hold'?'No jobs until released':'Ready for work',null,true);
- return '<section class="cw-hero page-hero cw-'+st.key+'"><div class="cw-bar">'+back+sw+'</div><div class="cw-id"><span class="cw-portrait">'+cwScene(w,st)+'</span><div class="cw-id-text"><div class="eyebrow">SCAFFOLD / CREW &middot; '+esc(yard?.name??name(w.location))+'</div><h1>'+esc(w.name)+'</h1><span class="cw-pill"><i aria-hidden="true"></i>'+esc(st.label)+'</span><p class="cw-detail">'+esc(st.detail)+'</p></div></div><div class="cw-hud" role="group" aria-label="'+esc(w.name)+' today">'+done+time+prog+'</div>'+heroBanner()+'</section>';}
+ return '<section class="cw-hero page-hero cw-'+st.key+'"><div class="cw-bar">'+back+sw+'</div><div class="cw-id"><span class="cw-portrait">'+cwScene(w,st)+'</span><div class="cw-id-text"><div class="eyebrow">SCAFFOLD / CREW &middot; '+esc(yard?.name??name(w.location))+'</div><h1>'+esc(w.name)+'</h1>'+(cwDayFor===cwWorker&&cwDay?.roleWords?'<p class="cw-role">'+esc(cwDay.roleWords)+'</p>':'')+'<span class="cw-pill"><i aria-hidden="true"></i>'+esc(st.label)+'</span><p class="cw-detail">'+esc(st.detail)+'</p></div></div><div class="cw-hud" role="group" aria-label="'+esc(w.name)+' today">'+done+time+prog+'</div>'+heroBanner()+'</section>';}
 const cwCard=(cls,art,title,sub,body,extra='')=>'<section class="panel cw-card '+cls+'" aria-labelledby="'+cls+'-h"><div class="cw-head"><span class="cw-badge">'+art+'</span><div class="cw-head-text"><h2 id="'+cls+'-h">'+title+'</h2>'+(sub?'<p>'+sub+'</p>':'')+'</div>'+extra+'</div>'+body+'</section>';
 // The Now pill uses the hero's words for a state (Idle, On hold, Walking, Driving forklift); a job or a move says which kind it is.
 const CW_KIND={move:['Forklift move','load'],job:['Yard job','job'],drive:['Driving forklift','drive'],walk:['Walking','walk'],hold:['On hold','hold'],idle:['Idle','idle']};
@@ -2816,12 +3157,12 @@ function cwControls(){const w=cwW();if(!w||!isOps())return '';const yard=state.y
    return '<button type="button" class="cw-menu-row'+(ok?'':' is-gone')+'" data-cw-mount="'+esc(id)+'"'+(ok?'':' disabled')+'><span class="cw-rank fork" aria-hidden="true">'+sprite('spr-forklift')+'</span><span><b>'+esc(f?.name??'Forklift')+'</b><small>'+(!f?'Removed':!ok?'In use now':(i===0?'Nearest when you opened this &middot; ':'')+(d(f)?Math.max(1,Math.round(d(f)/1000))+' m away':'Right here'))+'</small></span></button>';}).join('')+close+'</div>';}
  return cwCard('cw-ctl',cwGlyph('assign'),'Orders','Same orders as the Workers page (Hold here is Stop there).','<div class="cw-btns">'+bAuto+bHold+bAssign+bFork+'</div>'+menu+(w.workerReason?'<p class="error-text cw-note">'+esc(w.workerReason)+'</p>':''));}
 // Page order: the hero, then Orders (for the office; a yard hand without orders sees Now straight after the hero), Now with the map, Likely next, Done today.
-export function cwView(){parts=new Map();pageHeroShown=true;wkDefs();cwBindOnce();cwDayLoad(false);
- return '<div class="page-crew">'+part('cwHero','#view .cw-hero',cwHero,true)+part('cwCtl','#view .cw-ctl',()=>cwControls()||'<i class="cw-ctl" hidden></i>',true)+part('cwNow','#view .cw-now',cwNowCard,true)+part('cwNext','#view .cw-next',()=>cwNextCard()||'<i class="cw-next" hidden></i>',true)+part('cwToday','#view .cw-today',()=>cwTodayCard()||'<i class="cw-today" hidden></i>',true)+'</div>';}
+export function cwView(){if(cwDriver)return cwDriverView();parts=new Map();pageHeroShown=true;wkDefs();cwBindOnce();tdBindOnce();cwDayLoad(false);
+ return '<div class="page-crew">'+part('cwHero','#view .cw-hero',cwHero,true)+part('cwMsgs','#view .cw-msgs',cwMsgsCard,true)+part('cwCtl','#view .cw-ctl',()=>cwControls()||'<i class="cw-ctl" hidden></i>',true)+part('cwNow','#view .cw-now',cwNowCard,true)+part('cwNext','#view .cw-next',()=>cwNextCard()||'<i class="cw-next" hidden></i>',true)+part('cwToday','#view .cw-today',()=>cwTodayCard()||'<i class="cw-today" hidden></i>',true)+'</div>';}
 // A poll on the crew page: rebuild only the cards whose HTML changed (morphed, so the map's figures glide and focus stays); anything odd falls back to render().
 // Focus is put back by the button's own key (the job, forklift or order it stands for), never by its position in the card.
 const CW_KEYS=['data-cw-assign','data-cw-mount','data-cw-cmd','data-cw-menu','data-cw-next','data-cw-more','data-cw-close','data-cw-open','data-cw-back'];
-function cwPatch(){if(!parts||view!=='CREW'||deferRender||!onPage())return false;cwDayLoad(false);const todo=[];
+function cwPatch(){if(!parts||view!=='CREW'||deferRender||!onPage())return false;cwDayLoad(false);if(cwDriver)cwPersonLoad(false);const todo=[];
  for(const p of parts.values()){const html=p.fn();if(html===p.html)continue;if(!p.sel||!html||!p.html)return false;let els;try{els=document.querySelectorAll(p.sel);}catch{return false;}if(els.length!==1)return false;todo.push([p,els[0],html]);}
  if(!todo.length){patchVolatile();return true;}
  const act=document.activeElement,fk=act&&act!==document.body&&act.closest?.('.page-crew')?CW_KEYS.find(k=>act.hasAttribute(k)):null,fv=fk?act.getAttribute(fk):null;
@@ -2837,12 +3178,12 @@ function cwTick(){if(typeof document==='undefined')return;const w=cwW();if(!w)re
  document.querySelectorAll('#view [data-cw-left]').forEach(el=>{const v=cwLeftText(n);if(el.textContent!==v)el.textContent=v;});
  if(t.workMs!=null)document.querySelectorAll('#view [data-cw-work]').forEach(el=>{el.textContent=cwDur(t.workMs);});}
 // Today's records: fetched on opening, when the worker's job or move changes, and every 30 s.
-function cwDayLoad(force){if(typeof document==='undefined'||!api||!cwWorker||cwDayBusy)return;const id=cwWorker,w=cwW();if(!w){return;}const sig=id+'|'+(w.job??'')+'|'+(w.task??'');
+function cwDayLoad(force){if(typeof document==='undefined'||!api||!cwWorker||cwDayBusy)return;const id=cwWorker,w=cwW();if(!w){return;}const sig=id+'|'+(w.job??'')+'|'+(w.task??'')+'|'+(state?.plan?.rev??'');
  if(!force&&cwDayFor===id&&sig===cwDaySig&&Date.now()-cwDayAt<30000)return;cwDayBusy=true;cwDaySig=sig;
  api('crew-day?worker='+encodeURIComponent(id)).then(d=>{cwDay=d;cwDayErr=null;},e=>{if(cwDayFor!==id)cwDay=null;cwDayErr=e.message||'not available';}).finally(()=>{cwDayFor=id;cwDayBusy=false;cwDayAt=Date.now();if(view==='CREW'&&cwWorker===id)cwRedraw();});}
 const cwHref=id=>location.pathname+'?view=CREW&worker='+encodeURIComponent(id)+location.hash;
 // Opening from another page adds a browser history entry, so the phone's Back button returns to that page; switching workers replaces it.
-function cwOpen(id,{pop=false}={}){if(!id||!leaveEditor())return;const entering=view!=='CREW';if(entering)cwFrom=view;if(cwWorker!==id){cwMenu=null;cwCrop=null;cwDay=null;cwDayFor=null;cwDayErr=null;cwDaySig='';}
+function cwOpen(id,{pop=false}={}){if(!id||!leaveEditor())return;const entering=view!=='CREW';cwDriver=null;cwNo=null;cwReason=null;cwChange.clear();if(entering)cwFrom=view;if(cwWorker!==id){cwMenu=null;cwCrop=null;cwDay=null;cwDayFor=null;cwDayErr=null;cwDaySig='';}
  if(entering&&!pop&&typeof history!=='undefined'&&typeof location!=='undefined')try{history.pushState({cw:id},'',cwHref(id));cwPushed=true;}catch{}
  cwWorker=id;view='CREW';selected=null;pinnedSite=null;heldSite=null;returnView=null;if(workerMoveMode!=='PLACE')workerMoveMode=false;layoutDraft=null;layoutCheck=null;render();if(typeof scrollTo==='function')scrollTo({top:0});cwDayLoad(true);if(poll)schedulePoll();}
 function cwLeave(pop=false){if(!pop&&cwPushed&&typeof history!=='undefined'){cwPushed=false;try{history.back();}catch{}setTimeout(()=>{if(view==='CREW')cwLeave(true);},600);return;}
@@ -2864,12 +3205,61 @@ function cwBindOnce(){if(cwBound||typeof document==='undefined')return;cwBound=t
   else if(t.dataset.cwAssign){const j=(state.jobs??[]).find(x=>x.id===t.dataset.cwAssign);cwAct(t,()=>command('assignJob',{id:t.dataset.cwAssign,worker:w.id}),who+': '+(j?.title??'job')+'.');}
   else if(t.dataset.cwNext!==undefined)cwAct(t,()=>command('nextJob',{id:w.id}),r=>who+': '+(r?.title??'next job')+'.');
   else if(t.dataset.cwMount){const f=state.resources.find(x=>x.id===t.dataset.cwMount);cwAct(t,()=>command('workerCommand',{id:w.id,order:'MOUNT',forklift:t.dataset.cwMount}),who+' is walking to '+(f?.name??'the forklift')+'.');}});}
-function cwDeepLink(){cwBindOnce();if(cwLinked||typeof location==='undefined')return;cwLinked=true;const id=cwLinkFrom(location.search);if(!id)return;view='CREW';cwWorker=id;cwFrom='WORKERS';}
+function cwDeepLink(){cwBindOnce();if(cwLinked||typeof location==='undefined')return;cwLinked=true;const id=cwLinkFrom(location.search);if(!id){const d=cwDriverFrom(location.search);if(d){view='CREW';cwDriver=d;cwFrom='WORKERS';}return;}view='CREW';cwWorker=id;cwFrom='WORKERS';}
 // ?view=CREW&worker=<id> stays in the address while the crew page is open (a shortcut or a shared link opens straight on it); other pages drop it.
 function cwUrlSync(){if(typeof location==='undefined'||typeof history==='undefined')return;const on=!!cwLinkFrom(location.search)||/[?&]view=crew(&|$)/i.test(location.search);
- if(view==='CREW'&&cwWorker){const want='?view=CREW&worker='+encodeURIComponent(cwWorker);if(location.search!==want)try{history.replaceState(history.state,'',location.pathname+want+location.hash);}catch{}}
+ if(view==='CREW'&&(cwWorker||cwDriver)){const want=cwDriver?'?view=CREW&driver='+encodeURIComponent(cwDriver):'?view=CREW&worker='+encodeURIComponent(cwWorker);if(location.search!==want)try{history.replaceState(history.state,'',location.pathname+want+location.hash);}catch{}}
  else{cwPushed=false;if(on)try{history.replaceState(history.state,'',location.pathname+(view==='TODAY'?'?view=TODAY':'')+location.hash);}catch{}}}
 // The selected-worker panel on Home gets its "Crew phone view" button here, after its heading, so workerPanel itself is left as it is.
 const cwPanelBase=workerPanel;
 workerPanel=yard=>{const html=cwPanelBase(yard);if(!selectedWorker||!html.includes('SELECTED WORKER'))return html;const at=html.indexOf('</h2>',html.indexOf('SELECTED WORKER'));return at<0?html:html.slice(0,at+5)+cwPanelButton({id:selectedWorker})+html.slice(at+5);};
-export const cwTest={status:(r,s)=>cwStatus(r,s),now:(s,w)=>cwNow(s,w),likelyNext:(s,id,n)=>cwLikelyNext(s,id,n),today:(d,s,id,now)=>cwToday(d,s,id,now),linkFrom:v=>cwLinkFrom(v),dur:ms=>cwDur(ms),place:(s,l,p)=>cwPlace(s,l,p),priority:(s,l,j)=>cwPriority(s,l,j),crop:(...a)=>cwCropFor(...a),keep:(c,p)=>cwCropKeep(c,p),result:r=>cwResult(r),open(id,from='WORKERS'){cwWorker=id;cwFrom=from;view='CREW';cwMenu=null;cwCrop=null;},setDay(d,err=null){cwDay=d;cwDayFor=d?.worker??cwWorker;cwDayErr=err;},setMenu(m){cwMenu=typeof m==='string'?cwMenuOpen(m):m;},menu:()=>cwMenu,view:()=>cwView(),hero:()=>cwHero(),nowCard:()=>cwNowCard(),next:()=>cwNextCard(),todayCard:()=>cwTodayCard(),controls:()=>cwControls(),panel(yard,id){const was=selectedWorker;selectedWorker=id;try{return workerPanel(yard);}finally{selectedWorker=was;}}};
+
+// ----- Your messages (the crew and driver phone views): what the office asked this person (drive a truck, pack a list, be at a site), with two big
+// buttons, I'll be there / Can't make it (a reason chip, then Send), or Got it for a list to pack. A worker's messages come with GET /api/crew-day,
+// a driver's with GET /api/person?kind=driver (?view=CREW&driver=<id>). Answers post messageAnswer via PHONE_VIEW. -----
+let cwDriver=null,cwPerson=null,cwPersonFor=null,cwPersonAt=0,cwPersonBusy=false,cwPersonRev=null,cwPersonErr=null,cwNo=null,cwReason=null,cwChange=new Set();
+export function cwDriverFrom(search){try{const q=new URLSearchParams(String(search??''));if(String(q.get('view')??'').trim().toUpperCase()!=='CREW')return null;const d=String(q.get('driver')??'').trim();return /^[A-Za-z0-9_-]{1,100}$/.test(d)?d:null;}catch{return null;}}
+function cwMsgs(){if(cwDriver)return cwPersonFor===cwDriver?cwPerson?.messages??null:null;return cwDayFor===cwWorker?cwDay?.messages??null:null;}
+const CW_SUBJECT={DRIVE:'spr-truck12',PACK:'spr-stillage',WORK:'spr-worker'};
+function cwMsgCard(m){const open=m.canAnswer||m.canSee,id=esc(m.id),answered=m.answer==='YES'||m.answer==='NO',changing=cwChange.has(m.id);
+ const meta=[m.siteName,m.dayLabel,m.timeWords].filter(Boolean).map(esc).join(' &middot; ');
+ const dir=m.directions&&open?'<a class="cw-dir" href="'+esc(m.directions)+'" target="_blank" rel="noopener noreferrer">'+cwGlyph('pin')+'<span>Get directions</span></a>':'';
+ let acts='';
+ if(m.canAnswer&&answered&&!changing)acts='<p class="cw-said a-'+m.answer.toLowerCase()+'">'+(m.answer==='YES'?cwGlyph('check'):'')+esc(m.words)+(m.reason?': '+esc(m.reason):'')+'</p><button type="button" class="cw-link" data-cw-change="'+id+'">Change my answer</button>';
+ else if(m.canAnswer&&cwNo===m.id)acts='<div class="cw-why"><p>What’s up? (the office sees this)</p><div class="cw-chips">'+[...TDH_REASONS,'Other'].map(r=>'<button type="button" class="cw-chip'+(cwReason===r?' on':'')+'" data-cw-reason="'+esc(r)+'" aria-pressed="'+(cwReason===r)+'">'+esc(r==='Other'?'Other…':r)+'</button>').join('')+'</div>'
+  +(cwReason==='Other'?'<label class="cw-other"><span>Tell them why</span><input data-cw-reason-text maxlength="200" autocomplete="off"></label>':'')+'<div class="cw-ans-row"><button type="button" class="cw-ans cw-no-send" data-cw-send="'+id+'"'+(cwReason?'':' disabled')+'>Send: can’t make it</button><button type="button" class="cw-link" data-cw-no-x>Back</button></div></div>';
+ else if(m.canAnswer)acts='<div class="cw-ans-row"><button type="button" class="cw-ans cw-yes" data-cw-yes="'+id+'">'+cwGlyph('check')+'<b>I’ll be there</b></button><button type="button" class="cw-ans cw-no" data-cw-no="'+id+'"><b>Can’t make it</b></button></div>';
+ else if(m.canSee)acts='<div class="cw-ans-row"><button type="button" class="cw-ans cw-yes" data-cw-seen="'+id+'">'+cwGlyph('check')+'<b>Got it</b></button></div>';
+ else acts='<p class="cw-said a-'+String(m.answer).toLowerCase()+'">'+esc(m.status==='CALLED_OFF'?'Called off'+(m.calledOffWhy?': '+m.calledOffWhy:''):m.words)+(m.reason&&m.status!=='CALLED_OFF'?': '+esc(m.reason):'')+'</p>';
+ return '<article class="cw-msg'+(open?' is-open':'')+(m.status==='CALLED_OFF'?' is-off':'')+'" data-cw-msg="'+id+'"><div class="cw-msg-top"><span class="cw-msg-art">'+trkPic(CW_SUBJECT[m.subject]??'spr-worker','cw-msg-img')+'</span><div class="cw-msg-meta"><b>'+meta+'</b>'+dir+'</div></div><p class="cw-msg-text">'+esc(m.text)+'</p>'+acts+'</article>';}
+function cwMsgsCard(){const list=cwMsgs(),badge=trkPic(cwDriver?'spr-truck12':'spr-worker');if(!list||!list.length)return cwDriver&&list?cwCard('cw-msgs',trkPic('spr-truck12'),'Your messages','','<p class="cw-plain">No messages yet. When the office books you to drive, it shows here.</p>'):'<i class="cw-msgs" hidden></i>';
+ const open=list.filter(m=>m.canAnswer||m.canSee),rest=list.filter(m=>!(m.canAnswer||m.canSee)).slice(0,5),need=open.filter(m=>(m.canAnswer&&!['YES','NO'].includes(m.answer))||m.canSee).length;
+ return cwCard('cw-msgs',badge,'Your messages'+(need?' <span class="cw-count">'+need+'</span>':''),need?(need===1?'One needs an answer':need+' need an answer'):open.length?'All answered. You can still change your mind.':'Nothing to answer right now.',
+  '<div class="cw-msg-list">'+open.map(cwMsgCard).join('')+(rest.length?'<h3 class="cw-msg-old">Earlier</h3>'+rest.map(cwMsgCard).join(''):'')+'</div>');}
+function cwMsgClick(t){const d=t.dataset;
+ if(d.cwYes!==undefined){cwAct(t,()=>command('messageAnswer',{id:d.cwYes,yes:true,via:'PHONE_VIEW'}),r=>{cwChange.delete(d.cwYes);cwNo=null;cwMsgReload();return r?.message;});return;}
+ if(d.cwNo!==undefined){cwNo=d.cwNo;cwReason=null;cwRedraw();return;}
+ if(d.cwNoX!==undefined){cwNo=null;cwReason=null;cwRedraw();return;}
+ if(d.cwChange!==undefined){cwChange.add(d.cwChange);cwRedraw();return;}
+ if(d.cwReason!==undefined){cwReason=d.cwReason;cwRedraw();if(cwReason==='Other')requestAnimationFrame(()=>document.querySelector('[data-cw-reason-text]')?.focus());return;}
+ if(d.cwSend!==undefined){const other=document.querySelector('[data-cw-reason-text]')?.value?.trim(),reason=cwReason==='Other'?(other||'Something’s come up'):cwReason;cwAct(t,()=>command('messageAnswer',{id:d.cwSend,yes:false,reason,via:'PHONE_VIEW'}),r=>{cwChange.delete(d.cwSend);cwNo=null;cwReason=null;cwMsgReload();return r?.message;});return;}
+ if(d.cwSeen!==undefined)cwAct(t,()=>command('messageSeen',{id:d.cwSeen}),r=>{cwMsgReload();return r?.message;});}
+function cwMsgReload(){if(cwDriver){cwPersonAt=0;setTimeout(()=>cwPersonLoad(true),0);}else{cwDayAt=0;setTimeout(()=>cwDayLoad(true),0);}}
+// The driver's own page: the same shell as a worker's (?view=CREW&driver=<id>), with their messages and their truck today.
+function cwPersonLoad(force){if(typeof document==='undefined'||!api||!cwDriver||cwPersonBusy)return;const id=cwDriver,rev=state?.plan?.rev??null;if(!force&&cwPersonFor===id&&rev===cwPersonRev&&Date.now()-cwPersonAt<10000)return;cwPersonBusy=true;cwPersonRev=rev;
+ api('person?kind=driver&id='+encodeURIComponent(id)).then(d=>{cwPerson=d;cwPersonErr=null;},e=>{cwPerson=null;cwPersonErr=e.message||'Not available';}).finally(()=>{cwPersonFor=id;cwPersonBusy=false;cwPersonAt=Date.now();if(view==='CREW'&&cwDriver===id)cwRedraw();});}
+function cwDriverHero(){const d=cwPersonFor===cwDriver?cwPerson:null,p=d?.person,t=d?.today;
+ const back='<button type="button" class="cw-back" data-cw-back aria-label="Back to '+esc(cwFromName())+'">'+cwGlyph('back')+'<span class="cw-back-long">'+esc(cwFromName())+'</span><span class="cw-back-short" aria-hidden="true">Back</span></button>';
+ const detail=!d?(cwPersonErr?esc(cwPersonErr):'Loading…'):t?.truck?'Driving '+esc(t.truck.name)+' today from '+esc(t.timeWords):t?'Booked to drive today from '+esc(t.timeWords):'No truck booked for you today.';
+ return '<section class="cw-hero page-hero cw-idle cw-driver-hero"><div class="cw-bar">'+back+'</div><div class="cw-id"><span class="cw-portrait cw-portrait-truck">'+trkPic('spr-truck12','cw-truck-pic')+'</span><div class="cw-id-text"><div class="eyebrow">SCAFFOLD / DRIVER &middot; '+esc(account.company?.name??'')+'</div><h1>'+esc(p?.name??'Driver')+'</h1><span class="cw-pill"><i aria-hidden="true"></i>Driver</span><p class="cw-detail">'+detail+'</p></div></div></section>';}
+function cwTruckCard(){const d=cwPersonFor===cwDriver?cwPerson:null,t=d?.today;if(!d)return '<i class="cw-truck" hidden></i>';
+ if(!t?.truck)return cwCard('cw-truck',trkPic('spr-truck2'),'Your truck today','','<p class="cw-plain">'+(t?'The truck turns up at the yard at 6:00 am.':'Nothing booked for you today. The office sends you a message when it is.')+'</p>');
+ const trips=t.trips??[],TW={IN_TRANSIT:'On the road',DELIVERED:'Delivered',UNLOADING:'Unloading',LOADED:'Loaded'};
+ return cwCard('cw-truck',trkPic('spr-truck12'),'Your truck today',esc(t.truck.name)+' &middot; '+esc(t.truck.where),trips.length?'<ol class="cw-dones">'+trips.map(x=>'<li class="cw-done"><time datetime="'+esc(x.at)+'">'+esc(cwClock(x.at))+'</time><span class="cw-done-text"><b>To '+esc(x.toName)+'</b><small>'+(x.stillages===1?'1 stillage':x.stillages+' stillages')+' &middot; '+esc(TW[x.status]??String(x.status).toLowerCase().replaceAll('_',' '))+'</small></span></li>').join('')+'</ol>':'<p class="cw-plain">No trips yet today.</p>');}
+function cwDriverView(){parts=new Map();pageHeroShown=true;cwBindOnce();tdBindOnce();cwPersonLoad(false);
+ return '<div class="page-crew cw-driver-page">'+part('cwHero','#view .cw-hero',cwDriverHero,true)+part('cwMsgs','#view .cw-msgs',cwMsgsCard,true)+part('cwTruck','#view .cw-truck',cwTruckCard,true)+'</div>';}
+function cwOpenDriver(id){if(!id||!leaveEditor())return;const entering=view!=='CREW';if(entering)cwFrom=view;if(cwDriver!==id){cwPerson=null;cwPersonFor=null;cwNo=null;cwReason=null;cwChange.clear();}
+ if(entering&&typeof history!=='undefined'&&typeof location!=='undefined')try{history.pushState({cwd:id},'',location.pathname+'?view=CREW&driver='+encodeURIComponent(id)+location.hash);cwPushed=true;}catch{}
+ cwDriver=id;cwWorker=null;view='CREW';cwMenu=null;selected=null;pinnedSite=null;heldSite=null;returnView=null;render();if(typeof scrollTo==='function')scrollTo({top:0});cwPersonLoad(true);if(poll)schedulePoll();}
+export const cwMsgTest={card:()=>cwMsgsCard(),driver(id,data){cwDriver=id;cwWorker=null;view='CREW';cwPerson=data;cwPersonFor=data?id:null;},worker(){cwDriver=null;},no(id,reason=null){cwNo=id;cwReason=reason;},driverView:()=>cwDriverView(),linkFrom:v=>cwDriverFrom(v)};
+export const cwTest={status:(r,s)=>cwStatus(r,s),now:(s,w)=>cwNow(s,w),likelyNext:(s,id,n)=>cwLikelyNext(s,id,n),today:(d,s,id,now)=>cwToday(d,s,id,now),linkFrom:v=>cwLinkFrom(v),dur:ms=>cwDur(ms),place:(s,l,p)=>cwPlace(s,l,p),priority:(s,l,j)=>cwPriority(s,l,j),crop:(...a)=>cwCropFor(...a),keep:(c,p)=>cwCropKeep(c,p),result:r=>cwResult(r),open(id,from='WORKERS'){cwDriver=null;cwWorker=id;cwFrom=from;view='CREW';cwMenu=null;cwCrop=null;},setDay(d,err=null){cwDay=d;cwDayFor=d?.worker??cwWorker;cwDayErr=err;},setMenu(m){cwMenu=typeof m==='string'?cwMenuOpen(m):m;},menu:()=>cwMenu,view:()=>cwView(),hero:()=>cwHero(),nowCard:()=>cwNowCard(),next:()=>cwNextCard(),todayCard:()=>cwTodayCard(),controls:()=>cwControls(),panel(yard,id){const was=selectedWorker;selectedWorker=id;try{return workerPanel(yard);}finally{selectedWorker=was;}}};

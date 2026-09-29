@@ -26,3 +26,6 @@ export function chipOf(e){
   if(e.kind==='collection')return {kind:'COLLECTION',...CHIP_KINDS.COLLECTION,label:'Back ← '+(e.siteName??'site')};
   if(e.kind==='loadList'||e.kind==='request')return {kind:'LOAD',...CHIP_KINDS.LOAD,label:'Load → '+(e.siteName??'site')};
   return {kind:'DELIVERED',...CHIP_KINDS.DELIVERED,label:'Delivered '+(e.siteName??'')};}
+// The planner's times of day (5:00 am to 5:00 pm every half hour, as src/domain/plantime.js) and their words: '07:00' -> '7:00 am'.
+export const PLAN_TIMES=[];for(let h=5;h<=17;h++)for(const m of ['00','30'])if(h<17||m==='00')PLAN_TIMES.push(String(h).padStart(2,'0')+':'+m);
+export const planTimeWords=hm=>{const [h,m]=String(hm??'07:00').split(':').map(Number);return ((h+11)%12+1)+':'+String(m).padStart(2,'0')+' '+(h<12?'am':'pm');};

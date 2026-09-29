@@ -139,7 +139,8 @@ export const planMethods={
       if(packer){it.packer=packer.id;it.packMessage=this.planAskPerson(it,packer.id,'worker','PACK',now);this.planLog(it,packer.name+' has been asked to pack it.',now);}else this.planLog(it,'No yardsman in the team, so nobody was sent a message.',now);
       it.stage='PACKING';if(jobsOff&&this.planPack(it,now))this.planLog(it,'Packed by the office (yard jobs are switched off).',now);}
     if(it.stage==='PACKING'&&due){if(this.planPack(it,now))this.planLog(it,"Packed by the office so the truck isn't held up.",now);}
-    if(it.stage==='PACKING'&&!(it.held??[]).length)problem='Nothing on the list is free in the yard right now.';
+    // only once someone has tried to pack it (at its time, or by the office when yard jobs are off): until then the crew's PACK job is on the board
+    if(it.stage==='PACKING'&&!(it.held??[]).length&&(due||jobsOff))problem='Nothing on the list is free in the yard right now.';
     // held stillages that are no longer in the yard (moved by hand, removed): off the list
     if((it.left??[]).length){const keep=[];for(const id of it.left){let c=null;try{c=this.repo.get(id,'container');}catch{}if(c&&!c.retired&&c.location===yard.id)keep.push(id);else{this.planRelease(it,now,[id]);this.planLog(it,(c?.name??'A stillage')+' is no longer in the yard, so it was taken off the list.',now);}}it.left=keep;}
     // follow the trips: on the road, then delivered

@@ -17,7 +17,7 @@ export function createApp(db,{backups=null}={}) {
   // The installable app (Today page): the web app manifest and its icons (PNG files made once by scripts/make-icons.js).
   Object.assign(assets,{'/manifest.webmanifest':['manifest.webmanifest','application/manifest+json'],...Object.fromEntries(['icon-32','icon-192','icon-512','icon-maskable-512','apple-touch-icon'].map(n=>['/icons/'+n+'.png',['icons/'+n+'.png','image/png']]))});
   Object.assign(assets,{'/game.js':['game.js','text/javascript'],'/game-art.js':['game-art.js','text/javascript'],'/game-pick.js':['game-pick.js','text/javascript'],'/game-finish.js':['game-finish.js','text/javascript'],'/game.css':['game.css','text/css']});// the game board
-  assets['/plan-cal.js']=['plan-cal.js','text/javascript'];// the Today calendar's grid and chips (shared with src/domain/today.js)
+  Object.assign(assets,{'/plan-cal.js':['plan-cal.js','text/javascript']});// the Today calendar's grid and chips (shared with src/domain/today.js)
   return createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff'); res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
