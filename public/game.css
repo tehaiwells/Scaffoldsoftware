@@ -360,7 +360,7 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 /* the new-site window: the sites already on the map */
 .sf-nw{width:100%;margin-top:8px;padding-top:10px;border-top:1px solid var(--gm-line);text-align:left}
 .gm-nw p.sf-nw-h{margin:0 0 6px;font-size:12.5px;font-weight:750;color:var(--gm-soft)}
-.sf-nw-list{list-style:none;margin:0;padding:0;display:grid;gap:5px;max-height:188px;overflow-y:auto}
+.sf-nw-list{list-style:none;margin:0;padding:0;display:grid;gap:5px;max-height:206px;overflow-y:auto}
 .sf-nw-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 4px 10px;border-radius:9px;background:#ffffff08}
 .sf-nw-list li.sf-open{flex-direction:column;align-items:stretch;padding:6px}
 .sf-nw-list li.sf-open .sf-box{margin-top:0}
@@ -393,3 +393,15 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 .sf-done-name small{display:block;color:#5b7466;font-size:12.5px;overflow-wrap:anywhere}
 .sf-done-list button{flex:none;margin:0}
 @media (max-width:760px){.sf-box p{font-size:14px}.sf-done-list li{flex-wrap:wrap}.page-sites .si-actions .sf-office{margin-left:0}.page-sites .si-actions .sf-office .si-archive{width:100%;justify-content:center}}
+/* review fixes: "Remove site" in full on the small tiles (two short lines), the Removing line, the Office Undo pop, the stocktake it points at */
+.gm .sf-tile .sf-rm-tile{height:auto;min-height:30px;padding:3px 4px;gap:4px;font-size:11px;line-height:1.1;text-align:left}
+.gm .sf-tile .sf-rm-tile span{max-width:40px}
+.gm .sf-nw-list .sf-rm-tile{padding:0 9px}
+.sf-txt .sf-left{display:block;font-size:14px;font-weight:800}
+.sf-txt b+.sf-left{margin-top:2px;font-size:12.5px;font-weight:700;color:var(--gm-soft)}
+.sf-office .sf-txt b+.sf-left{color:#5b7466}
+.sf-fixrow{display:flex;margin-top:6px}
+.sf-fixrow .gm-go{height:36px;padding:0 14px;font-size:13.5px}
+.sf-office .sf-txt .sf-stuck{color:#8a4a15}
+.sf-float{position:fixed;top:calc(14px + env(safe-area-inset-top,0px));z-index:70}
+.sf-focus{outline:3px solid #f0a81c;outline-offset:3px;transition:outline-color .6s}

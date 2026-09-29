@@ -61,6 +61,12 @@ test('Remove site: undo a new site, remove a practice site from its tile and und
   await office(page,'Client sites').click();const prac=(await state(page)).sites.find(s=>s.name==='Practice'&&s.status==='ACTIVE');
   await page.locator('#si-site-'+prac.id).getByRole('button',{name:'Remove site'}).click();
   await expect.poll(async()=>(await state(page)).sites.some(s=>s.id===prac.id),{timeout:20000}).toBe(false);
+  // the Office has its Undo too: the very same site comes back
+  const pop=page.locator('.sf-float .sf-pop').filter({hasText:'Practice removed'});await expect(pop).toBeVisible();await pop.getByRole('button',{name:'Undo'}).click();
+  await expect.poll(async()=>(await state(page)).sites.find(s=>s.id===prac.id)?.status,{timeout:20000}).toBe('ACTIVE');
+  await expect(page.locator('#si-site-'+prac.id).getByRole('button',{name:'Remove site'})).toBeVisible({timeout:20000});
+  await page.locator('#si-site-'+prac.id).getByRole('button',{name:'Remove site'}).click();
+  await expect.poll(async()=>(await state(page)).sites.some(s=>s.id===prac.id),{timeout:20000}).toBe(false);
   const list=page.locator('#si-finished');await expect(list.getByRole('heading',{name:'Removed / finished sites'})).toBeVisible();
   await list.getByRole('button',{name:'Open again'}).click();await expect.poll(async()=>(await state(page)).sites.find(s=>s.id===site.id).status,{timeout:20000}).toBe('ACTIVE');
   await page.getByRole('button',{name:'Back to the yard',exact:true}).click();await expect(bar).toBeVisible();await expect(page.locator('[data-wm-site="'+site.id+'"]')).toHaveCount(1,{timeout:20000});

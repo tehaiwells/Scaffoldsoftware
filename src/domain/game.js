@@ -19,7 +19,7 @@ import { active } from './inventory.js';
 import { cached,savepoint } from '../database.js';
 import { RT_EDITABLE } from './collections.js';
 import { gpChoose,gpPerStillage } from '../../public/game-pick.js';
-import { siteFinishMethods,SF_OPS,SF_FINISH_PROBE } from './sitefinish.js';
+import { siteFinishMethods,SF_OPS,SF_FINISH_PROBE,sfGuard } from './sitefinish.js';
 export const GAME_OPS=['gameStart','gameSite','gameCatalogue','gameAddStock','gameSend','gameCollect','gameStop','gameCancel',...SF_OPS];
 export const GAME_SIZES={S:{w:20000,d:16000,name:'Small yard'},M:{w:30000,d:20000,name:'Medium yard'},L:{w:40000,d:25000,name:'Large yard'}};
 const TRUCK_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='truck' AND json_type(data,'$.game')='object' LIMIT 1",ORDER_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='gameOrder' LIMIT 1";
@@ -131,11 +131,13 @@ export const gameMethods={
     // a board truck already on its way to bring things back from this site: everything is being fetched already, or the rest waits for it
     const going=this.repo.all('truck').filter(t=>t.game?.kind==='COLLECT'&&t.game.site===site.id).map(t=>{try{return this.repo.get(t.game.collection,'collection');}catch{return null;}}).filter(o=>o&&OPEN_RT.includes(o.status));
     requireRule(!going.some(o=>o.scope==='ALL'),'A truck is already on its way to bring everything back from '+site.name+'.');
-    if(going.length&&input.all&&!input.fromQueue)return this.gameWait('COLLECT',site,{all:true},'A truck is already on its way to '+site.name+'. Another goes back for the rest once it has loaded.');
+    if(going.length&&input.all&&!input.fromQueue)return this.gameWait('COLLECT',site,{all:true,...(input.byRemove?{byRemove:true}:{})},'A truck is already on its way to '+site.name+'. Another goes back for the rest once it has loaded.');
     let scope='ALL',containers;if(!input.all){const lines=lineList(input.lines),items=this.gameItems([site.id]).get(site.id),pick=gpChoose(items,lines);notYet(pick.ids.length,'None of that can be lifted at '+site.name+' right now.');scope='SELECTED';containers=pick.ids;}
     if(scope==='ALL')requireRule(this.containers().some(c=>c.location===site.id),'Nothing is on '+site.name+' to bring back.');
-    const trucks=this.gameFreeTrucks(yard);if(!trucks.length){requireRule(!input.fromQueue,'Every truck is busy.');return this.gameWait('COLLECT',site,scope==='ALL'?{all:true}:{lines:lineList(input.lines)});}const t=trucks.find(x=>x.id===input.truck)??trucks[0];
-    const o=this.requestCollection({site:site.id,scope,containers,neededOn:this.calendar().today,truck:t.id,notes:'Bring back from the yard board'});
+    const trucks=this.gameFreeTrucks(yard);if(!trucks.length){requireRule(!input.fromQueue,'Every truck is busy.');return this.gameWait('COLLECT',site,{...(scope==='ALL'?{all:true}:{lines:lineList(input.lines)}),...(input.byRemove?{byRemove:true}:{})});}const t=trucks.find(x=>x.id===input.truck)??trucks[0];
+    let o=this.requestCollection({site:site.id,scope,containers,neededOn:this.calendar().today,truck:t.id,notes:'Bring back from the yard board'});
+    // one the Remove site button asked for (sitefinish.js): Keep it calls off only these
+    if(input.byRemove){o=this.repo.get(o.id,'collection');o.byRemove=true;this.repo.save(o);}
     this.gameCrew(site);this.dispatch({id:t.id,destination:site.id});
     const f=this.repo.get(t.id,'truck');f.game={kind:'COLLECT',site:site.id,collection:o.id,stage:'OUTBOUND',since:new Date().toISOString(),problem:null,retryAt:null};this.repo.save(f);
     return {truck:{id:t.id,name:t.name},collection:o.id,message:t.name+' is on its way to '+site.name+' to bring '+(scope==='ALL'?'everything':'it')+' back.'};},
@@ -151,8 +153,8 @@ export const gameMethods={
   gameOrders(){const yard=this.repo.all('yard')[0];if(!yard)return;
     // a Bring back waits while a board truck is still on its way to that site or loading there (the site crane is busy with it)
     const atSite=new Set(this.repo.all('truck').filter(t=>t.game?.kind==='COLLECT'&&['OUTBOUND','LOADING'].includes(t.game.stage)).map(t=>t.game.site));
-    for(const o of this.repo.all('gameOrder').sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))){if(!this.gameFreeTrucks(yard).length)return;if(o.type==='COLLECT'&&atSite.has(o.site))continue;
-      try{savepoint(this.db,'game_order',()=>{if(o.type==='SEND')this.gameSend({site:o.site,lines:o.lines,fromQueue:true});else this.gameCollect({site:o.site,all:o.all,lines:o.lines,fromQueue:true});this.repo.remove(o.id,'gameOrder');this.rtSync();});}
+    for(const o of this.repo.all('gameOrder').sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))){if(!this.gameFreeTrucks(yard).length)return;if(o.type==='COLLECT'&&atSite.has(o.site))continue;if(o.byRemove&&this.sfHeld(o.site))continue;
+      try{savepoint(this.db,'game_order',()=>{if(o.type==='SEND')this.gameSend({site:o.site,lines:o.lines,fromQueue:true});else this.gameCollect({site:o.site,all:o.all,lines:o.lines,fromQueue:true,byRemove:!!o.byRemove});this.repo.remove(o.id,'gameOrder');this.rtSync();});}
       catch(error){if(!error.status){logError('game_order_error',{order:o.id,message:error.message});return;}if(error.wait)continue;this.repo.remove(o.id,'gameOrder');let name='the site';try{name=this.repo.get(o.site,'site').name;}catch{}this.notify('Not sent',(o.type==='SEND'?'Sending to '+name+' was dropped: ':'Bringing back from '+name+' was dropped: ')+error.message,o.site);}}},
   // Stop the autopilot for one truck (the Office pages then run it by hand, as before).
   gameStop(input){const t=this.repo.get(input?.id,'truck');requireRule(t.game,t.name+' is not on an automatic trip.');t.game=null;this.repo.save(t);return {ok:true,message:t.name+' is now run by hand from its truck page.'};},
@@ -169,27 +171,31 @@ export const gameMethods={
     const set=patch=>{const f=this.repo.get(t.id,'truck');f.game=patch===null?null:{...f.game,...patch,problem:null,retryAt:null};this.repo.save(f);};
     const siteName=()=>{try{return this.repo.get(g.site,'site').name;}catch{return 'the site';}};
     const home=()=>this.dispatch({id:t.id,destination:t.yard});
+    // a Send turned back for a removal that was then called off (Keep it): the owner is told it was not made
+    const end=()=>{if(g.diverted){let s=null;try{s=this.repo.get(g.site,'site');}catch{}if(s?.status==='ACTIVE'&&!s.finishing)this.notify('Not sent','The load for '+s.name+' came back to the yard. Send it again if it is still needed.',s.id);}return set(null);};
     if(loading||unloading){if(g.problem)set({});return;}// the crew is on it
     if(g.kind==='SEND'){
       if(g.stage==='LOADING'){if(t.status!=='AT_YARD')return set(null);if(!cargo){this.notify('Nothing to send',t.name+' had nothing loaded for '+siteName()+'.',g.site);return set(null);}
         // the site is being removed: the load never leaves; it is unloaded back into the yard (below)
-        if(this.sfFinishing(g.site)){const f=this.repo.get(t.id,'truck');f.destination=null;this.repo.save(f);return set({stage:'RETURNING'});}
+        if(this.sfFinishing(g.site)){const f=this.repo.get(t.id,'truck');f.destination=null;this.repo.save(f);return set({stage:'RETURNING',diverted:true});}
         this.dispatch({id:t.id,destination:g.site});
         // the run is the day's record of a board Send (it has no yard list): marked, with its pieces, for Today and the Schedule
         const d=this.repo.get(this.repo.get(t.id,'truck').delivery,'delivery');d.game='SEND';d.pieces=d.containers.reduce((n,id)=>n+this.repo.lines(id).reduce((k,l)=>k+l.quantity,0),0);this.repo.save(d);
         return set({stage:'DRIVING'});}
-      if(g.stage==='DRIVING'||g.stage==='UNLOADING'){if(t.status!=='AT_SITE'||t.at!==g.site){if(t.status==='AT_YARD'&&!cargo)set(null);return;}
+      if(g.stage==='DRIVING'||g.stage==='UNLOADING'){if(t.status!=='AT_SITE'||t.at!==g.site){if(t.status==='AT_YARD'&&!cargo)end();return;}
         // arriving at a site that is being removed: the load comes straight home again
-        if(cargo&&g.stage==='DRIVING'&&this.sfFinishing(g.site)){home();return set({stage:'RETURNING'});}
+        if(cargo&&g.stage==='DRIVING'&&this.sfFinishing(g.site)){home();return set({stage:'RETURNING',diverted:true});}
         if(cargo){this.gameCrew(this.repo.get(g.site,'site'));this.unload({id:t.id});return set({stage:'UNLOADING'});}
         this.notify('Delivered','Delivered to '+siteName()+'! '+t.name+' is heading back to the yard.',g.site);home();return set({stage:'RETURNING'});}
     }else if(g.kind==='COLLECT'){
       if(g.stage==='OUTBOUND'){if(t.status!=='AT_SITE'||t.at!==g.site){if(t.status==='AT_YARD'&&!cargo)set(null);return;}let o=null;try{o=this.repo.get(g.collection,'collection');}catch{}
-        if(o&&RT_EDITABLE.includes(o.status)){const site=this.repo.get(g.site,'site');this.gameCrew(site);const r=this.loadCollection({id:o.id,truck:t.id});
+        if(o&&RT_EDITABLE.includes(o.status)){const site=this.repo.get(g.site,'site');this.gameCrew(site);let r;
+          // a site being removed where nothing can be loaded: the truck comes home empty and removing waits for Try again (sitefinish.js)
+          try{r=savepoint(this.db,'game_collect_load',()=>this.loadCollection({id:o.id,truck:t.id}));}catch(e){if(!e.status||!site.finishing)throw e;this.cancelCollection({id:o.id,reason:'Nothing could be loaded'});this.sfStuck(site.id,e.message);home();return set({stage:'RETURNING'});}
           // the truck is full: the rest waits for the next truck (it goes as soon as this one has left the site), and the owner is told
           // (each trip takes at least one stillage, so this always ends)
           const left=r.left??[];let more=false;
-          if(left.length){if(o.scope==='ALL')this.repo.add('gameOrder',{type:'COLLECT',site:site.id,all:true,createdAt:new Date().toISOString(),by:this.user.id});else this.gameQueue('COLLECT',site,left.map(x=>x.id));more=true;
+          if(left.length){if(o.scope==='ALL')this.repo.add('gameOrder',{type:'COLLECT',site:site.id,all:true,...(o.byRemove?{byRemove:true}:{}),createdAt:new Date().toISOString(),by:this.user.id});else this.gameQueue('COLLECT',site,left.map(x=>x.id));more=true;
             this.notify('More to bring back','One truck is not enough for '+site.name+'. Another truck goes back for the rest.',site.id);}
           return set({stage:'LOADING',more});}
         home();return set({stage:'RETURNING'});}
@@ -199,7 +205,7 @@ export const gameMethods={
     if(t.status!=='AT_YARD'||t.at!==t.yard)return;
     if(cargo){this.unload({id:t.id});return set({stage:'UNLOADING'});}
     if(g.kind==='COLLECT'&&(g.brought||g.stage==='UNLOADING'))this.notify('Back at the yard',t.name+' is back from '+siteName()+(g.more?' with a full load. Another truck brings the rest.':' and everything is unloaded.'),g.site);
-    set(null);},
+    end();},
   // result.gameOrders: Sends and Bring backs waiting for a truck (a few bytes; the poll carries nothing else for the board).
   gameSnapshot(result){result.gameOrders=this.repo.all('gameOrder').map(o=>({id:o.id,type:o.type,site:o.site,all:!!o.all,lines:o.lines??null,createdAt:o.createdAt})).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));},
   // GET /api/game-items?loc=: the stillages at the yard or one active site, with their contents and whether each can be lifted now (the amount
@@ -212,7 +218,7 @@ export function installGame(proto){
   // tick() (movement.js) ends with tickJobs(), and a quiet tick runs tickJobs() alone (simulation.js tickCompany): wrapping tickJobs runs the
   // autopilot once after every engine tick either way.
   const tickJobs=proto.tickJobs,build=proto.buildSnapshot;if(typeof tickJobs!=='function'||typeof build!=='function')throw new AppError(500,'The game board needs tickJobs and buildSnapshot.');
-  Object.assign(proto,gameMethods,siteFinishMethods);
+  Object.assign(proto,gameMethods,siteFinishMethods);sfGuard(proto);
   proto.tickJobs=function(elapsed){const r=tickJobs.call(this,elapsed);this.gameTick();return r;};
   proto.buildSnapshot=function(page,opts){const result=build.call(this,page,opts);if(this.auth.permissions(this.user).includes('operations.manage'))this.gameSnapshot(result);return result;};
 }

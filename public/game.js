@@ -262,7 +262,7 @@ export function gmPick(kind,id){const ctx=G.ctx;if(!ctx)return false;
  if(kind==='truck'){G.mode='truck';G.truck=id;G.sel=null;openSheet();refreshNow();wmFocus('truck',id);return true;}return false;}
 const refreshNow=()=>{if(G.ctx)gmUpdate(G.ctx);};
 // What Remove site and Undo need from the board (game-finish.js).
-const sfApi=()=>({ctx:G.ctx,refresh:refreshNow,pop,gone:id=>{if(G.lastSite===id)G.lastSite=null;if(G.site!==id)return;if(G.mode==='site')setMode('yard');else{G.site=null;G.picks=new Map();G.sel=null;}}});
+const sfApi=()=>({ctx:G.ctx,refresh:refreshNow,pop,gone:(id,soft)=>{if(G.lastSite===id)G.lastSite=null;if(G.site!==id)return;if(G.mode==='site'){if(!soft)setMode('yard');}else{G.site=null;if(!soft||G.mode!=='send'){G.picks=new Map();G.sel=null;}}}});// soft: being removed (its site window shows Removing)
 const openSheet=()=>document.querySelector('.gm-body')?.classList.add('sheet');
 function setMode(mode,site){hideCard();G.mode=mode;G.picks=new Map();G.sel=null;G.pending=null;G.busy=false;G.win=null;const s=G.ctx.state,sites=activeSites(s);
  if(site)G.site=site;else if(mode==='send'){if(!sites.some(x=>x.id===G.site))G.site=sites.find(x=>x.id===G.lastSite)?.id??sites[0]?.id??null;}

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase,atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
-import { sfBlock,sfAsk,sfActs,sfSub,sfSendable,sfTile,sfBelowTiles,sfNewSiteList,sfOfficeActs,sfFinishedHTML,sfClick,__sf } from '../public/game-finish.js';
+import { sfBlock,sfAsk,sfTies,sfActs,sfSub,sfSendable,sfTile,sfBelowTiles,sfNewSiteList,sfOfficeActs,sfFinishedHTML,sfClick,__sf } from '../public/game-finish.js';
 import { __gm } from '../public/game.js';
 
 // Remove site (src/domain/sitefinish.js, public/game-finish.js), on a small yard made the way the board makes it.
@@ -26,7 +26,7 @@ function game(t){
   return {db,auth,user,sim,cmd,tick,until,truck,site,total,at,stock,idle,supervisor,usedEmpty,yard:start.yard};
 }
 // The ledger's stock rows (custody: every piece in and out) and the contents table, to compare before and after.
-const custody=f=>({ledger:f.db.prepare("SELECT sequence,event,product_id,container_id,quantity,source,destination FROM ledger WHERE company_id=? AND event NOT IN ('COMMAND','SITE_REMOVED','SITE_MAP') ORDER BY sequence").all(f.user.company_id),contents:f.db.prepare('SELECT container_id,product_id,quantity FROM contents WHERE company_id=? ORDER BY container_id,product_id').all(f.user.company_id)});
+const custody=f=>({ledger:f.db.prepare("SELECT sequence,event,product_id,container_id,quantity,source,destination FROM ledger WHERE company_id=? AND event NOT IN ('COMMAND','SITE_REMOVED','SITE_MAP','SITE_RESTORED') ORDER BY sequence").all(f.user.company_id),contents:f.db.prepare('SELECT container_id,product_id,quantity FROM contents WHERE company_id=? ORDER BY container_id,product_id').all(f.user.company_id)});
 const lotOf=(f,id)=>{const p=f.sim.worldLayoutNow().byId.get(id);return p?[p.col,p.row]:null;};
 
 test('a site never used goes completely at once: its crane, crew and map block go, the ledger and stock are untouched; Undo puts it back in its block',t=>{
@@ -35,14 +35,17 @@ test('a site never used goes completely at once: its crane, crew and map block g
   const {site}=f.cmd('gameSite',{name:'George St',address:'1 George St'});const lot=lotOf(f,site.id);assert.ok(lot);
   assert.equal(f.sim.repo.all('resource').filter(r=>r.location===site.id).length,3,'crane and two workers');
   const r=f.cmd('gameRemoveSite',{site:site.id});assert.equal(r.removed,true);assert.equal(r.message,'George St removed');
-  assert.deepEqual(r.undo,{name:'George St',address:'1 George St',col:lot[0],row:lot[1]},'what Undo needs');
+  assert.equal(typeof r.undo,'string','a copy is kept for Undo');
   assert.throws(()=>f.sim.repo.get(site.id,'site'),/not found/,'the site is gone');assert.equal(f.sim.repo.all('resource').filter(r=>r.location===site.id).length,0,'its crane and crew too');
   const after=f.sim.worldLayoutNow();assert.equal(after.byId.get(site.id),undefined);assert.ok(!after.places.some(x=>x.col===lot[0]&&x.row===lot[1]),'its block is free again');
   assert.deepEqual(lotOf(f,keep.id),keepLot,'the other site stays where it was');
   assert.deepEqual(custody(f),before,'no stock moved and no custody row changed');assert.equal(f.at(f.yard.id,p.id),200);
   assert.ok(f.db.prepare("SELECT 1 FROM ledger WHERE company_id=? AND event='SITE_REMOVED' AND reason LIKE '%George St%'").get(f.user.company_id),'the removal is noted');
-  // Undo: the board makes it again from the answer, in the same block
-  const {kind,...data}={kind:'make',...r.undo};const again=f.cmd('gameSite',data).site;assert.deepEqual(lotOf(f,again.id),lot);assert.equal(again.address,'1 George St');
+  // Undo: the very same site back, in the same block, with its crane and crew
+  const back=f.cmd('gameRestoreSite',{undo:r.undo});assert.equal(back.message,'George St is back on the map.');assert.equal(back.site.id,site.id,'the same site');
+  assert.deepEqual(lotOf(f,site.id),lot);assert.equal(f.site(site.id).address,'1 George St');assert.equal(f.sim.repo.all('resource').filter(r=>r.location===site.id).length,3);
+  assert.deepEqual(custody(f),before,'Undo moves no stock either');assert.throws(()=>f.cmd('gameRestoreSite',{undo:r.undo}),/can no longer be put back/,'once');
+  f.cmd('gameRemoveSite',{site:site.id});
   // a site made in the Office goes the same way while unused; a Send only waiting for a truck does not count as use
   const o=f.cmd('site',{name:'Office made'});assert.equal(f.cmd('gameRemoveSite',{site:o.id}).removed,true);
   const w=f.cmd('gameSite',{name:'Waiting'}).site;const busy=f.sim.repo.all('truck');for(const x of busy){x.game={kind:'HOLD'};f.sim.repo.save(x);}
@@ -87,7 +90,7 @@ test('scaffold still on the site: asked first; then everything comes home on the
   assert.ok(f.db.prepare("SELECT 1 FROM ledger WHERE company_id=? AND event='SITE_FINISHING'").get(f.user.company_id));
   assert.equal(f.sim.repo.all('gameOrder').length,0);assert.equal(lotOf(f,site.id),null,'gone from the map once the trucks are home');
   // the pure question, as the board shows it
-  assert.equal(sfAsk({name:'Q St'},true),'Q St still has scaffold on it. Bring it all back and remove the site?');assert.match(sfAsk({name:'Q St'},false),/^A truck is still going to Q St\./);
+  assert.equal(sfAsk({name:'Q St'},true),'Q St still has scaffold on it. Bring it all back and remove the site?');assert.match(sfAsk({name:'Q St'},false),/^A truck is still busy for Q St\./);
 });
 
 test('a Send still loading when the site is removed comes straight home; waiting Sends are dropped',t=>{
@@ -154,7 +157,7 @@ test('the board: Remove under every site tile, in the new-site window, in the si
   __gm.reset();__gm.shell({state:s,account,hire:true});
   // the Send window: every tile has its Remove, next to + New site
   __gm.setMode('send',site.id);let head=__gm.head(s);
-  for(const x of [site,other])assert.ok(head.includes('data-sf-remove="'+x.id+'" aria-label="Remove '+x.name+'"'),x.name);assert.match(head,/data-gm-newsite/);assert.match(head,/<span>Remove<\/span>/);
+  for(const x of [site,other])assert.ok(head.includes('data-sf-remove="'+x.id+'" aria-label="Remove '+x.name+'"'),x.name);assert.match(head,/data-gm-newsite/);assert.match(head,/<span>Remove site<\/span>/);assert.ok(!/<span>Remove<\/span>/.test(head),'never just "Remove" (the part line has its own)');
   assert.equal(sfTile(siteIn(s),'TILE',false),'TILE','nothing for someone who cannot run the yard');
   // the new-site window lists the sites already on the map, each with Remove
   const nw=sfNewSiteList(s,s.sites,true);assert.match(nw,/Already on the map/);assert.ok(nw.includes('data-sf-remove="'+site.id+'"')&&nw.includes('data-sf-remove="'+other.id+'"'));assert.equal(sfNewSiteList(s,[],true),'');
@@ -177,7 +180,7 @@ test('the board: Remove under every site tile, in the new-site window, in the si
   sfClick({dataset:{sfNo:''},closest:()=>null},api);f.cmd('cancelCount',{id:count.id});
   // removing: the words, Keep it, and no Send to it
   f.cmd('gameRemoveSite',{site:site.id,bringBack:true});s=snap();assert.equal(sfSub(siteIn(s)),'Removing — bringing it all home');assert.match(__gm.head(s),/Removing — bringing it all home/);
-  acts=__gm.acts(s);assert.match(acts,/Bringing it all home/,'the window title already says Removing');assert.match(acts,/data-sf-keep=/);assert.match(acts,/>Keep it</);assert.ok(!/Send here|Remove site/.test(acts));
+  acts=__gm.acts(s);assert.match(acts,/still there/,'the window title already says Removing');assert.ok(!/Bringing it all home/.test(acts),'said once');assert.match(acts,/data-sf-keep=/);assert.match(acts,/>Keep it</);assert.ok(!/Send here|Remove site/.test(acts));
   assert.match(sfOfficeActs(s,siteIn(s)),/data-sf-keep=/);
   assert.equal(sfSendable(siteIn(s)),false,'Send does not offer it');__gm.setMode('send',other.id);assert.ok(!__gm.head(s).includes('data-gm-site="'+site.id+'"'));
   __gm.setMode('back',site.id);head=__gm.head(s);assert.match(head,/Removing&hellip;/);assert.match(head,/Removing — bringing it all home/,'the picked site says so under the tiles');
@@ -197,4 +200,126 @@ test('the board new module is served to the browser (every module game.js and op
   const {readFileSync}=await import('node:fs'),read=f=>readFileSync(new URL('../'+f,import.meta.url),'utf8'),server=read('src/server.js');
   for(const f of ['public/game.js','public/operations.js'])for(const m of read(f).matchAll(/from '\.\/([\w-]+\.js)'/g))assert.ok(server.includes("'/"+m[1]+"':"),m[1]+' is served');
   assert.match(read('public/game.css'),/Site undo and finish/);assert.ok(!/style="/.test(read('public/game-finish.js')),'no inline styles (CSP)');
+});
+
+// ---------- review fixes ----------
+test('Undo of a never-used site puts back the very same site: its Office details, its drawn shape, its id; in a free block when its own was taken',t=>{
+  const f=game(t);f.stock(100);
+  const o=f.cmd('site',{name:'Office Job',address:'9 Main Rd',client:'BuildCo',contact:'Jan',phone:'0400'});const full=f.site(o.id);
+  const shaped={...full,points:[{x:0,y:0},{x:30000,y:0},{x:30000,y:9000},{x:0,y:9000}],height:12000};f.sim.repo.save(shaped);const want=f.site(o.id);
+  const lot=lotOf(f,o.id);const r=f.cmd('gameRemoveSite',{site:o.id});assert.equal(r.removed,true);
+  assert.equal(f.sim.repo.all('site').some(x=>x.id===o.id),false,'gone from every list');
+  const other=f.cmd('gameSite',{name:'Took it',col:lot[0],row:lot[1]}).site;assert.deepEqual(lotOf(f,other.id),lot);
+  const back=f.cmd('gameRestoreSite',{undo:r.undo});assert.equal(back.site.id,o.id);const s=f.site(o.id);
+  for(const k of ['name','address','client','contact','phone','points','height','gate','loading','supervisor'])assert.deepEqual(s[k],want[k],k);
+  assert.equal(s.status,'ACTIVE');const q=lotOf(f,o.id);assert.ok(q);assert.notDeepEqual(q,lot,'a free block');assert.deepEqual(lotOf(f,other.id),lot,'the newcomer stays');
+  assert.throws(()=>f.cmd('gameRestoreSite',{undo:'nope'}),/can no longer be put back/);
+  const sup=f.supervisor();const r2=f.cmd('gameRemoveSite',{site:o.id});assert.throws(()=>sup.execute('gameRestoreSite',{undo:r2.undo},randomUUID()),/does not allow/);
+  const k=randomUUID(),a=f.cmd('gameRestoreSite',{undo:r2.undo},k);assert.deepEqual(f.cmd('gameRestoreSite',{undo:r2.undo},k),a,'idempotent');
+});
+
+test('the question matches what is happening: a Send loading, a Send on the road, scaffold there; only the last load driving home: no question at all',t=>{
+  const f=game(t);const p=f.stock(400);const {site}=f.cmd('gameSite',{name:'Pitt St'});
+  f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:100}]});assert.equal(f.sim.sfBusy(f.site(site.id)),'loading');
+  assert.throws(()=>f.cmd('gameRemoveSite',{site:site.id}),/A truck is loading for Pitt St\. Stop it and remove the site\?$/);
+  assert.ok(f.until(()=>f.sim.repo.all('truck').some(x=>x.game?.stage==='DRIVING')));assert.equal(f.sim.sfBusy(f.site(site.id)),'sending');
+  assert.throws(()=>f.cmd('gameRemoveSite',{site:site.id}),/A truck is taking scaffold to Pitt St\. Bring it home and remove the site\?$/);
+  assert.ok(f.until(()=>f.idle()));assert.throws(()=>f.cmd('gameRemoveSite',{site:site.id}),/Pitt St still has scaffold on it\./);
+  // bring it all back by hand; once the truck has left the site with the last load, Remove site needs no question
+  const c=f.cmd('gameCollect',{site:site.id,all:true});assert.ok(f.until(()=>{const x=f.truck(c.truck.id);return x.status==='IN_TRANSIT'&&x.game?.stage==='RETURNING';}));
+  assert.equal(f.sim.sfBusy(f.site(site.id)),'home');
+  const r=f.cmd('gameRemoveSite',{site:site.id});assert.equal(r.removing,true);assert.equal(r.message,'The last load from Pitt St is on its way home. Pitt St goes when it is back.');
+  assert.ok(f.until(()=>f.site(site.id).status==='ARCHIVED',2000));assert.equal(f.at(f.yard.id,p.id),400);
+  assert.equal(sfAsk({name:'Q'},'loading'),'A truck is loading for Q. Stop it and remove the site?');
+  assert.equal(sfTies('S',{trucks:[{id:'T',status:'IN_TRANSIT',destination:'Y',at:'S',game:{kind:'COLLECT',site:'S',stage:'RETURNING'}}],collections:[{site:'S',status:'ON THE WAY',truck:'T'}]}),'home');
+  assert.equal(sfTies('S',{trucks:[{id:'T',status:'AT_YARD',at:'Y',game:{kind:'SEND',site:'S',stage:'LOADING'}}]}),'loading');
+  assert.equal(sfTies('S',{}),null);
+});
+
+test('while a site is being removed nothing new is booked for it or sent there by hand; a replayed command still answers',t=>{
+  const f=game(t);const p=f.stock(300);const {site}=f.cmd('gameSite',{name:'I St'});f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:100}]});assert.ok(f.until(()=>f.idle()));
+  const hand=f.sim.repo.all('truck')[0],key=randomUUID();const first=f.cmd('dispatch',{id:hand.id,destination:site.id},key);assert.ok(f.until(()=>f.truck(hand.id).status==='AT_SITE'));
+  f.cmd('dispatch',{id:hand.id,destination:f.yard.id});assert.ok(f.until(()=>f.truck(hand.id).status==='AT_YARD'));
+  // hold the trucks so the removal waits
+  const all=f.sim.repo.all('truck');for(const x of all){x.game={kind:'HOLD'};f.sim.repo.save(x);}
+  f.cmd('gameRemoveSite',{site:site.id,bringBack:true});assert.ok(f.site(site.id).finishing);
+  for(const [a,input] of [['request',{site:site.id,product:p.id,quantity:10}],['requestCollection',{site:site.id,neededOn:f.sim.calendar().today}],['createLoadList',{site:site.id,lines:[{product:p.id,quantity:10}]}],['dispatch',{id:f.sim.repo.all('truck')[1].id,destination:site.id}]])
+    assert.throws(()=>f.cmd(a,input),/I St is being removed\. Tap Keep it first\./,a);
+  assert.deepEqual(f.cmd('dispatch',{id:hand.id,destination:site.id},key),first,'the replay is answered as before');
+  for(const x of all){const y=f.truck(x.id);y.game=null;f.sim.repo.save(y);}
+  assert.ok(f.until(()=>f.site(site.id).status==='ARCHIVED',3000));
+});
+
+test('something in the way while removing is said on the site (not a silent wait): a stocktake opened meanwhile; it goes on by itself once fixed',t=>{
+  const f=game(t);const p=f.stock(200);const {site}=f.cmd('gameSite',{name:'J St'});f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:200}]});assert.ok(f.until(()=>f.idle()));
+  const all=f.sim.repo.all('truck');for(const x of all){x.game={kind:'HOLD'};f.sim.repo.save(x);}
+  f.cmd('gameRemoveSite',{site:site.id,bringBack:true});const count=f.cmd('count',{scope:site.id});
+  for(const x of all){const y=f.truck(x.id);y.game=null;f.sim.repo.save(y);}
+  f.tick(5);assert.equal(f.site(site.id).finishing.blocked,'A stocktake is open at J St. Finish it first.');assert.ok(f.idle(),'no truck drives out meanwhile');
+  f.cmd('cancelCount',{id:count.id});assert.ok(f.until(()=>f.site(site.id).status==='ARCHIVED',3000));assert.equal(f.at(f.yard.id,p.id),200);
+});
+
+test('a stillage marked damaged: said up front with Mark it OK; marked damaged after a truck left: the truck comes home empty, Try again after it is fixed',t=>{
+  const f=game(t);const p=f.stock(300);const {site}=f.cmd('gameSite',{name:'D St'});f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:300}]});assert.ok(f.until(()=>f.idle()));
+  const here=()=>f.sim.containers().filter(c=>c.location===site.id);const bad=here()[0];
+  f.cmd('condition',{id:bad.id,condition:'DAMAGED',reason:'bent'});
+  assert.throws(()=>f.cmd('gameRemoveSite',{site:site.id,bringBack:true}),new RegExp(bad.name+' at D St is marked damaged, so it cannot go on a truck\\. Mark it OK to bring it home\\.'));
+  const b=f.sim.sfBlockFor(f.site(site.id));assert.equal(b.fix.act,'ok');assert.equal(b.fix.container,bad.id);assert.equal(b.fix.label,'Mark it OK');
+  f.cmd('condition',{id:bad.id,condition:'SERVICEABLE',reason:'Marked OK to bring it home'});
+  // now removing starts, and every stillage there is marked damaged while the truck is on its way
+  f.cmd('gameRemoveSite',{site:site.id,bringBack:true});const tr=f.sim.repo.all('truck').find(x=>x.game?.kind==='COLLECT');assert.equal(tr.game.stage,'OUTBOUND');
+  for(const c of here())f.cmd('condition',{id:c.id,condition:'DAMAGED',reason:'bent'});
+  assert.ok(f.until(()=>f.idle(),1500),'the truck comes home, it does not wait at the site for ever');
+  const fin=f.site(site.id).finishing;assert.match(fin.stuck,/Nothing could be loaded/);assert.match(fin.blocked,/marked damaged/);f.tick(30);assert.ok(f.idle(),'and no truck goes out again by itself');
+  for(const c of here())f.cmd('condition',{id:c.id,condition:'SERVICEABLE',reason:'ok'});
+  assert.ok(f.until(()=>f.site(site.id).status==='ARCHIVED',3000),'once fixed it goes on by itself');assert.equal(f.at(f.yard.id,p.id),300);
+  // stuck with nothing to explain it: Try again (the same button) starts bringing it back again
+  const {site:g}=f.cmd('gameSite',{name:'G St'});f.cmd('gameSend',{site:g.id,lines:[{product:p.id,quantity:100}]});assert.ok(f.until(()=>f.idle()));
+  const all=f.sim.repo.all('truck');for(const y of all){y.game={kind:'HOLD'};f.sim.repo.save(y);}
+  f.cmd('gameRemoveSite',{site:g.id,bringBack:true});for(const y of f.sim.repo.all('gameOrder'))f.sim.repo.remove(y.id,'gameOrder');
+  const x=f.site(g.id);x.finishing={...x.finishing,stuck:'Nothing could be loaded.'};f.sim.repo.save(x);for(const y of all){const z=f.truck(y.id);z.game=null;f.sim.repo.save(z);}
+  f.tick(20);assert.equal(f.site(g.id).status,'ACTIVE','stuck: it waits');assert.ok(f.idle());
+  assert.equal(f.cmd('gameRemoveSite',{site:g.id,bringBack:true}).removing,true,'Try again');assert.equal(f.site(g.id).finishing.stuck,null);
+  assert.ok(f.until(()=>f.site(g.id).status==='ARCHIVED',3000));
+  // a stillage the crew could never lift is said too (the board cannot see weights)
+  const {site:h}=f.cmd('gameSite',{name:'H St'});f.cmd('gameSend',{site:h.id,lines:[{product:p.id,quantity:100}]});assert.ok(f.until(()=>f.idle()));
+  for(const r of f.sim.repo.all('resource'))if(r.location===f.yard.id&&r.type==='FORKLIFT'){r.capacity=1;f.sim.repo.save(r);}
+  assert.throws(()=>f.cmd('gameRemoveSite',{site:h.id,bringBack:true}),/is too heavy for the crew to lift/);
+});
+
+test('Keep it calls off only what the removal asked for: the owner\'s own Bring back still goes; a turned-back Send says so; an empty truck brings no tick',t=>{
+  const f=game(t);const p=f.stock(600);const {site}=f.cmd('gameSite',{name:'K St'});f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:300}]});assert.ok(f.until(()=>f.idle()));
+  const all=f.sim.repo.all('truck');const hold=()=>{for(const x of all){const y=f.truck(x.id);y.game={kind:'HOLD'};f.sim.repo.save(y);}},free=()=>{for(const x of all){const y=f.truck(x.id);y.game=null;f.sim.repo.save(y);}};
+  hold();const own=f.cmd('gameCollect',{site:site.id,lines:[{product:p.id,quantity:100}]});assert.ok(own.queued);
+  f.cmd('gameRemoveSite',{site:site.id,bringBack:true});f.cmd('gameKeepOpen',{site:site.id});
+  assert.deepEqual(f.sim.repo.all('gameOrder').map(o=>o.id),[own.queued],'the owner\'s Bring back is kept');
+  free();assert.ok(f.until(()=>f.idle()&&!f.sim.repo.all('gameOrder').length));assert.equal(f.at(site.id,p.id),200,'it went');
+  // the removal's own waiting Bring back is called off
+  hold();f.cmd('gameRemoveSite',{site:site.id,bringBack:true});assert.equal(f.sim.repo.all('gameOrder').filter(o=>o.byRemove).length,1);f.cmd('gameKeepOpen',{site:site.id});
+  assert.equal(f.sim.repo.all('gameOrder').length,0);free();
+  // a Send turned back by the removal, then Keep it: the owner is told it was not made
+  const s=f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:100}]});const id=s.trucks[0].id;
+  // the other trucks are away for a while (a held truck would be freed by the next tick)
+  for(const x of all)if(x.id!==id){const y=f.truck(x.id);y.retired=true;f.sim.repo.save(y);}
+  f.cmd('gameRemoveSite',{site:site.id,bringBack:true});assert.ok(f.until(()=>f.truck(id).game?.diverted));f.cmd('gameKeepOpen',{site:site.id});
+  assert.ok(f.until(()=>!f.truck(id).game,1500));for(const x of all){const y=f.truck(x.id);y.retired=false;f.sim.repo.save(y);}assert.ok(f.until(()=>f.idle()));
+  assert.ok(f.sim.repo.all('notification').some(n=>n.title==='Not sent'&&/The load for K St came back to the yard\. Send it again/.test(n.body)));
+  assert.equal(f.at(site.id,p.id),200,'nothing moved off the kept site');assert.equal(f.at(f.yard.id,p.id),400);
+  // an empty truck turned back by Keep it: no "Back at the yard" for it
+  f.cmd('gameRemoveSite',{site:site.id,bringBack:true});const out=f.sim.repo.all('truck').find(x=>x.game?.kind==='COLLECT');assert.equal(out.game.stage,'OUTBOUND');
+  const before=f.sim.repo.all('notification').filter(n=>n.title==='Back at the yard').length;f.cmd('gameKeepOpen',{site:site.id});
+  assert.ok(f.until(()=>f.idle(),1500));assert.equal(f.sim.repo.all('notification').filter(n=>n.title==='Back at the yard').length,before);assert.equal(f.at(site.id,p.id),200);
+});
+
+test('the board: "Remove site" in full on the tiles; the Undo of "added" asks the question when a Send already went; a stocktake fix opens that stocktake',t=>{
+  const f=game(t);const p=f.stock(200);const {site}=f.cmd('gameSite',{name:'New St'});__sf.reset();
+  const s0=f.sim.snapshot(0,{lean:true});assert.ok(sfTile(s0.sites.find(x=>x.id===site.id),'T',true).includes('<span>Remove site</span>'));
+  f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:100}]});const s=f.sim.snapshot(0,{lean:true});
+  const calls=[];const api={ctx:{state:s,cmd:a=>{calls.push(a);return {};}},refresh:()=>{},pop:()=>{},gone:()=>{}};
+  __sf.state().undos.set('u9',{kind:'new',site:site.id});sfClick({dataset:{sfUndo:'u9'},closest:()=>null},api);
+  assert.equal(calls.length,0,'nothing sent');assert.equal(__sf.state().ask,site.id,'the question shows instead');
+  __sf.reset();assert.ok(f.until(()=>f.idle()));const count=f.cmd('count',{scope:site.id});const s2=f.sim.snapshot(0,{lean:true});let went=null;
+  const api2={ctx:{state:s2,cmd:()=>({}),go:(v,o)=>{went=[v,o];}},refresh:()=>{},pop:()=>{},gone:()=>{}};
+  sfClick({dataset:{sfRemove:site.id},closest:()=>null},api2);sfClick({dataset:{sfFix:site.id},closest:()=>null},api2);
+  assert.deepEqual(went,['STOCK',{stockTab:'CONTAINERS',focus:count.id}]);
 });
