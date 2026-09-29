@@ -6,7 +6,7 @@ import { dayLabel } from './schedule.js';
 // alCheck keeps the set of materials below their minimum and adds one notification when a material first drops below it (never again until it recovers).
 // The yard figure is the free count: serviceable pieces in the yard (and on its machines) not reserved for a load, the same number the Home card shows as 'free'.
 export const AL_SEVERITY=['high','medium','low'];
-const RANK={high:0,medium:1,low:2},KIND_RANK={BLOCKED:0,OVERDUE:1,CLASH:2,LOW_STOCK:3,DUE_TODAY:4,PAPERWORK:5,ANSWER:6,DAMAGED:7};
+const RANK={high:0,medium:1,low:2},KIND_RANK={BLOCKED:0,OVERDUE:1,CLASH:2,LOW_STOCK:3,DUE_TODAY:4,PAPERWORK:5,ANSWER:6,MISSED:7,DAMAGED:8};
 const plural=(n,one,many)=>n+' '+(n===1?one:many);
 // Free pieces per product over the yards, from a stockByLocation block map (each yard clamped at zero on its own, as the Home card adds them).
 export function alFreeInYards(stock,yardIds){const free=new Map();for(const id of yardIds)for(const r of stock?.[id]?.rows??[])free.set(r.product,(free.get(r.product)??0)+(r.free??Math.max(0,r.quantity-(r.reserved??0)-(r.unserviceable??0))));return free;}

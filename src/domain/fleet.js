@@ -42,12 +42,13 @@ export const fleetMethods={
     }
     if(kind==='TRUCK'){
       const payload=input.payload===undefined?12500000:Number(input.payload);requireRule([2000000,12500000].includes(payload),'Choose a 2 tonne or 12.5 tonne truck.');const light=payload<10000000;
-      const trucks=this.repo.all('truck').filter(t=>t.yard===yard.id&&!t.retired&&(t.payload<10000000)===light);
+      const trucks=this.repo.all('truck').filter(t=>t.yard===yard.id&&!t.retired&&!t.hired&&(t.payload<10000000)===light);// a hire truck booked on the Today page is never one of yours to remove
       if(input.delta===1)return this.truck({name:nextName(new Set(this.repo.all('truck').map(t=>t.name)),light?'L-':'T-',2),yard:yard.id,payload,length:light?4200:6000,width:light?1900:2050,stackLimit:light?1:2});
       requireRule(trucks.length,light?'There are no 2 tonne trucks for this yard.':'There are no 12.5 tonne trucks for this yard.');const idle=trucks.filter(t=>t.at===yard.id&&this.idleTruck(t));
       requireRule(idle.length,'Every truck is loaded, away or planned for a trip; unload and finish its trip first.');
       // Remove the newest idle truck with the fewest booked runs, so bookings only go back to Needs a truck when every idle truck has some.
       const booked=new Map(idle.map(t=>[t.id,0]));for(const o of [...this.repo.all('loadList'),...this.repo.all('request')])if(o.plannedTruck&&booked.has(o.plannedTruck)&&this.schedulable(o))booked.set(o.plannedTruck,booked.get(o.plannedTruck)+1);
+      for(const it of this.repo.all('planItem'))if(it.type==='TRUCK'&&['PLANNED','ACTIVE'].includes(it.status)&&booked.has(it.truck))booked.set(it.truck,booked.get(it.truck)+1);// Today calendar bookings count too
       const fewest=Math.min(...booked.values());return this.retireTruck([...idle].reverse().find(t=>booked.get(t.id)===fewest));
     }
     const stillages=this.containers().filter(c=>c.location===yard.id&&c.type==='STILLAGE');

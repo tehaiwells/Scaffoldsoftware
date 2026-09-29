@@ -350,7 +350,8 @@ export function cardHTML(s,p){const yard=yardOf(s),yr=rowsAt(s,yard?.id).get(p.i
   +'<p>'+[len&&gaLenTag(p)?'Length '+(Math.round(len*100)/100)+' m':'',p.packQuantity>0?'1 pack = '+num(p.packQuantity)+' pieces':'',p.unitWeight>0?(Math.round(p.unitWeight/100)/10)+' kg each':''].filter(Boolean).join(' · ')+'</p></div>';}
 // ---------------------------------------------------------------- the planning picker (the Today page's Materials list): the same inventory window
 // (system chips, kind tabs, the part pictures in slots, the amount panel) over every part the crew can lift, for a list on a coming day. The corner
-// number is what is in the yard now; any amount can be typed, because the yard may be restocked by then. + and - step one stillage at a time.
+// number is always what is free in the yard now; the amount picked is its own tag at the top (amber when it is more than is free). Any amount can
+// be typed, because the yard may be restocked by then. + and - step one stillage at a time.
 // gmPlanPicker(host, {state, lift}, {title, lines, onDone(lines), onCancel}) draws into host (the Today page's sheet) and keeps its own state.
 const PP={host:null,ctx:null,opts:null,picks:new Map(),sel:null,tab:null,sys:null};
 const ppLift=()=>PP.ctx?.lift>0?PP.ctx.lift:1500000;
@@ -358,16 +359,17 @@ const ppPer=p=>gpPerStillage(p,ppLift());
 const ppAll=()=>products(PP.ctx?.state).filter(p=>ppPer(p)>0);
 const ppHave=()=>rowsAt(PP.ctx?.state,yardOf(PP.ctx?.state)?.id);
 function ppList(){const all=ppAll(),have=ppHave(),sys=addSystems(all);if(sys.length>1&&!sys.includes(PP.sys)){const n=id=>all.filter(p=>p.system===id).reduce((k,p)=>k+(have.get(p.id)?.quantity??0),0);PP.sys=[...sys].sort((a,b)=>n(b)-n(a))[0];}
- return {sys,list:all.filter(p=>sys.length<2||p.system===PP.sys).map(p=>({p,count:have.get(p.id)?.quantity??0}))};}
+ return {sys,list:all.filter(p=>sys.length<2||p.system===PP.sys).map(p=>({p,count:ppFree(have.get(p.id))}))};}
+const ppFree=r=>r?Math.max(0,r.free??r.quantity??0):0;
 function ppTabs(list){const has=new Map();for(const x of list)has.set(gaTab(x.p),(has.get(gaTab(x.p))??0)+1);has.set('all',list.length);
  if(!PP.tab||!has.has(PP.tab))PP.tab=list.length<=40?'all':GA_TABS.find(t=>t.id!=='all'&&has.has(t.id))?.id??'all';const shown=GA_TABS.filter(t=>has.has(t.id));if(shown.length<=2)return '';
  return '<div class="gm-tabs pp-tabs" role="tablist">'+shown.map(t=>'<button type="button" role="tab" class="gm-tab'+(t.id===PP.tab?' on':'')+'" data-pp-tab="'+t.id+'" aria-selected="'+(t.id===PP.tab)+'" title="'+t.name+'">'+t.pic()+'<span>'+t.name+'</span></button>').join('')+'</div>';}
-function ppSlot(x){const p=x.p,q=PP.picks.get(p.id)??0,tag=gaLenTag(p),label=p.name+': '+num(x.count)+' in the yard now'+(q?', '+num(q)+' on the list':'');
- const corner=q?'<b class="gm-n gm-n-pick">'+gpCount(q)+'</b>':x.count?'<b class="gm-n">'+gpCount(x.count)+'</b>':'';
+function ppSlot(x){const p=x.p,q=PP.picks.get(p.id)??0,tag=gaLenTag(p),label=p.name+': '+num(x.count)+' free in the yard now'+(q?', '+num(q)+' on the list'+(q>x.count?', more than is free':''):'');
+ const corner=(x.count?'<b class="gm-n">'+gpCount(x.count)+'</b>':'')+(q?'<b class="pp-q'+(q>x.count?' over':'')+'">'+gpCount(q)+'</b>':'');
  return '<button type="button" class="gm-slot'+(x.count||q?'':' dim')+(q?' picked':'')+(PP.sel===p.id?' sel':'')+'" data-pp-slot="'+esc(p.id)+'" aria-label="'+esc(label)+'" aria-pressed="'+(!!q)+'">'+gaItem(p)+(tag?'<i class="gm-len">'+esc(tag)+'</i>':'')+corner+'</button>';}
 function ppAmount(){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return '<div class="gm-amt pp-amt pp-amt-empty"><p class="gm-empty-line">Tap a part, then how many.</p></div>';
- const q=PP.picks.get(p.id)??0,have=ppHave().get(p.id)?.quantity??0,per=ppPer(p),n=q?Math.ceil(q/per):0;
- const words=q?num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages')+(q>have?' &middot; only '+num(have)+' in the yard now':''):num(have)+' in the yard now';
+ const q=PP.picks.get(p.id)??0,have=ppFree(ppHave().get(p.id)),per=ppPer(p),n=q?Math.ceil(q/per):0;
+ const words=q?num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages')+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
  return '<div class="gm-amt pp-amt"><div class="gm-amt-top">'+gaItem(p,'gm-amt-pic')+'<div class="gm-amt-name"><b>'+esc(p.name)+'</b><small data-pp-words>'+words+'</small></div>'+(q?'<button type="button" class="gm-chip" data-pp-unpick>Remove</button>':'')+'</div>'
   +'<div class="pp-amt-row"><button type="button" class="gm-step" data-pp-step="-1" aria-label="One stillage less">&minus;</button><input type="number" class="gm-num" data-pp-num min="0" max="100000" step="1" value="'+q+'" inputmode="numeric" aria-label="How many '+esc(p.name)+'"><button type="button" class="gm-step" data-pp-step="1" aria-label="One stillage more">+</button></div>'
   +'<p class="pp-per">+ and &minus; add or take away one stillage ('+num(per)+' pieces). You can type any number.</p></div>';}
@@ -375,7 +377,7 @@ function ppHTML(){const {sys,list}=ppList(),tabs=ppTabs(list),here=PP.tab==='all
  const sorted=[...here].sort((a,b)=>GA_TABS.findIndex(t=>t.id===gaTab(a.p))-GA_TABS.findIndex(t=>t.id===gaTab(b.p))||sortKey(a,b));
  const sysbar=sys.length>1?'<div class="gm-sysbar pp-sys" role="radiogroup" aria-label="Scaffold system">'+sys.map(id=>'<button type="button" role="radio" class="gm-sysopt'+(id===PP.sys?' on':'')+'" data-pp-sys="'+esc(id)+'" aria-checked="'+(id===PP.sys)+'"><s class="gm-sys '+(SYS_CLASS[id]??'')+'"></s>'+esc(SYS_NAME[id]??id)+'</button>').join('')+'</div>':'';
  const chosen=picks.length?'<div class="pp-chosen"><span>On the list:</span><div class="pp-chosen-row">'+picks.map(([id,q])=>{const p=ps.get(id);return p?'<button type="button" class="gm-slot gm-mini'+(PP.sel===id?' sel':'')+'" data-pp-slot="'+esc(id)+'" title="'+esc(p.name)+'" aria-label="'+esc(p.name+': '+q)+'">'+gaItem(p)+'<b class="gm-n gm-n-pick">'+gpCount(q)+'</b></button>':'';}).join('')+'</div></div>':'';
- return '<div class="pp-win" data-pp><div class="gm-win-head pp-head"><div><h2>'+esc(PP.opts?.title??'Pick the parts')+'</h2><p>Tap a part, then how many. The corner number is what is in the yard now.</p></div><button type="button" class="gm-x" data-pp-cancel aria-label="Close">&times;</button></div>'
+ return '<div class="pp-win" data-pp><div class="gm-win-head pp-head"><div><h2>'+esc(PP.opts?.title??'Pick the parts')+'</h2><p>Tap a part, then how many. The corner number is what is free in the yard now.</p></div><button type="button" class="gm-x" data-pp-cancel aria-label="Close">&times;</button></div>'
   +sysbar+tabs+'<div class="pp-grid-wrap"><div class="pp-grid" role="list">'+(sorted.length?sorted.map(ppSlot).join(''):'<p class="gm-empty-line">No parts with a weight yet. Add the weights in the Office, Materials catalogue.</p>')+'</div></div>'
   +ppAmount()+chosen+'<div class="pp-acts"><button type="button" class="gm-go gm-go-big" data-pp-done'+(picks.length?'':' disabled')+'>Use these parts'+(picks.length?' ('+picks.length+')':'')+'</button><button type="button" class="pp-cancel" data-pp-cancel>Cancel</button></div></div>';}
 let ppDrawing=false;

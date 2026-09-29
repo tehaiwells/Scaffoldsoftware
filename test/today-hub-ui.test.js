@@ -16,7 +16,7 @@ function world(t,{replies=false}={}){const f=planFixture(t,{now:L(D0,'16:00')});
  const a=f.site('Bondi','12 Smith St'),b=f.site('Parramatta');const {p,per}=f.stock(3);
  const tr=f.cmd('planTruck',{day:D1,truck:f.truck('T-01').id,driver:f.driver('Dave').id,time:'06:30'});
  const mat=f.cmd('planMaterials',{day:D1,site:a.id,lines:[{product:p.id,quantity:per}],truckPlan:tr.item.id,time:'09:00'});
- const liam=f.cmd('teamAdd',{name:'Liam',role:'SCAFFOLDER',mobile:'0412 345 678'}).person.id;const wk=f.cmd('planWorkers',{day:D1,site:a.id,count:3,people:[liam],time:'07:00'});f.cmd('planWorkers',{day:addDays(D0,4),site:b.id,count:1,time:'07:00'});
+ const liam=f.cmd('teamAdd',{name:'Liam',role:'SCAFFOLDER',mobile:'0412 345 678'}).person.id;const wk=f.cmd('planWorkers',{day:D1,site:a.id,count:6,people:[liam],time:'07:00'});f.cmd('planWorkers',{day:addDays(D0,4),site:b.id,count:1,time:'07:00'});
  const rs=f.cmd('planRestack',{day:D1,time:'13:00'});f.cmd('paperworkAdd',{type:'SWMS',site:a.id,expiresOn:addDays(D0,-2)});f.cmd('paperworkAdd',{type:'JHSA',site:b.id,expiresOn:addDays(D0,60)});
  return {f,a,b,p,per,tr,mat,wk,rs,liam};}
 const show=async(w,perms=OWNER,day=D1)=>{const {T,td}=await load();td.reset();T.setState(w.f.sim.snapshot(),acct(w.f,perms));T.setView('TODAY');const plan=w.f.sim.planMonth(D0.slice(0,7)),today=w.f.sim.todayView(),sup=!perms.includes('operations.manage');
@@ -36,9 +36,9 @@ test('the calendar: 42 days, today ringed, a chip per thing in its colour, amber
  assert.ok(!/\sstyle="/.test(html)&&ids(html));});
 
 test('the day panel: items in time order with one status line, the people and their answers, and the few buttons that help',async t=>{const w=world(t);const html=await show(w);
- const order=['T-01 (big truck) &middot; 6:30 am','3 workers &rarr; Bondi &middot; 7:00 am','List for Bondi &middot; 9:00 am','Re-stack the yard &middot; 1:00 pm'].map(s=>html.indexOf(s));assert.ok(order.every(i=>i>0),JSON.stringify(order));assert.deepEqual([...order].sort((a,b)=>a-b),order,'by time');
+ const order=['T-01 (big truck) &middot; 6:30 am','6 workers &rarr; Bondi &middot; 7:00 am','List for Bondi &middot; 9:00 am','Re-stack the yard &middot; 1:00 pm'].map(s=>html.indexOf(s));assert.ok(order.every(i=>i>0),JSON.stringify(order));const byTime=[order[1],order[0],order[2],order[3]];assert.deepEqual([...byTime].sort((a,b)=>a-b),byTime,'what needs sorting first (the workers are short), then by time');
  assert.ok(html.includes('Waiting for Dave to answer'));assert.ok(html.includes('data-tdh-yes="'+w.f.sim.repo.get(w.tr.item.id,'planItem').message+'"'),'They said yes on the phone');
- assert.ok(html.includes('Waiting for an answer'),'tomorrow after 3 pm: they were asked at once');assert.ok((await show(w,OWNER,addDays(D0,4))).includes('Message goes the day before at 3 pm'),'later: asked the day before');assert.ok(html.includes('Short by 1'),'the gap');
+ assert.ok(html.includes('Waiting for an answer'),'tomorrow after 3 pm: they were asked at once');assert.ok((await show(w,OWNER,addDays(D0,4))).includes('Message goes the day before at 3 pm'),'later: asked the day before');assert.ok(html.includes('Short by 2'),'the gap');
  assert.ok(html.includes('data-tdh-edit="'+w.mat.item.id+'"')&&html.includes('Change the parts'),'the list can change before it is packed');
  assert.ok(html.includes('data-tdh-mini="'+w.mat.item.id+'|move"')&&html.includes('data-tdh-cancel="'+w.rs.item.id+'"'));
  assert.ok(html.includes('class="gm-slot gm-mini tdh-slot"'),'the list shows its parts as little slots');
@@ -88,6 +88,25 @@ test('the Team on the Workers page, the answers switch in the Control room',asyn
 
 test('the planning picker: the parts the crew can lift, any amount (the yard may be restocked by then), + and - by one stillage, Use these parts gives the lines',async t=>{const w=world(t);const {gm}=await load();
  const pk=gm.planPick({state:w.f.sim.snapshot(),lift:1500000});let h=pk.html();assert.ok(h.includes('data-pp-slot="'+w.p.id+'"')&&h.includes('Use these parts'));assert.ok(/data-pp-done disabled/.test(h),'nothing picked yet');
- h=pk.set(w.p.id,w.per*10);assert.ok(h.includes('only '+(w.per*3)+' in the yard now'),'more than the yard has is allowed, and said');
+ h=pk.set(w.p.id,w.per*10);assert.ok(h.includes('more than you have: '+(w.per*3)+' free in the yard now'),'more than the yard has is allowed, and said');assert.ok(h.includes('class="pp-q over"'),'the picked tag is amber');assert.ok(h.includes('<b class="gm-n">'),'the corner still shows the yard');
  pk.select(w.p.id);assert.equal(pk.step(1),w.per*11);assert.equal(pk.step(-1),w.per*10);
  assert.deepEqual(pk.done(),[{product:w.p.id,quantity:w.per*10}]);});
+
+test("review fixes on the page: a low-stock line, the Workers form uses the server's free list (the crane crew marked), a list that didn't go asks for a new day, paperwork without a doubled title, dates in words, messages first on a phone",async t=>{const w=world(t);const {T,td,cw,cm}=await load();
+ const D5=addDays(D0,5);w.f.cmd('planMaterials',{day:D5,site:w.b.id,lines:[{product:w.p.id,quantity:w.per*9}]});
+ let html=await show(w,OWNER,D5);assert.ok(html.includes('class="tdh-warn"')&&/Only \d+ of .+ in the yard now: \d+ short/.test(html),'amber before its day');
+ const cell=html.slice(html.indexOf('data-tdh-day="'+D5+'"'),html.indexOf('</button>',html.indexOf('data-tdh-day="'+D5+'"')));assert.ok(cell.includes('tdh-flag amber'),'an amber dot on the calendar');
+ // one of Bondi's two hands is booked away on the day of its delivery: the other is the crane crew, marked and never offered
+ const bondi=w.f.sim.repo.all('resource').filter(r=>r.type==='WORKER'&&r.enabled&&r.location===w.a.id).sort((a,b)=>a.name.localeCompare(b.name));w.f.cmd('planWorkers',{day:D1,site:w.b.id,time:'08:00',count:1,people:[bondi[0].id]});
+ html=await show(w);td.openForm('WORKERS',D1,{site:w.b.id,who:'PICK',count:2});let f=td.view();assert.ok(f.includes('needed for the crane at Bondi'),'marked');assert.match(f,new RegExp('data-tdh-person="'+bondi[1].id+'" disabled'));
+ td.openForm('WORKERS',D1,{site:w.b.id,count:9});f=td.view();assert.ok(f.includes('Nobody is free that day. Tap <b>Pick people…</b> to choose, or add someone to your team.'),'the form says so before booking');
+ td.openForm('WORKERS',D5,{site:w.b.id,count:9});td.select(D5);f=td.view();assert.match(f,/Only \d+ free that day, so \d+ will show as short\. Tap <b>Pick people…<\/b> to choose anyone\./);td.select(D1);
+ // paperwork: a SWMS with no name is titled by its site; the chosen date in words under the date box
+ const paper=html.slice(html.indexOf('id="tdh-paper"'));assert.ok(paper.includes('<span class="tdh-ptype">SWMS</span><span class="tdh-paper-text"><b>Bondi</b>'),'no SWMS | SWMS');
+ td.openForm('PAPER',D1,{expiresOn:'2026-10-20'});assert.ok(td.view().includes('data-tdh-date-words aria-live="polite">Tue 20 Oct 2026</small>'));td.reset();
+ // the list for tomorrow: Dave never answers, so at 5 pm it didn't go; it waits for a new day
+ w.f.clock(D1,'17:00');w.f.pass();html=await show(w);assert.match(html,/Didn(&#39;|&#x27;|'|’)t go/);assert.ok(html.includes('data-tdh-mini="'+w.mat.item.id+'|move"')&&html.includes('Pick a new day'));
+ w.f.clock(addDays(D0,2),'08:00');html=await show(w,OWNER,addDays(D0,2));assert.ok(html.includes('class="tdh-missed"')&&html.includes('data-tdh-goto="'+w.mat.item.id+'"'),'on Where we begin today until it has a new day');
+ // a phone with a message to answer opens on the message, with no simulation disclaimer
+ const g=world(t);T.setState(g.f.sim.snapshot(),acct(g.f));const day=g.f.sim.crewDay(g.liam);cw.open(g.liam,'TODAY');cw.setDay({...day,worker:g.liam});cm.worker();const h=cw.view();
+ assert.ok(h.indexOf('cw-msgs')>0&&h.indexOf('cw-msgs')<h.indexOf('cw-hero'),'Your messages first');assert.ok(!h.includes('SIMULATION / DEMONSTRATION'));assert.ok(!/\sstyle="/.test(h)&&ids(h));});

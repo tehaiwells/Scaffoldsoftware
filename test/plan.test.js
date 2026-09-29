@@ -71,7 +71,7 @@ test('MATERIALS end to end: packed the day before by the yard crew (whole stilla
   assert.equal(r.message,'List for Bondi on '+dayLabel(D1)+' planned. Worker 1 packs it the day before.');assert.equal(r.item.stage,'WAITING');assert.equal(r.item.packDay,D0);assert.equal(r.item.packerName,'Worker 1');assert.equal(r.item.truckPlanName,'T-01 · Dave');
   assert.equal(f.sim.repo.all('loadList').length,0,'no yard list: the owner\'s catalogue has no pack sizes');
   f.clock(D0,'06:00');f.pass();let it=f.item(r.item.id);assert.equal(it.stage,'PACKING');const pm=f.sim.repo.get(it.packMessage,'message');assert.equal(pm.subject,'PACK');assert.equal(pm.needsAnswer,false);
-  assert.equal(pm.text,'Hi Worker, please pack this list for Bondi today, for '+dayLabel(D1)+': '+(per*2)+' × '+p.name+'. T-01 picks it up at 7:00 am.');
+  assert.equal(pm.text,'Hi there, please pack this list for Bondi today, for '+dayLabel(D1)+': '+(per*2)+' × '+p.name+'. T-01 picks it up at 7:00 am.');
   const job=()=>f.sim.repo.all('job').find(j=>j.key==='PLAN:PACK:'+it.id);
   assert.ok(f.until(()=>job(),20),'the pack job is on the yard board');assert.equal(job().priority,3);assert.equal(job().effect,'PACK');assert.equal(job().badge,'REAL');assert.equal(job().category,'ORDERS');
   assert.ok(f.until(()=>f.item(it.id).stage==='PACKED',300),'packed by the crew');it=f.item(it.id);assert.equal(it.held.length,2);assert.match(it.log.at(-1).text,/^Packed by Worker \d\.$/);
@@ -173,9 +173,11 @@ test('WORKERS: a late yes on the day moves at once; auto-pick takes yard scaffol
   f.clock(D1,'09:00');const m=f.msgs(r.item.id).find(x=>x.person===abe);f.cmd('messageAnswer',{id:m.id,yes:true});assert.equal(f.sim.repo.get(abe,'resource').location,a.id,'a late yes moves at once');
   // site crew: Bondi has a list that day (its crane is busy), Parramatta is the target, Manly can spare one of its two
   const {p,per}=f.stock(1);f.cmd('planMaterials',{day:D2,site:a.id,lines:[{product:p.id,quantity:per}]});
-  const r2=f.cmd('planWorkers',{day:D2,site:b.id,count:5});const picked=f.item(r2.item.id).people.map(x=>f.sim.repo.get(x.person,'resource'));
-  assert.deepEqual(picked.map(w=>w.name),['Abe','Zed','Worker 1']);assert.equal(picked[2].location,c.id,"one of Manly's two, never the last one");
-  assert.equal(f.item(r2.item.id).problem,'Short by 2: add a person to your team.');assert.match(r2.message,/Short by 2/);assert.equal(f.view(r2.item.id).gaps,2);
+  // then, as a last resort, yardsmen: never the one packing Bondi's list that day, and always two left at the yard
+  const r2=f.cmd('planWorkers',{day:D2,site:b.id,count:7});const picked=f.item(r2.item.id).people.map(x=>f.sim.repo.get(x.person,'resource'));
+  assert.deepEqual(picked.map(w=>w.name),['Abe','Zed','Worker 1','Worker 2','Worker 3']);assert.equal(picked[2].location,c.id,"one of Manly's two, never the last one");
+  assert.ok(picked.slice(3).every(w=>w.location===f.yard.id&&f.sim.roleOf(w)==='YARDSMAN'));assert.ok(!picked.some(w=>w.id===f.item(f.sim.repo.all('planItem').find(i=>i.type==='MATERIALS').id).packer),'never the packer');
+  assert.equal(f.item(r2.item.id).problem,'Short by 2: nobody else is free that day. Tap Ask someone.');assert.match(r2.message,/Short by 2: nobody else is free that day/);assert.equal(f.view(r2.item.id).gaps,2);
   assert.throws(()=>f.cmd('planWorkers',{day:D2,site:b.id,time:'08:00',count:21}),/How many/);
 });
 
@@ -210,8 +212,11 @@ test('catch-up after the app was closed: a whole missed day of workers is closed
   const a=f.item(w.item.id);assert.equal(a.status,'DONE');assert.ok(a.log.some(l=>l.text==='The day passed while the app was closed.'));
   assert.ok(f.sim.repo.all('resource').filter(r=>r.type==='WORKER').every(r=>!r.away));
   const b=f.item(w2.item.id);assert.ok(b.log.some(l=>l.text==='Sent late: the app was closed.'));assert.equal(f.msgs(b.id).length,1);
-  const late=f.view(m.item.id);assert.equal(late.flags.late,true);assert.equal(late.flags.red,true);assert.equal(f.item(m.item.id).stage,'LOADING','the late list still goes');
-  assert.ok(f.until(()=>f.item(m.item.id).status==='DONE',800));
+  // a list whose whole day passed while the app was closed never goes by itself days late: nobody is asked, it waits, red, for a new day
+  const late=f.view(m.item.id);assert.equal(late.flags.late,true);assert.equal(late.flags.red,true);assert.equal(f.item(m.item.id).status,'MISSED');assert.equal(late.words,"Didn't go");
+  assert.equal(f.item(m.item.id).problem,"Didn't go: the day passed while the app was closed. Pick a new day or cancel it.");assert.equal(f.msgs(m.item.id).length,0,'no late pack message');assert.equal(late.canMove,true);
+  f.cmd('planMove',{id:m.item.id,day:D2,time:'11:00'});assert.equal(f.item(m.item.id).status,'ACTIVE');f.clock(D2,'11:00');f.pass();
+  assert.ok(f.until(()=>f.item(m.item.id).status==='DONE',800),'on its new day it goes');
 });
 
 test('removing a site calls its plans off, lets its held stillages go and sends borrowed people home first; they survive the delete of an unused site',t=>{
@@ -233,9 +238,9 @@ test('a removed truck and a person who leaves: bookings say what to fix; borrowe
   const f=planFixture(t,{now:L(D0,'09:00')});f.cmd('teamStart');const dave=f.driver('Dave'),s=f.site();const {p,per}=f.stock(1);const [liam,noah]=team(f,['Liam','Noah']);f.cmd('planReplies',{on:false});
   f.cmd('quickAdjust',{kind:'TRUCK',delta:1,location:f.yard.id,payload:2000000});const small=f.truck('L-01');
   const tr=f.cmd('planTruck',{day:D2,truck:small.id,driver:dave.id}),mat=f.cmd('planMaterials',{day:D2,site:s.id,lines:[{product:p.id,quantity:per}],truckPlan:tr.item.id});
-  f.cmd('retire',{id:small.id});let it=f.item(tr.item.id);assert.equal(it.truck,null);assert.equal(it.problem,'L-01 was removed. Pick another truck.');assert.equal(f.item(mat.item.id).truckPlan,null,'the list goes on the next free truck');
+  f.cmd('retire',{id:small.id});let it=f.item(tr.item.id);assert.equal(it.truck,null);assert.equal(it.problem,'L-01 was removed. Cancel it and book another truck.');assert.equal(f.item(mat.item.id).truckPlan,null,'the list goes on the next free truck');
   f.cmd('teamRemove',{id:dave.id});it=f.item(tr.item.id);assert.equal(it.driver,null);assert.equal(it.needsDriver,true);assert.ok(f.msgs(it.id).every(m=>m.status==='CALLED_OFF'));
-  const w=f.cmd('planWorkers',{day:D1,site:s.id,count:2,people:[liam,noah]});f.cmd('teamRemove',{id:noah});assert.equal(f.item(w.item.id).people.length,1);assert.equal(f.item(w.item.id).problem,'Short by 1: add a person to your team.');
+  const w=f.cmd('planWorkers',{day:D1,site:s.id,count:2,people:[liam,noah]});f.cmd('teamRemove',{id:noah});assert.equal(f.item(w.item.id).people.length,1);assert.equal(f.item(w.item.id).problem,'Short by 1: nobody else is free that day. Tap Ask someone.');
   f.clock(D0,'15:00');f.pass();f.cmd('messageAnswer',{id:f.msgs(w.item.id).find(m=>m.person===liam).id,yes:true});f.clock(D1,'07:00');f.pass();assert.equal(f.sim.repo.get(liam,'resource').location,s.id);
   assert.throws(()=>f.cmd('teamRemove',{id:liam}),/Liam is at .* today\. Remove them tomorrow\./);
   f.cmd('resources',{location:s.id,workers:2,machines:1,stepMs:100,speed:100000,jobs:false});const l=f.sim.repo.get(liam,'resource');assert.equal(l.enabled,true);assert.equal(l.location,f.yard.id,'sent home before the reset');
@@ -246,7 +251,7 @@ test('idempotency: a repeated command key makes one item; a pass run twice at th
   const f=planFixture(t,{now:L(D0,'09:00')});f.cmd('teamStart');const s=f.site();team(f,['Liam']);const key=randomUUID();
   const a=f.cmd('planRestack',{day:D1},key),b=f.cmd('planRestack',{day:D1},key);assert.deepEqual(a,b);assert.equal(f.sim.repo.all('planItem').length,1);
   assert.throws(()=>f.cmd('planRestack',{day:D2},key),/different action/);
-  f.cmd('planTruck',{day:D1,truck:f.truck('T-01').id,driver:f.driver('Dave').id});f.cmd('planWorkers',{day:D1,site:s.id,count:1});f.cmd('planTruck',{day:D0,hire:{size:'BIG'}});
+  f.cmd('planTruck',{day:D1,truck:f.truck('T-01').id,driver:f.driver('Dave').id});f.cmd('planWorkers',{day:D1,site:s.id,count:1});f.cmd('planTruck',{day:D0,time:'10:00',hire:{size:'BIG'}});
   f.at(L(D0,'09:10'));f.pass();const versions=()=>f.db.prepare("SELECT id,version FROM objects WHERE company_id=? AND kind IN ('planItem','message','resource','truck','reservation') ORDER BY id").all(f.user.company_id).map(r=>r.id+'@'+r.version).join(',');
   const once=versions();f.pass();assert.equal(versions(),once,'nothing changed');
   const rev=f.sim.snapshot().plan.rev;f.pass();assert.equal(f.sim.snapshot().plan.rev,rev,'no revision bump either');
