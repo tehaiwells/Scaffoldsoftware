@@ -1470,7 +1470,11 @@ export function createShapeEditor({ target, state, account, api, command, notify
     if (!ui.view) ui.view = fitView();
     computeK();
     svg.setAttribute('viewBox', [ui.view.x, ui.view.y, ui.view.w, ui.view.h].map(f2).join(' '));
-    svg.innerHTML = planSVG(draft, ui, ctx());
+    // Redraw only when the plan really changed: a poll that changed nothing must not recreate the handles under a pointer (or a test).
+    const plan = planSVG(draft, ui, ctx());
+    if (plan === ui.lastPlan && svg.childElementCount) return;
+    svg.innerHTML = plan;
+    ui.lastPlan = plan;
     if (had) svg.querySelector(attrSel('data-handle', had) + '[tabindex]')?.focus({ preventScroll: true });
   }
   function fieldValue(key) {
@@ -1598,6 +1602,22 @@ export function createShapeEditor({ target, state, account, api, command, notify
 
   function mount(h) {
     if (closed) return;
+    const markup = editorMarkup(draft, ui, ctx()),
+      first = !ui.mounted;
+    // A poll re-renders the page around the editor every second or so. When nothing about the editor has changed, keep the drawing
+    // that is on screen: a handle someone is about to grab must never vanish under them. If the page made a new container, the old
+    // drawing moves into it. (A remount during a drag still finishes the drag, as before.)
+    if (!first && host && !ui.drag && markup === ui.lastMarkup) {
+      if (host !== h) {
+        h.replaceChildren(...host.childNodes);
+        host = h;
+        if (boundHost !== host) bindHost(host);
+        svg = host.querySelector('#shape-svg');
+      }
+      paint();
+      flushPending();
+      return;
+    }
     if (ui.drag) endDrag(null, false, true); // the svg holding pointer capture is replaced: finish the drag as dropped, never leave it stuck
     const same = host === h,
       f = same ? captureFocus() : null;
@@ -1605,9 +1625,9 @@ export function createShapeEditor({ target, state, account, api, command, notify
       for (const x of h.querySelectorAll('details[data-more]'))
         x.open ? ui.open.add(x.dataset.more) : ui.open.delete(x.dataset.more);
     host = h;
-    const first = !ui.mounted;
     ui.locked = false;
-    host.innerHTML = editorMarkup(draft, ui, ctx());
+    host.innerHTML = markup;
+    ui.lastMarkup = markup;
     svg = host.querySelector('#shape-svg');
     if (first) {
       ui.mounted = true;
@@ -1632,7 +1652,10 @@ export function createShapeEditor({ target, state, account, api, command, notify
       svgRO.observe(svg);
     }
     if (boundHost !== host) bindHost(host);
-    bindSvg(svg);
+    if (!svg.__shapeBound) {
+      bindSvg(svg);
+      svg.__shapeBound = true;
+    }
     paint();
     restoreFocus(f);
     if (first) {
