@@ -144,3 +144,19 @@ removes only closed messages and notifications older than that.
   the right customer; Xero and MYOB files parse and carry the totals; unbilled and Needs you; permissions; the LIVE invariant),
   `test/live-golive.test.js` (opening lots run from `onHireSince`, the import checks and refusals, any system name, weight optional,
   the parallel run, retention), and `e2e/live-billing-api.spec.js` on the running server.
+- On screen (`public/live-billing.js`, loaded only in a real yard beside `live-office.js` and `live-today.js`, ADR 0007; no new Office
+  page, §13.7): **Client sites** gets a Customers card (name, ABN, terms, PO, billing email, its sites; the unbilled amount for
+  finance.view; Change, Remove with a reason, Bring back; "Link client names to customers" while a site still carries only a client name),
+  a Customer picker and PO in Create site and Edit site details, and on each site card a Billing block (Bills to, the off-hire notice with
+  its pickup number and pickup day — overdue in words — the "Off-hire called…" form, and "Already on hire here? Add an opening lot").
+  The board's **New site** (Send) takes the customer and PO too, and **Remove site** in a real yard asks for the reason. The **Hire** page
+  gains Statements (customer picker, the preview with the rule's words on each line it touched, Issue → the number, a Locked badge,
+  Reprint as the stored bytes, Adjust… and Reverse… for the owner, the accounting file with Download for Xero / MYOB and a plain "not
+  set" state until the codes are entered), the per-site view stays as "One site, any dates" (a preview, never sent), Hire settings
+  (owner: the rule and its window, the Xero and MYOB codes, retention years) and "Bring your yard in" (the five pasted lists in the
+  catalogue import's check-first style, a refused row explained in place, the parts picker offered again, the parallel run). **Today**'s
+  business card reads "Unbilled since <day>" with an Issue statements link; Needs you shows "Pickup overdue" and "Unbilled". **Account**
+  invites the Accounts role, which lands on Hire. Tests: `test/live-billing-ui.test.js` (the render functions from the server's own views,
+  who sees what) and `e2e/live-billing-ui.spec.js` (customer → site → send → deliver → opening lot → off-hire → collect → issue →
+  Xero download → identical reprint, then a go-live import producing a first statement from the lot's date), on the normal clock and
+  CI-style (UTC).

@@ -46,6 +46,7 @@ import {
   gmCamera,
   gmInset,
   gmOfficeToggle,
+  gmPartsAgain,
   officeHTML,
   OFFICE_TILES,
 } from './game.js'; // the game board (the main screen) and the Office drawer
@@ -89,6 +90,14 @@ const loHost = {
   today: () => tdhToday(),
   finished: () => {
     LOM?.__lr?.reset?.();
+  },
+  // billing (public/live-billing.js): what the signed-in person may do, the Needs-you jump to a customer's statement, the parts picker again
+  perms: () => account?.permissions ?? [],
+  pickCustomer: (id) => LBM?.lbPick?.(id),
+  parts: () => {
+    if (!isOps()) return;
+    if (view !== 'HOME' && !schGo('HOME')) return;
+    requestAnimationFrame(() => gmPartsAgain());
   },
 };
 // A trip by id (today's, or a later day's): open Today on its day and bring its card into view.
@@ -146,12 +155,38 @@ function lo() {
   }
   return LOM;
 }
+// Billing in a real yard (public/live-billing.js, ADR 0011): customers, off-hire, statements, the accounting file, hire settings, go-live.
+let LBM = null,
+  lbLoading = false;
+function lb() {
+  if (!liveMode()) return null;
+  if (!LBM && !lbLoading && typeof document !== 'undefined') {
+    lbLoading = true;
+    import('./live-billing.js')
+      .then((m) => {
+        LBM = m;
+        m.lbSetup(loHost);
+        loRedraw();
+      })
+      .catch(() => {
+        lbLoading = false;
+      });
+  }
+  return LBM;
+}
 // New trip data or an opened form: Today morphs itself; another Office page is drawn again unless someone is typing in a trip form.
 function loRedraw() {
   if (typeof document === 'undefined' || !onPage() || deferRender) return;
   if (view === 'TODAY') return tdRedraw();
+  if (view === 'HIRE') return hrPaint();
   if (!['TRUCK12', 'TRUCK2', 'WORKERS', 'STOCK', 'MATERIALS', 'SITES'].includes(view)) return;
-  if (document.activeElement?.closest?.('.lo-form, .lo-link-box, .lr-values, .lr-finish')) return;
+  // someone typing in a site form or a reason box keeps their words: the page waits for the next poll
+  if (
+    document.activeElement?.closest?.(
+      '.lo-form, .lo-link-box, .lr-values, .lr-finish, .lb-form, .sf-reason, form#site, form[id^="site-details-"]',
+    )
+  )
+    return;
   render();
 }
 // Remove site's one fix button for an open stocktake: the stock page opens at that stocktake, marked for a moment.
@@ -281,8 +316,10 @@ const onKey = (fn) => {
 };
 const onRenderKey = (fn) => (patching ? renderKeys.length : renderKeys.push(onKey(fn)));
 const isOps = () => !!account?.permissions.includes('operations.manage');
-// The first page after signing in: the game board for the yard office (operations), the Control room for everyone else.
-const startView = (permissions) => (permissions?.includes('operations.manage') ? 'HOME' : 'CONTROL');
+// The first page after signing in: the game board for the yard office (operations), Hire for Accounts (money, never operations), the
+// Control room for everyone else.
+const startView = (permissions) =>
+  permissions?.includes('operations.manage') ? 'HOME' : permissions?.includes('finance.view') ? 'HIRE' : 'CONTROL';
 const NAV = [
   ['HOME', 'Yard'],
   ['CONTROL', 'Control room'],
@@ -357,8 +394,11 @@ async function keyedPost(url, data) {
 }
 async function command(action, data) {
   const { res, out: result } = await keyedPost(`/api/commands/${action}`, data);
-  if (!res.ok) throw new Error(result.error);
+  // a refusal keeps its code and detail (BILLED, CHECK_FAILED: the page shows the rows, the statement, the earliest day)
+  if (!res.ok)
+    throw Object.assign(new Error(result.error), { status: res.status, code: result.code, detail: result.detail });
   LTM?.ltForget?.(); // a real yard's Needs you and lanes are read again after anything changes
+  LBM?.lbForget?.();
   return result;
 }
 function bind(id, action, transform = (x) => x, after = null) {
@@ -4461,6 +4501,8 @@ export function miPlan(rows, cfg, products = [], systems = []) {
     else if (e.name.length > 250) e.errors.push('Name is longer than 250 characters');
     e.sysRaw = get(r, 'system', line);
     e.system = miSystemOf(e.sysRaw, systems);
+    // a real yard takes any system name as written (ADR 0011: the three-system gate is lifted there); the Practice yard asks
+    if (!e.system && cfg.anySystem && e.sysRaw) e.system = e.sysRaw;
     if (!e.system) {
       const k = miNorm(e.sysRaw),
         pick = cfg.sysMap?.[k],
@@ -4784,6 +4826,7 @@ const miCfg = () => ({
   decisions: mi.decisions,
   edits: mi.edits,
   dupDefault: mi.dupDefault,
+  anySystem: liveMode(),
 });
 const miPlanNow = () => miPlan(mi.rows ?? [], miCfg(), state?.products ?? [], miSystems());
 // The unit from the weight header: kg or g sets it; lb, oz or t (refused by the import) leaves it unchosen ('') until the owner picks one; a header naming none keeps the owner's choice (kg to start).
@@ -10979,6 +11022,51 @@ function siTruck(t, coming = false) {
     '</div>'
   );
 }
+// A real yard bills a site to a customer (ADR 0011): the picker and the site's PO in the site forms, and the billing block on the card
+// (bills to, the off-hire notice with its pickup number, an opening lot). The Practice yard keeps its free-text client field only.
+function siBillFields(s = null) {
+  if (!liveMode()) return '';
+  const L = lb(),
+    c = L?.lbCustomers();
+  return (
+    '<label>Customer<select name="customer"' +
+    (c ? '' : ' disabled') +
+    '><option value="">' +
+    (c ? 'No customer yet' : 'Loading customers…') +
+    '</option>' +
+    (c?.customers ?? [])
+      .map(
+        (x) =>
+          '<option value="' +
+          esc(x.id) +
+          '"' +
+          (x.id === s?.customer ? ' selected' : '') +
+          '>' +
+          esc(x.name) +
+          '</option>',
+      )
+      .join('') +
+    '</select></label><label>PO (optional)<input name="po" maxlength="60" value="' +
+    esc(s?.po ?? '') +
+    '"></label>'
+  );
+}
+function siBillBlock(s, ops) {
+  if (!liveMode()) return '';
+  const L = lb();
+  if (!L) return '';
+  return (
+    '<div class="si-block lb-block"><h3 class="si-sub">Billing</h3>' +
+    L.lbSiteHTML(s, {
+      customers: L.lbCustomers(),
+      offHires: ops ? L.lbOffHires() : null,
+      ops,
+      today: tdhToday(),
+      products: state.products,
+    }) +
+    '</div>'
+  );
+}
 function siCard(s, ix) {
   const ops = isOps(),
     live = s.status === 'ACTIVE',
@@ -11056,6 +11144,7 @@ function siCard(s, ix) {
             '"></label><label>Contact phone<input name="phone" maxlength="60" value="' +
             esc(s.phone ?? '') +
             '"></label>' +
+            siBillFields(s) +
             (account.users.length
               ? '<label>Assigned supervisor<select name="supervisor"><option value="">Not assigned</option>' +
                 options(account.users, 'name', s.supervisor) +
@@ -11108,7 +11197,9 @@ function siCard(s, ix) {
     '</div>' +
     selectionBar(s) +
     '</div>' +
-    '<div class="si-side"><div class="si-block"><h3 class="si-sub">On site <span class="si-count">' +
+    '<div class="si-side">' +
+    siBillBlock(s, ops) +
+    '<div class="si-block"><h3 class="si-sub">On site <span class="si-count">' +
     boxes.length +
     '</span></h3>' +
     siTiles(s.id, boxes, ix) +
@@ -11146,9 +11237,19 @@ function siteView() {
   siMount();
   const ix = siIndex(),
     ops = isOps();
+  const L = liveMode() ? lb() : null,
+    custCard =
+      L && (ops || account.permissions.includes('customers.manage') || hrOK())
+        ? L.lbCustomersHTML(L.lbCustomers(), {
+            ops,
+            finance: hrOK(),
+            manage: account.permissions.includes('customers.manage'),
+          })
+        : '';
   return (
     '<div class="page-sites">' +
     siHero(ix) +
+    custCard +
     (!state.sites.length
       ? '<section class="panel si-empty">' +
         siImg('si-site', 'si-empty-art') +
@@ -11175,6 +11276,7 @@ function siteView() {
           text('name', 'Site name') +
             text('address', 'Address / location') +
             '<label>Client company (optional)<input name="client" maxlength="250"></label><label>Site contact (optional)<input name="contact" maxlength="250"></label><label>Contact email (optional)<input name="email" type="email" maxlength="254"></label><label>Contact phone (optional)<input name="phone" maxlength="60"></label>' +
+            siBillFields() +
             `<label>Assigned supervisor<select name="supervisor"><option value="">Not assigned</option>${options(account.users)}</select></label>`,
           'Create site',
         ) +
@@ -11542,7 +11644,7 @@ function bindViews() {
   action('[data-archive]', (e) => command('archive', { id: e.dataset.archive }));
   document
     .querySelectorAll(
-      '[data-sf-remove],[data-sf-sure],[data-sf-no],[data-sf-fix],[data-sf-keep],[data-sf-reopen],[data-sf-retry]',
+      '[data-sf-remove],[data-sf-sure],[data-sf-reason-go],[data-sf-no],[data-sf-fix],[data-sf-keep],[data-sf-reopen],[data-sf-retry]',
     )
     .forEach(
       (b) =>
@@ -19190,6 +19292,7 @@ function hrBodyHTML(d) {
       sprite('spr-truck12') +
       '<div><b>Adding up the ledger&hellip;</b><p>Every delivery to a client site and every collection is replayed to work out what is on hire and since when.</p></div></div></section>'
     );
+  const L = hrLB(d);
   return (
     (hrErr
       ? '<p class="notice hr-note">Showing the last figures: ' +
@@ -19198,9 +19301,40 @@ function hrBodyHTML(d) {
       : '') +
     hrAlert(d) +
     hrSitesCard(d) +
+    L.st +
     hrStatementCard(d) +
-    hrRatesCard(d)
+    hrRatesCard(d) +
+    L.set +
+    L.gl
   );
+}
+// A real yard's billing cards (public/live-billing.js, ADR 0011): the statement per customer (preview → Issue → locked, reprint, reverse,
+// adjust) and the accounting file for everyone with finance.view; hire settings and the go-live import for the owner. The Practice yard: none.
+function hrLB(d) {
+  if (!liveMode()) return { st: '', set: '', gl: '' };
+  const L = lb();
+  if (!L || !d)
+    return {
+      st: '<section class="panel hr-card lb-card" id="lb-statements"><p class="lb-quiet">Loading statements…</p></section>',
+      set: '',
+      gl: '',
+    };
+  const owner = !!account?.permissions.includes('company.manage'),
+    settings = L.lbSettings();
+  return {
+    st: L.lbStatementsHTML({
+      customers: L.lbCustomers(),
+      statements: L.lbStatements(),
+      preview: L.lbPreview(),
+      settings,
+      today: d.today,
+      finance: hrOK(),
+      issue: !!account?.permissions.includes('statements.manage'),
+      owner,
+    }),
+    set: L.lbSettingsHTML(settings, { owner }),
+    gl: L.lbGoLiveHTML({ owner }),
+  };
 }
 // Materials out on hire with no rate: named, counted and left out of every total until the owner sets one.
 function hrAlert(d) {
@@ -19381,8 +19515,10 @@ function hrStatementCard(d) {
   const head = hrHead(
     'si-docket',
     'hr-h-st',
-    'Hire statement',
-    'Pick a site and the dates. The pieces on hire each day are added up into piece-days and priced at your rates, ex GST; GST is added at 10%. Print it on A4 or download it for your accounts.',
+    liveMode() ? 'One site, any dates' : 'Hire statement',
+    liveMode()
+      ? 'A look at one site for the dates you choose, priced the same way as the statement. Statements themselves are issued per customer above; this preview is not sent.'
+      : 'Pick a site and the dates. The pieces on hire each day are added up into piece-days and priced at your rates, ex GST; GST is added at 10%. Print it on A4 or download it for your accounts.',
   );
   if (!sites.length)
     return (
@@ -19545,6 +19681,10 @@ function hrStatementBody(d) {
         '</td><td class="num hr-c-amt" data-label="Amount">' +
         (l.amount == null ? '<span class="hr-muted">not priced</span>' : '<b>' + hrAUD(l.amount) + '</b>') +
         '</td></tr>' +
+        // the hire-stop rule's words on the line it touched (a real yard's off-hire notice, ADR 0011)
+        (l.offHire ?? [])
+          .map((o) => '<tr class="hr-offhire"><td colspan="5"><small>' + esc(o.words) + '</small></td></tr>')
+          .join('') +
         (l.topUp
           ? '<tr class="hr-topup"><td class="hr-c-mat"><span class="hr-top"><b>Minimum hire top-up</b><small>' +
             esc(p.name) +
@@ -19590,6 +19730,17 @@ function hrStatementBody(d) {
         ' no rate and ' +
         (s.missing === 1 ? 'is' : 'are') +
         ' not in these totals. <button type="button" class="text-button" data-hr-go-rates>Set rates</button></p>'
+      : '') +
+    (liveMode()
+      ? '<p class="hr-rule-line">' +
+        esc(s.hireStopRule ?? '') +
+        (s.billedUpTo
+          ? ' Billed up to ' +
+            esc(dFmt(s.billedUpTo)) +
+            (s.lastStatement ? ' on ' + esc(s.lastStatement) : '') +
+            ': the next statement starts after that.'
+          : '') +
+        '</p><p class="hr-footer">Statement — your accounting package issues the tax invoice.</p>'
       : '') +
     actions
   );
@@ -19982,6 +20133,8 @@ function hrPaint() {
   const a = document.activeElement,
     inRates = !!a?.closest?.('#hr-rates'),
     inControls = !!a?.closest?.('#hr-controls') && a.matches?.('input[type=date]'),
+    // a billing card holding the cursor in a box is left alone (typing); a focused button never blocks its card's redraw
+    inLB = a?.matches?.('input,select,textarea') ? (a.closest?.('.lb-card')?.id ?? null) : null,
     refocus = a?.closest?.('#hr-statement')
       ? a.id
         ? '#' + a.id
@@ -19989,12 +20142,20 @@ function hrPaint() {
           ? '[data-hr-preset="' + a.dataset.hrPreset + '"]'
           : null
       : null;
-  if (!d || !document.getElementById('hr-sites') || (!inRates && !inControls && !refocus)) {
+  if (!d || !document.getElementById('hr-sites') || (!inRates && !inControls && !refocus && !inLB)) {
     body.innerHTML = hrBodyHTML(d);
     hrRatesStale = false;
   } else {
     swap('hr-alert', hrAlert(d));
     swap('hr-sites', hrSitesCard(d));
+    // a real yard's billing cards: each is drawn again unless it holds the cursor
+    const L = hrLB(d);
+    for (const [id, html] of [
+      ['lb-statements', L.st],
+      ['lb-settings', L.set],
+      ['lb-golive', L.gl],
+    ])
+      if (id !== inLB && html) swap(id, html);
     if (inControls) {
       const b = document.getElementById('hr-st-body');
       if (b) {
@@ -20097,6 +20258,7 @@ async function hrPrint(btn) {
     printedAt: new Date().toISOString(),
     gstPercent: d.gstPercent,
     no: prNo('HS', s.site.id) + '-' + s.to.replaceAll('-', '').slice(2),
+    footer: liveMode() ? 'Statement — your accounting package issues the tax invoice' : null,
   };
   prReturn = btn;
   prOpen(m);
@@ -20261,7 +20423,11 @@ export function hrSheetHTML(m) {
     esc(m.no) +
     ' &middot; ' +
     esc(m.site.name) +
-    ' &middot; statement only, not a tax invoice</span><span>Scaffold Yard &middot; simulation / demonstration</span></div></article>'
+    ' &middot; ' +
+    esc(m.footer ?? 'statement only, not a tax invoice') +
+    '</span><span>' +
+    (m.footer ? 'Scaffold Yard' : 'Scaffold Yard &middot; simulation / demonstration') +
+    '</span></div></article>'
   );
 }
 // ---- events: one delegated listener per kind, bound once ----
@@ -20416,6 +20582,7 @@ function hrBind() {
   if (patching || typeof document === 'undefined') return;
   hrMountArt();
   hrBindOnce();
+  lb();
   hrLoad(false);
 }
 // A poll on the Hire page: the live pill, Pause, activity and notifications; the figures follow the ledger through hrLoad.
@@ -23436,7 +23603,12 @@ function tdhBusiness(t) {
       esc(m.toInvoiceWords ?? 'Built up, to invoice (incl. GST)') +
       '</span><b>' +
       tdhMoney(m.toInvoice) +
-      '</b></div></div>' +
+      '</b>' +
+      // a real yard: the statements are issued on the Hire page (ADR 0011)
+      (liveMode() && m.unbilled?.amount
+        ? '<button type="button" class="tdh-link tdh-statements" data-view="HIRE">Issue statements</button>'
+        : '') +
+      '</div></div>' +
       (m.missingWords
         ? '<p class="tdh-missing">' +
           tdhDot('amber') +

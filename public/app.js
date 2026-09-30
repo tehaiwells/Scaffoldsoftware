@@ -61,16 +61,23 @@ const checks = (items, selected, name, tiles = false) =>
   `<div class="checks${tiles ? ' sys-tiles' : ''}">${items.map((x) => `<label><input type="checkbox" name="${name}" value="${escape(x.id)}" ${selected.includes(x.id) ? 'checked' : ''}>${tiles ? `<span class="sys-badge" aria-hidden="true">${escape(badge(x))}</span>` : ''}${escape(x.name)}</label>`).join('')}</div>`;
 const field = (name, label, type = 'text', value = '', max = type === 'email' ? 254 : 128) =>
   `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" required maxlength="${max}" ${type === 'password' ? 'minlength="12" autocomplete="new-password"' : ''}></label>`;
+// ACCOUNTS (ADR 0011): money, customers and statements, never operations (no sites, trucks, trips or Needs you).
 const ROLES = [
   { id: 'OWNER', name: 'Owner / Director' },
   { id: 'GENERAL_MANAGER', name: 'General Manager' },
   { id: 'SUPERVISOR', name: 'Supervisor' },
+  { id: 'ACCOUNTS', name: 'Accounts (money and statements only)' },
 ];
-const ROLE_NAME = { OWNER: 'Owner / Director', GENERAL_MANAGER: 'General Manager', SUPERVISOR: 'Supervisor' },
-  ROLE_SHORT = { OWNER: 'Owner', GENERAL_MANAGER: 'General Manager', SUPERVISOR: 'Supervisor' },
-  ROLE_COUNT = { OWNER: 'owner', GENERAL_MANAGER: 'manager', SUPERVISOR: 'supervisor' },
-  ROLE_CLASS = { OWNER: 'owner', GENERAL_MANAGER: 'manager', SUPERVISOR: 'supervisor' };
-const ROLE_ORDER = ['OWNER', 'GENERAL_MANAGER', 'SUPERVISOR'];
+const ROLE_NAME = {
+    OWNER: 'Owner / Director',
+    GENERAL_MANAGER: 'General Manager',
+    SUPERVISOR: 'Supervisor',
+    ACCOUNTS: 'Accounts',
+  },
+  ROLE_SHORT = { OWNER: 'Owner', GENERAL_MANAGER: 'General Manager', SUPERVISOR: 'Supervisor', ACCOUNTS: 'Accounts' },
+  ROLE_COUNT = { OWNER: 'owner', GENERAL_MANAGER: 'manager', SUPERVISOR: 'supervisor', ACCOUNTS: 'accounts' },
+  ROLE_CLASS = { OWNER: 'owner', GENERAL_MANAGER: 'manager', SUPERVISOR: 'supervisor', ACCOUNTS: 'accounts' };
+const ROLE_ORDER = ['OWNER', 'GENERAL_MANAGER', 'SUPERVISOR', 'ACCOUNTS'];
 const rolePills = (roles) =>
   roles.map((r) => `<span class="role-pill ${ROLE_CLASS[r] ?? ''}">${escape(ROLE_SHORT[r] ?? r)}</span>`).join('');
 
@@ -564,7 +571,9 @@ const myRoles = () => {
         ? ['OWNER']
         : state.permissions.includes('operations.manage')
           ? ['GENERAL_MANAGER']
-          : ['SUPERVISOR'];
+          : state.permissions.includes('finance.view')
+            ? ['ACCOUNTS']
+            : ['SUPERVISOR'];
   return ROLE_ORDER.filter((x) => r.includes(x));
 };
 const ACCESS = [
@@ -574,6 +583,8 @@ const ACCESS = [
   ['sites.assigned', 'See the sites assigned to you'],
   ['requests.create', 'Order material for sites'],
   ['finance.view', 'See financial figures'],
+  ['customers.manage', 'Keep the customer list'],
+  ['statements.manage', 'Issue statements and download the accounting file'],
 ];
 function settingsHome() {
   mountSprites();

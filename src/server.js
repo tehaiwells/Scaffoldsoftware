@@ -149,6 +149,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/live-office.js': ['live-office.js', 'text/javascript'], // a real yard's trips on Today, the truck page and Your team
     '/live-today.js': ['live-today.js', 'text/javascript'], // Today as a dispatch tool: Needs you, the lanes, the run sheet (ADR 0010)
     '/live-returns.js': ['live-returns.js', 'text/javascript'], // Back & counted, quarantine, the site-finish question, values (ADR 0010)
+    '/live-billing.js': ['live-billing.js', 'text/javascript'], // customers, off-hire, statements, the accounting file, go-live (ADR 0011)
   });
   return async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -390,7 +391,14 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
       else if (req.method === 'GET' && path === '/api/off-hire') send(200, simulation.offHiresView());
       else if (req.method === 'GET' && path === '/api/accounting.csv') {
         const out = simulation.accountingFile(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams));
-        res.writeHead(200, { 'Content-Type': out.type, 'Content-Disposition': `attachment; filename="${out.name}"` });
+        // the page reads what the file carried from the headers (the body is the file itself, saved as it is)
+        res.writeHead(200, {
+          'Content-Type': out.type,
+          'Content-Disposition': `attachment; filename="${out.name}"`,
+          'X-Statements': out.statements.join(','),
+          'X-Total': String(out.total),
+          'X-Words': encodeURIComponent(out.words),
+        });
         res.end(out.body);
       } else if (req.method === 'POST' && path === '/api/golive-preview') send(200, simulation.goLivePreview(body));
       else if (req.method === 'POST' && path === '/api/parallel-run') send(200, simulation.parallelRun(body));

@@ -2857,3 +2857,61 @@ body.in-game #app {
     padding: 3px 8px;
   }
 }
+/* a real yard's New site: the customer and PO under the name (ADR 0011) */
+.gm-newsite-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.gm-newsite-bill {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.gm-nw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8ea99b;
+}
+.gm-newsite .gm-nw-field select,
+.gm-newsite .gm-nw-field input {
+  height: 40px;
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid #4d695b;
+  background: #0f1c16;
+  color: #fff;
+  padding: 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Remove site in a real yard: the reason, then the site is archived with its history kept */
+.sf-reason-in {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6c7f70;
+  margin: 6px 0;
+}
+.sf-reason-in input {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #cfd8c6;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}

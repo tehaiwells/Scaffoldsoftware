@@ -1329,16 +1329,47 @@ function win2HTML() {
   if (G.win?.kind === 'book')
     return glBookHTML(G.win, G.ctx?.state, G.team, G.ctx?.state?.liveBoard?.today ?? G.ctx?.state?.calendar?.today);
   if (G.win?.kind !== 'newsite') return '';
+  // a real yard bills a site to a customer (ADR 0011): the picker and the PO sit under the name; the list comes from /api/customers once
+  if (live()) customersSoon();
+  const cust = live()
+    ? '<div class="gm-newsite-bill"><label class="gm-nw-field"><span>Customer</span><select name="customer"' +
+      (G.customers ? '' : ' disabled') +
+      '><option value="">' +
+      (G.customers ? 'No customer yet' : 'Loading customers…') +
+      '</option>' +
+      (G.customers ?? []).map((c) => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('') +
+      '</select></label><label class="gm-nw-field"><span>PO</span><input name="po" maxlength="60" placeholder="optional" autocomplete="off"></label></div>'
+    : '';
   return (
     '<div class="gm-nw" role="dialog" aria-labelledby="gm-nw-h"><button type="button" class="gm-x" data-gm-win-x aria-label="Close">&times;</button><div class="gm-nw-pic">' +
     gaSprite('si-site', 'gm-nw-img') +
     '</div><h3 id="gm-nw-h">Open a new site</h3><p>' +
     (G.win.then === 'send' ? 'Where does it go? ' : '') +
     'What is the site called?</p>' +
-    '<form class="gm-newsite" data-gm-newsite-form><input name="name" required maxlength="120" placeholder="e.g. George St" aria-label="Site name" autocomplete="off"><button type="submit" class="gm-go">Open site</button></form>' +
+    '<form class="gm-newsite' +
+    (cust ? ' has-bill' : '') +
+    '" data-gm-newsite-form><div class="gm-newsite-row"><input name="name" required maxlength="120" placeholder="e.g. George St" aria-label="Site name" autocomplete="off"><button type="submit" class="gm-go">Open site</button></div>' +
+    cust +
+    '</form>' +
     sfNewSiteList(G.ctx?.state, activeSites(G.ctx?.state), ops()) +
     '</div>'
   );
+}
+// The customers of a real yard, fetched once for the New site window (a new one made on Client sites shows after the next open).
+function customersSoon() {
+  if (G.customers !== undefined || typeof fetch === 'undefined') return;
+  G.customers = null;
+  fetch('/api/customers')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      G.customers = d?.customers ?? [];
+      const el = document.querySelector('[data-gm-win2]');
+      if (el) el.__h = null;
+      refreshNow();
+    })
+    .catch(() => {
+      G.customers = [];
+    });
 }
 function openWin(win) {
   G.win = win;
@@ -1393,7 +1424,7 @@ export function gmUpdate(ctx) {
     if (['site', 'back'].includes(G.mode)) G.mode = 'yard';
   }
   if (G.mode === 'truck' && !(s.trucks ?? []).some((t) => t.id === G.truck && !t.retired)) G.mode = 'yard';
-  if (G.mode === 'parts' && products(s).length && !G.busy) G.mode = 'add';
+  if (G.mode === 'parts' && products(s).length && !G.busy && !G.partsAgain) G.mode = 'add';
   ensureItems(s);
   const list = gridItems(s),
     counts = new Map(list.map((x) => [x.p.id, x.count]));
@@ -1599,8 +1630,16 @@ const sfApi = () => ({
   },
 }); // soft: being removed (its site window shows Removing)
 const openSheet = () => document.querySelector('.gm-body')?.classList.add('sheet');
+// The parts picker offered again after the first list (ADR 0011: gameCatalogue only adds what is missing): the Hire page's go-live card sends here.
+export function gmPartsAgain() {
+  if (!G.ctx?.state) return false;
+  G.partsAgain = true;
+  setMode('parts');
+  return true;
+}
 function setMode(mode, site) {
   hideCard();
+  if (mode !== 'parts') G.partsAgain = false;
   G.mode = mode;
   G.picks = new Map();
   G.sel = null;
@@ -1972,6 +2011,7 @@ function onClick(e) {
     else if (b.dataset.gmDo === 'parts')
       run('gameCatalogue', { systems: [...G.systems] }, (r) => {
         pop(r.message, 'tick');
+        G.partsAgain = false;
         G.mode = 'add';
         G.tab = null;
       });
@@ -2129,8 +2169,14 @@ function onSubmit(e) {
   const w = G.win ?? {};
   run(
     'gameSite',
-    { name: d.name, ...(Number.isInteger(w.col) && Number.isInteger(w.row) ? { col: w.col, row: w.row } : {}) },
+    {
+      name: d.name,
+      ...(Number.isInteger(w.col) && Number.isInteger(w.row) ? { col: w.col, row: w.row } : {}),
+      ...(live() && d.customer ? { customer: d.customer } : {}),
+      ...(live() && String(d.po ?? '').trim() ? { po: String(d.po).trim() } : {}),
+    },
     (r) => {
+      G.customers = undefined; // a new customer may have been made meanwhile: read them again next time
       G.win = null;
       G.lastSite = r.site.id;
       sfUndo(r.site, sfApi());

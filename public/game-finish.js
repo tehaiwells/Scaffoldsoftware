@@ -136,7 +136,7 @@ const homeSVG =
 const tickSVG =
   '<span class="gm-tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 // ---------------------------------------------------------------- state (per browser tab)
-const F = { ask: null, block: null, busy: false, undos: new Map(), seq: 0, api: null, reveal: null }; // ask: the site waiting for its one question; block: {site, why, fix}
+const F = { ask: null, block: null, reason: null, busy: false, undos: new Map(), seq: 0, api: null, reveal: null }; // ask: the site waiting for its one question; block: {site, why, fix}; reason: the site a real yard is asked a reason for (ADR 0011)
 const piecesAt = (s, id) => s?.stock?.[id]?.containers ?? 0;
 const hereOf = (s, id) => {
   const out = new Set();
@@ -286,6 +286,27 @@ function panel(s, site, office = false, head = null) {
       '" data-sf-no>Not now</button></div></div>'
     );
   }
+  // a real yard keeps every site's record: Remove site takes a reason and archives (never deletes)
+  if (F.reason === id)
+    return (
+      '<div class="sf-box sf-ask sf-reason"' +
+      box +
+      ' role="group" aria-label="Remove ' +
+      esc(site.name) +
+      '"><p>' +
+      sfBin('sf-bin sf-bin-big') +
+      '<span>Remove <b>' +
+      esc(site.name) +
+      '</b>? Its record is kept with the reason.</span></p><label class="sf-reason-in"><span>Why (a few words)</span><input maxlength="200" data-sf-reason-in placeholder="e.g. Job finished, all back" autocomplete="off"></label><div class="sf-two"><button type="button" class="' +
+      go +
+      'sf-sure" data-sf-reason-go="' +
+      esc(id) +
+      '"' +
+      dis +
+      '>Remove site</button><button type="button" class="' +
+      alt +
+      '" data-sf-no>Keep it</button></div></div>'
+    );
   if (F.ask === id)
     return (
       '<div class="sf-box sf-ask"' +
@@ -324,7 +345,8 @@ export function sfTile(site, tile, ops) {
 export function sfBelowTiles(s, list, picked, ops) {
   if (!ops) return '';
   const ask =
-    list.find((x) => x.id === F.ask || x.id === F.block?.site) ?? list.find((x) => x.id === picked && x.finishing);
+    list.find((x) => x.id === F.ask || x.id === F.block?.site || x.id === F.reason) ??
+    list.find((x) => x.id === picked && x.finishing);
   return ask ? (panel(s, ask, false, 'Removing — bringing it all home') ?? '') : '';
 }
 // The "Open a new site" window: the sites already on the map, each with Remove site.
@@ -439,7 +461,23 @@ export function sfClick(b, api) {
       show(api, site.id);
       return true;
     }
+    // the real yard asks why: the site is archived with the reason, its history kept (ADR 0011)
+    if (api.ctx?.account?.company?.mode === 'LIVE') {
+      F.reason = site.id;
+      F.ask = null;
+      F.block = null;
+      show(api, site.id);
+      setTimeout(() => document.querySelector('[data-sf-reason-in]')?.focus?.({ preventScroll: true }), 0);
+      return true;
+    }
     sfRun(api, 'gameRemoveSite', { site: site.id }, removed(api, site.id, where), failed(site.id));
+    return true;
+  }
+  if (d.sfReasonGo !== undefined) {
+    const id = d.sfReasonGo,
+      reason = String(b.closest?.('[data-sf-box]')?.querySelector?.('[data-sf-reason-in]')?.value ?? '').trim();
+    F.reason = null;
+    sfRun(api, 'gameRemoveSite', { site: id, ...(reason ? { reason } : {}) }, removed(api, id, where), failed(id));
     return true;
   }
   if (d.sfSure !== undefined) {
@@ -454,6 +492,7 @@ export function sfClick(b, api) {
   if (d.sfNo !== undefined) {
     F.ask = null;
     F.block = null;
+    F.reason = null;
     api.refresh();
     return true;
   }

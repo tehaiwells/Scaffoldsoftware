@@ -38,6 +38,8 @@ export const LT_KIND_WORDS = {
   CANT_MAKE_IT: 'Can’t make it',
   PAPERWORK: 'Paperwork',
   UNPRICED_ON_HIRE: 'No rate',
+  OFF_HIRE_OVERDUE: 'Pickup overdue',
+  UNBILLED: 'Unbilled',
 };
 const DOT_TONE = {
   DRAFT: 'draft',
@@ -49,7 +51,7 @@ const DOT_TONE = {
   DELIVERED: 'done',
   BACK: 'back',
 };
-/** @param {{get:(p:string)=>Promise<any>,cmd:(a:string,d:any)=>Promise<any>,notify:(t:string)=>void,redraw:()=>void,refresh:()=>Promise<any>,state:()=>any,go:(v:string)=>void,goItem:(id:string,day:string)=>void,goTrip:(id:string)=>void,selectDay:(d:string)=>void,addForm:(kind:string,day:string)=>void,today:()=>string|null}} host */
+/** @param {{get:(p:string)=>Promise<any>,cmd:(a:string,d:any)=>Promise<any>,notify:(t:string)=>void,redraw:()=>void,refresh:()=>Promise<any>,state:()=>any,go:(v:string)=>void,goItem:(id:string,day:string)=>void,goTrip:(id:string)=>void,selectDay:(d:string)=>void,addForm:(kind:string,day:string)=>void,today:()=>string|null,pickCustomer?:(id:string)=>void}} host */
 export function ltSetup(host) {
   LT.host = host;
   if (typeof document === 'undefined' || LT.bound) return;
@@ -602,6 +604,13 @@ function act(x) {
   if (a.view === 'TODAY' && a.item) return h.goItem(a.item, a.day ?? h.today());
   if (a.view === 'TODAY') return h.selectDay(a.day ?? h.today());
   if (a.view === 'TRIPS' && a.trip) return h.goTrip(a.trip);
+  // UNBILLED: the Hire page opens on that customer's statement (ADR 0011)
+  if (a.view === 'HIRE' && a.customer) {
+    h.pickCustomer?.(a.customer);
+    h.go('HIRE');
+    requestAnimationFrame(() => document.getElementById('lb-statements')?.scrollIntoView({ block: 'start' }));
+    return;
+  }
   if (a.view === 'SITES' && a.site) {
     h.go('SITES');
     requestAnimationFrame(() => document.getElementById('si-site-' + a.site)?.scrollIntoView({ block: 'start' }));
