@@ -1,105 +1,950 @@
 // @ts-check
-import { integer,requireRule,rect,carryRoute,turnPath,contains,overlap,bbox } from './geometry.js';
+import { integer, requireRule, rect, carryRoute, turnPath, contains, overlap, bbox } from './geometry.js';
 import { AppError } from '../service.js';
 import { label } from './catalogue.js';
-import { active,spotProblem } from './inventory.js';
-import { parseDay,parseSlot } from './schedule.js';
+import { active, spotProblem } from './inventory.js';
+import { parseDay, parseSlot } from './schedule.js';
 // Optional free-text site details (client company, contact, email, phone): empty means null, never a placeholder.
 /** @type {(v:unknown,name:string,max?:number)=>string|null} */
-const optional=(v,name,max=250)=>{if(v===undefined||v===null)return null;requireRule(typeof v==='string',name+' must be text.');const s=v.trim();if(!s)return null;requireRule(s.length<=max,name+' can be at most '+max+' characters.');return s;};
-const EMAIL=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const optional = (v, name, max = 250) => {
+  if (v === undefined || v === null) return null;
+  requireRule(typeof v === 'string', name + ' must be text.');
+  const s = v.trim();
+  if (!s) return null;
+  requireRule(s.length <= max, name + ' can be at most ' + max + ' characters.');
+  return s;
+};
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Free-text contact details kept on a client site (siteDetailFields). @typedef {{client:string|null,contact:string|null,email:string|null,phone:string|null}} SiteDetails */
 /** Commands and reads about sites and material requests, mixed into Simulation.prototype (this = the Simulation). */
-export const logisticsMethods={
-  cancelRequest(input){const request=this.repo.get(input.id,'request');this.assertSite(request.site);requireRule(!request.loadList||input.fromList,'This request belongs to a yard list. Cancel the yard list instead.');requireRule(!['CANCELLED','DELIVERED','RETURNED'].includes(request.status),'This request is already closed.');const tasks=this.tasks().filter(t=>t.request===request.id&&active(t));requireRule(!tasks.some(t=>t.picked),'Finish placement of material currently on equipment before cancelling the remainder.');for(const task of tasks.reverse()){task.state='CANCELLED';this.repo.save(task);this.release(task);}request.status='CANCELLED';request.cancelledBy=this.user.id;request.reason=label(input.reason,'Cancellation reason');this.repo.save(request);this.releaseTruck(request.truck);this.notify('Request cancelled','Unstarted reservations released; already moved stock stays at its actual location.',request.site);return request;},
-  siteDetailFields(input){const email=optional(input.email,'Contact email',254)?.toLowerCase()??null;requireRule(!email||EMAIL.test(email),'Enter a valid contact email.');return {client:optional(input.client,'Client company'),contact:optional(input.contact,'Site contact'),email,phone:optional(input.phone,'Contact phone',60)};},
-  siteDetails(input){const site=this.repo.get(input.id,'site');requireRule(site.status==='ACTIVE','Choose an active site.');let supervisor=site.supervisor??null;if(input.supervisor!==undefined){requireRule(input.supervisor==null||typeof input.supervisor==='string','Choose a valid supervisor.');supervisor=input.supervisor||null;if(supervisor)requireRule(this.db.prepare('SELECT user_id FROM memberships WHERE company_id=? AND user_id=? AND removed_at IS NULL').get(this.user.company_id,supervisor),'Supervisor must belong to this company.');}const changed=supervisor!==(site.supervisor??null),renamed=label(input.name??site.name)!==site.name;if(renamed)site.shapeRev=(site.shapeRev??0)+1;Object.assign(site,{name:label(input.name??site.name),address:label(input.address??site.address,'Address'),...this.siteDetailFields({...site,...input}),supervisor});this.repo.save(site);this.repo.event(this.user.id,'SITE_DETAILS',{destination:site.id,reason:'Site details updated',key:this.key});if(changed)this.notify('Site reassigned',site.name+' now has '+(supervisor?(this.db.prepare('SELECT name FROM users WHERE id=?').get(supervisor)?.name??'a new supervisor'):'no supervisor')+'.',site.id);return site;},
+export const logisticsMethods = {
+  cancelRequest(input) {
+    const request = this.repo.get(input.id, 'request');
+    this.assertSite(request.site);
+    requireRule(
+      !request.loadList || input.fromList,
+      'This request belongs to a yard list. Cancel the yard list instead.',
+    );
+    requireRule(!['CANCELLED', 'DELIVERED', 'RETURNED'].includes(request.status), 'This request is already closed.');
+    const tasks = this.tasks().filter((t) => t.request === request.id && active(t));
+    requireRule(
+      !tasks.some((t) => t.picked),
+      'Finish placement of material currently on equipment before cancelling the remainder.',
+    );
+    for (const task of tasks.reverse()) {
+      task.state = 'CANCELLED';
+      this.repo.save(task);
+      this.release(task);
+    }
+    request.status = 'CANCELLED';
+    request.cancelledBy = this.user.id;
+    request.reason = label(input.reason, 'Cancellation reason');
+    this.repo.save(request);
+    this.releaseTruck(request.truck);
+    this.notify(
+      'Request cancelled',
+      'Unstarted reservations released; already moved stock stays at its actual location.',
+      request.site,
+    );
+    return request;
+  },
+  siteDetailFields(input) {
+    const email = optional(input.email, 'Contact email', 254)?.toLowerCase() ?? null;
+    requireRule(!email || EMAIL.test(email), 'Enter a valid contact email.');
+    return {
+      client: optional(input.client, 'Client company'),
+      contact: optional(input.contact, 'Site contact'),
+      email,
+      phone: optional(input.phone, 'Contact phone', 60),
+    };
+  },
+  siteDetails(input) {
+    const site = this.repo.get(input.id, 'site');
+    requireRule(site.status === 'ACTIVE', 'Choose an active site.');
+    let supervisor = site.supervisor ?? null;
+    if (input.supervisor !== undefined) {
+      requireRule(input.supervisor == null || typeof input.supervisor === 'string', 'Choose a valid supervisor.');
+      supervisor = input.supervisor || null;
+      if (supervisor)
+        requireRule(
+          this.db
+            .prepare('SELECT user_id FROM memberships WHERE company_id=? AND user_id=? AND removed_at IS NULL')
+            .get(this.user.company_id, supervisor),
+          'Supervisor must belong to this company.',
+        );
+    }
+    const changed = supervisor !== (site.supervisor ?? null),
+      renamed = label(input.name ?? site.name) !== site.name;
+    if (renamed) site.shapeRev = (site.shapeRev ?? 0) + 1;
+    Object.assign(site, {
+      name: label(input.name ?? site.name),
+      address: label(input.address ?? site.address, 'Address'),
+      ...this.siteDetailFields({ ...site, ...input }),
+      supervisor,
+    });
+    this.repo.save(site);
+    this.repo.event(this.user.id, 'SITE_DETAILS', {
+      destination: site.id,
+      reason: 'Site details updated',
+      key: this.key,
+    });
+    if (changed)
+      this.notify(
+        'Site reassigned',
+        site.name +
+          ' now has ' +
+          (supervisor
+            ? (this.db.prepare('SELECT name FROM users WHERE id=?').get(supervisor)?.name ?? 'a new supervisor')
+            : 'no supervisor') +
+          '.',
+        site.id,
+      );
+    return site;
+  },
   // A booking that dies (cancelled request or yard list, or a cancelled load finally emptied at the yard) must not leave a phantom destination on the truck.
-  releaseTruck(id){if(!id)return;let truck;try{truck=this.repo.get(id,'truck');}catch{return;}if(!truck.destination||!['AT_YARD','AT_SITE'].includes(truck.status))return;if(this.repo.all('request').some(r=>r.truck===id&&['ALLOCATED','PARTIALLY ALLOCATED'].includes(r.status)))return;if(this.repo.all('loadList').some(l=>l.truck===id&&!l.cancelled&&!l.delivery))return;if(this.tasks().some(t=>active(t)&&t.to===id))return;if(this.containers().some(c=>c.location===id))return;truck.destination=null;this.repo.save(truck);},
-  site(input){requireRule(input.supervisor==null||typeof input.supervisor==='string','Choose a valid supervisor.');const supervisor=input.supervisor||null;if(supervisor)requireRule(this.db.prepare('SELECT user_id FROM memberships WHERE company_id=? AND user_id=? AND removed_at IS NULL').get(this.user.company_id,supervisor),'Supervisor must belong to this company.');return this.repo.add('site',{name:label(input.name),address:label(input.address??'Demonstration site'),supervisor,status:'ACTIVE',...this.siteDetailFields(input),points:[{x:0,y:0},{x:20000,y:0},{x:20000,y:16000},{x:0,y:16000}],height:10000,loading:{x:1000,y:1000},gate:{x:3500,y:1000},mode:'DEMO ONLY'});},
-  archive(input){const site=this.repo.get(input.id,'site');requireRule(!this.containers().some(c=>c.location===site.id),'Return all containers and stock before archiving.');requireRule(!this.tasks().some(t=>active(t)&&(t.from===site.id||t.to===site.id)),'Resolve the open site movements first.');requireRule(!this.repo.all('request').some(r=>r.site===site.id&&!['DELIVERED','CANCELLED','RETURNED'].includes(r.status)),'Resolve open requests before archiving.');requireRule(!this.repo.all('count').some(c=>c.scope===site.id&&c.state==='OPEN'),'Resolve the site stocktake first.');this.planSiteGone?.(site.id,'removed');site.status='ARCHIVED';this.repo.save(site);this.repo.event(this.user.id,'SITE_ARCHIVED',{destination:site.id,key:this.key});return site;},
-  truck(input){const yard=this.repo.get(input.yard,'yard');return this.repo.add('truck',{name:label(input.name),yard:yard.id,at:yard.id,status:'AT_YARD',length:integer(input.length??6000,'Deck length',1),width:integer(input.width??2050,'Deck width',1),payload:integer(input.payload??12500000,'Payload (g)',1),height:integer(input.height??3000,'Load height',1),stackLimit:integer(input.stackLimit??2,'Truck stack limit',1,2),destination:null,mode:'DEMO ONLY'});},
-  resources(input){const loc=this.repo.get(input.location);requireRule(['yard','site'].includes(loc.kind),'Configure resources at a yard or site.');const workers=integer(input.workers,'Workers',0,500),machines=integer(input.machines,'Machines',0,20);this.planCrewReset?.(loc.id);// people borrowed here by the Today planner go home first (never switched off)
-    const existing=this.repo.all('resource').filter(r=>r.location===loc.id);for(const r of existing)if(r.job){this.releaseJob(r,'Resources reconfigured');this.repo.save(r);}if(input.jobs===false)this.releaseAllJobs(null);requireRule(!existing.some(r=>r.task||r.walk||r.driver||r.claimedBy||r.mountedOn),'Do not remove busy workers or machines.');for(const r of existing){r.enabled=false;this.repo.save(r);}for(const r of existing)if(r.type==='WORKER')this.planPersonGone?.('worker',r.id);// the Today planner calls their asks off and shows the gaps
-    for(let i=0;i<workers;i++)this.repo.add('resource',{name:`Worker ${i+1}`,type:'WORKER',location:loc.id,enabled:true,task:null});for(let i=0;i<machines;i++)this.repo.add('resource',{name:`${loc.kind==='site'?'Crane':'Forklift'} ${i+1}`,type:loc.kind==='site'?'CRANE':'FORKLIFT',location:loc.id,enabled:true,task:null,capacity:integer(input.capacity??1500000,'Machine capacity (g)',1),reach:integer(input.reach??10000,'Reach (mm)',1)});let config=this.repo.all('config')[0];const flag=(k,d)=>{if(input[k]===undefined)return config?.[k]??d;requireRule(typeof input[k]==='boolean','Choose on or off.');return input[k];};const values={stepMs:integer(input.stepMs??700,'Demo step time (ms)',100,60000),speed:integer(input.speed??4000,'Demo travel speed (mm/s)',1,100000),craneWorkers:integer(input.craneWorkers??1,'Crane workers',1,10),paused:config?.paused??false,mode:'SIMULATION / DEMONSTRATION',jobs:flag('jobs',true),routineJobs:flag('routineJobs',true),countCycleMs:integer(input.countCycleMs??config?.countCycleMs??900000,'Cycle count interval (ms)',1000,86400000),checkCycleMs:integer(input.checkCycleMs??config?.checkCycleMs??1800000,'Equipment check interval (ms)',1000,86400000),jobRefreshMs:integer(input.jobRefreshMs??config?.jobRefreshMs??1000,'Job refresh interval (ms)',250,60000),jobEffects:config?.jobEffects??{},jobsFault:config?.jobsFault??null};return config?this.repo.save({...config,...values}):this.repo.add('config',values);},
+  releaseTruck(id) {
+    if (!id) return;
+    let truck;
+    try {
+      truck = this.repo.get(id, 'truck');
+    } catch {
+      return;
+    }
+    if (!truck.destination || !['AT_YARD', 'AT_SITE'].includes(truck.status)) return;
+    if (this.repo.all('request').some((r) => r.truck === id && ['ALLOCATED', 'PARTIALLY ALLOCATED'].includes(r.status)))
+      return;
+    if (this.repo.all('loadList').some((l) => l.truck === id && !l.cancelled && !l.delivery)) return;
+    if (this.tasks().some((t) => active(t) && t.to === id)) return;
+    if (this.containers().some((c) => c.location === id)) return;
+    truck.destination = null;
+    this.repo.save(truck);
+  },
+  site(input) {
+    requireRule(input.supervisor == null || typeof input.supervisor === 'string', 'Choose a valid supervisor.');
+    const supervisor = input.supervisor || null;
+    if (supervisor)
+      requireRule(
+        this.db
+          .prepare('SELECT user_id FROM memberships WHERE company_id=? AND user_id=? AND removed_at IS NULL')
+          .get(this.user.company_id, supervisor),
+        'Supervisor must belong to this company.',
+      );
+    return this.repo.add('site', {
+      name: label(input.name),
+      address: label(input.address ?? 'Demonstration site'),
+      supervisor,
+      status: 'ACTIVE',
+      ...this.siteDetailFields(input),
+      points: [
+        { x: 0, y: 0 },
+        { x: 20000, y: 0 },
+        { x: 20000, y: 16000 },
+        { x: 0, y: 16000 },
+      ],
+      height: 10000,
+      loading: { x: 1000, y: 1000 },
+      gate: { x: 3500, y: 1000 },
+      mode: 'DEMO ONLY',
+    });
+  },
+  archive(input) {
+    const site = this.repo.get(input.id, 'site');
+    requireRule(
+      !this.containers().some((c) => c.location === site.id),
+      'Return all containers and stock before archiving.',
+    );
+    requireRule(
+      !this.tasks().some((t) => active(t) && (t.from === site.id || t.to === site.id)),
+      'Resolve the open site movements first.',
+    );
+    requireRule(
+      !this.repo
+        .all('request')
+        .some((r) => r.site === site.id && !['DELIVERED', 'CANCELLED', 'RETURNED'].includes(r.status)),
+      'Resolve open requests before archiving.',
+    );
+    requireRule(
+      !this.repo.all('count').some((c) => c.scope === site.id && c.state === 'OPEN'),
+      'Resolve the site stocktake first.',
+    );
+    this.planSiteGone?.(site.id, 'removed');
+    site.status = 'ARCHIVED';
+    this.repo.save(site);
+    this.repo.event(this.user.id, 'SITE_ARCHIVED', { destination: site.id, key: this.key });
+    return site;
+  },
+  truck(input) {
+    const yard = this.repo.get(input.yard, 'yard');
+    return this.repo.add('truck', {
+      name: label(input.name),
+      yard: yard.id,
+      at: yard.id,
+      status: 'AT_YARD',
+      length: integer(input.length ?? 6000, 'Deck length', 1),
+      width: integer(input.width ?? 2050, 'Deck width', 1),
+      payload: integer(input.payload ?? 12500000, 'Payload (g)', 1),
+      height: integer(input.height ?? 3000, 'Load height', 1),
+      stackLimit: integer(input.stackLimit ?? 2, 'Truck stack limit', 1, 2),
+      destination: null,
+      mode: 'DEMO ONLY',
+    });
+  },
+  resources(input) {
+    const loc = this.repo.get(input.location);
+    requireRule(['yard', 'site'].includes(loc.kind), 'Configure resources at a yard or site.');
+    const workers = integer(input.workers, 'Workers', 0, 500),
+      machines = integer(input.machines, 'Machines', 0, 20);
+    this.planCrewReset?.(loc.id); // people borrowed here by the Today planner go home first (never switched off)
+    const existing = this.repo.all('resource').filter((r) => r.location === loc.id);
+    for (const r of existing)
+      if (r.job) {
+        this.releaseJob(r, 'Resources reconfigured');
+        this.repo.save(r);
+      }
+    if (input.jobs === false) this.releaseAllJobs(null);
+    requireRule(
+      !existing.some((r) => r.task || r.walk || r.driver || r.claimedBy || r.mountedOn),
+      'Do not remove busy workers or machines.',
+    );
+    for (const r of existing) {
+      r.enabled = false;
+      this.repo.save(r);
+    }
+    for (const r of existing) if (r.type === 'WORKER') this.planPersonGone?.('worker', r.id); // the Today planner calls their asks off and shows the gaps
+    for (let i = 0; i < workers; i++)
+      this.repo.add('resource', {
+        name: `Worker ${i + 1}`,
+        type: 'WORKER',
+        location: loc.id,
+        enabled: true,
+        task: null,
+      });
+    for (let i = 0; i < machines; i++)
+      this.repo.add('resource', {
+        name: `${loc.kind === 'site' ? 'Crane' : 'Forklift'} ${i + 1}`,
+        type: loc.kind === 'site' ? 'CRANE' : 'FORKLIFT',
+        location: loc.id,
+        enabled: true,
+        task: null,
+        capacity: integer(input.capacity ?? 1500000, 'Machine capacity (g)', 1),
+        reach: integer(input.reach ?? 10000, 'Reach (mm)', 1),
+      });
+    let config = this.repo.all('config')[0];
+    const flag = (k, d) => {
+      if (input[k] === undefined) return config?.[k] ?? d;
+      requireRule(typeof input[k] === 'boolean', 'Choose on or off.');
+      return input[k];
+    };
+    const values = {
+      stepMs: integer(input.stepMs ?? 700, 'Demo step time (ms)', 100, 60000),
+      speed: integer(input.speed ?? 4000, 'Demo travel speed (mm/s)', 1, 100000),
+      craneWorkers: integer(input.craneWorkers ?? 1, 'Crane workers', 1, 10),
+      paused: config?.paused ?? false,
+      mode: 'SIMULATION / DEMONSTRATION',
+      jobs: flag('jobs', true),
+      routineJobs: flag('routineJobs', true),
+      countCycleMs: integer(
+        input.countCycleMs ?? config?.countCycleMs ?? 900000,
+        'Cycle count interval (ms)',
+        1000,
+        86400000,
+      ),
+      checkCycleMs: integer(
+        input.checkCycleMs ?? config?.checkCycleMs ?? 1800000,
+        'Equipment check interval (ms)',
+        1000,
+        86400000,
+      ),
+      jobRefreshMs: integer(
+        input.jobRefreshMs ?? config?.jobRefreshMs ?? 1000,
+        'Job refresh interval (ms)',
+        250,
+        60000,
+      ),
+      jobEffects: config?.jobEffects ?? {},
+      jobsFault: config?.jobsFault ?? null,
+    };
+    return config ? this.repo.save({ ...config, ...values }) : this.repo.add('config', values);
+  },
   // First clear spot for c. Same candidates and order as before (bounding-box seed + the far edges of existing stock), so existing layouts place
   // exactly as they did; cheap geometric rejections skip validatePlacement for spots it would refuse anyway. Yards and sites then fall back to
   // seeds at the boundary's own corners and a 500 mm grid, so shapes whose bounding-box corner is outside (an L with the top-left cut out) still work.
   // opts.avoid: extra rectangles to keep clear (crew during a boundary change). this.deadline (set by a preview) bounds the search.
-  positionFor(c,locId,extra=[],opts={}){const loc=this.repo.get(locId);const truck=loc.kind==='truck',bx=truck?0:Math.ceil(Math.min(...loc.points.map(p=>p.x))),by=truck?0:Math.ceil(Math.min(...loc.points.map(p=>p.y)));const xs=truck?[0]:[bx+3500],ys=truck?[0]:[by+1000];let lastError=null,last=null,n=0;
-    const others=this.occupied(locId,c.id);for(const other of others){const r=rect(other);xs.push(r.x+r.w);ys.push(r.y+r.h);}
-    const ground=others.filter(o=>!o.support).map(o=>rect(o)),avoid=opts.avoid??[],deck=truck?{x:0,y:0,w:loc.length,h:loc.width}:null;
-    const cheap=p=>{const r=rect(c,p);return (truck?contains(deck,r):!spotProblem(r,loc))&&!ground.some(o=>overlap(r,o))&&!avoid.some(o=>overlap(r,o));};
-    const attempt=p=>{if(this.deadline&&n++%256===0&&performance.now()>this.deadline)throw Object.assign(new AppError(409,'The preview ran out of time.'),{slow:true});last=p;if(!cheap(p))return false;try{this.validatePlacement(c,locId,p,extra);return true;}catch(e){if(/payload|unknown/.test(e.message))throw e;lastError=e;return false;}};
-    const rotations=truck?[0,90]:[c.rotation??0,90-(c.rotation??0)],sorted=a=>[...new Set(a)].sort((p,q)=>p-q);
-    for(const rotation of rotations)for(const y of sorted(ys))for(const x of sorted(xs)){const p={x,y,rotation,support:null};if(attempt(p))return p;}
-    if(!truck){const L=c.envelopeLength??c.length,W=c.envelopeWidth??c.width,cx=[],cy=[];for(const q of loc.points){const x=Math.ceil(q.x),y=Math.ceil(q.y);cx.push(x,x-L,x-W);cy.push(y,y-L,y-W);}
-      const b=bbox(loc.points),gx=[],gy=[];for(let x=Math.ceil(b.x0/500)*500;x<b.x1;x+=500)gx.push(x);for(let y=Math.ceil(b.y0/500)*500;y<b.y1;y+=500)gy.push(y);
-      for(const [X,Y] of [[cx,cy],[gx,gy]])for(const rotation of rotations)for(const y of sorted(Y))for(const x of sorted(X)){const p={x,y,rotation,support:null};if(attempt(p))return p;}}
-    if(!lastError&&last){try{this.validatePlacement(c,locId,last,extra);}catch(e){lastError=e;}}
-    throw lastError??new Error('No destination space.');},
-  queue(input){const c=this.repo.get(input.container,'container'),to=this.repo.get(input.destination);this.assertSite(c.location);this.assertSite(to.id);this.assertFree(c);requireRule(c.condition==='SERVICEABLE','Only serviceable stock can be moved for a request.');requireRule(c.location!==to.id||input.position,'Choose a different destination or an explicit reposition.');requireRule(!(c.location===to.id&&input.position&&input.position.x===c.x&&input.position.y===c.y&&(input.position.rotation??0)===(c.rotation??0)&&(input.position.support??null)===(c.support??null)),c.name+' is already there.');const from=this.repo.get(c.location);requireRule(['yard','site','truck'].includes(from.kind),'Finish the current handling task first.');
-    let handling=from.kind==='truck'?this.repo.get(from.at):from;
-    if(to.kind==='truck'){requireRule(to.at===handling.id,'The truck must be at this pickup location.');requireRule(to.destination===null||!input.site||to.destination===input.site,'One destination per truck trip.');}
-    if(from.kind==='truck'){requireRule(['AT_YARD','AT_SITE'].includes(from.status)&&from.at===to.id,'Truck must arrive at the destination before unloading.');}
-    requireRule(from.kind==='truck'||to.kind==='truck'||from.id===to.id,'Use a truck to move between a yard and site.');
-    const candidate=input.position??this.positionFor(c,to.id),position={x:candidate.x,y:candidate.y,rotation:candidate.rotation??0,support:candidate.support??null};this.validatePlacement(c,to.id,position);
-    const task=this.makeTask({type:'MOVE',container:c.id,from:c.location,to:to.id,handling:handling.id,position,request:null,actor:this.user.id,state:'QUEUED'});
-    for(const line of this.repo.lines(c.id))this.reserve(c.id,line.product_id,line.quantity,task.id);
+  positionFor(c, locId, extra = [], opts = {}) {
+    const loc = this.repo.get(locId);
+    const truck = loc.kind === 'truck',
+      bx = truck ? 0 : Math.ceil(Math.min(...loc.points.map((p) => p.x))),
+      by = truck ? 0 : Math.ceil(Math.min(...loc.points.map((p) => p.y)));
+    const xs = truck ? [0] : [bx + 3500],
+      ys = truck ? [0] : [by + 1000];
+    let lastError = null,
+      last = null,
+      n = 0;
+    const others = this.occupied(locId, c.id);
+    for (const other of others) {
+      const r = rect(other);
+      xs.push(r.x + r.w);
+      ys.push(r.y + r.h);
+    }
+    const ground = others.filter((o) => !o.support).map((o) => rect(o)),
+      avoid = opts.avoid ?? [],
+      deck = truck ? { x: 0, y: 0, w: loc.length, h: loc.width } : null;
+    const cheap = (p) => {
+      const r = rect(c, p);
+      return (
+        (truck ? contains(deck, r) : !spotProblem(r, loc)) &&
+        !ground.some((o) => overlap(r, o)) &&
+        !avoid.some((o) => overlap(r, o))
+      );
+    };
+    const attempt = (p) => {
+      if (this.deadline && n++ % 256 === 0 && performance.now() > this.deadline)
+        throw Object.assign(new AppError(409, 'The preview ran out of time.'), { slow: true });
+      last = p;
+      if (!cheap(p)) return false;
+      try {
+        this.validatePlacement(c, locId, p, extra);
+        return true;
+      } catch (e) {
+        if (/payload|unknown/.test(e.message)) throw e;
+        lastError = e;
+        return false;
+      }
+    };
+    const rotations = truck ? [0, 90] : [c.rotation ?? 0, 90 - (c.rotation ?? 0)],
+      sorted = (a) => [...new Set(a)].sort((p, q) => p - q);
+    for (const rotation of rotations)
+      for (const y of sorted(ys))
+        for (const x of sorted(xs)) {
+          const p = { x, y, rotation, support: null };
+          if (attempt(p)) return p;
+        }
+    if (!truck) {
+      const L = c.envelopeLength ?? c.length,
+        W = c.envelopeWidth ?? c.width,
+        cx = [],
+        cy = [];
+      for (const q of loc.points) {
+        const x = Math.ceil(q.x),
+          y = Math.ceil(q.y);
+        cx.push(x, x - L, x - W);
+        cy.push(y, y - L, y - W);
+      }
+      const b = bbox(loc.points),
+        gx = [],
+        gy = [];
+      for (let x = Math.ceil(b.x0 / 500) * 500; x < b.x1; x += 500) gx.push(x);
+      for (let y = Math.ceil(b.y0 / 500) * 500; y < b.y1; y += 500) gy.push(y);
+      for (const [X, Y] of [
+        [cx, cy],
+        [gx, gy],
+      ])
+        for (const rotation of rotations)
+          for (const y of sorted(Y))
+            for (const x of sorted(X)) {
+              const p = { x, y, rotation, support: null };
+              if (attempt(p)) return p;
+            }
+    }
+    if (!lastError && last) {
+      try {
+        this.validatePlacement(c, locId, last, extra);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? new Error('No destination space.');
+  },
+  queue(input) {
+    const c = this.repo.get(input.container, 'container'),
+      to = this.repo.get(input.destination);
+    this.assertSite(c.location);
+    this.assertSite(to.id);
+    this.assertFree(c);
+    requireRule(c.condition === 'SERVICEABLE', 'Only serviceable stock can be moved for a request.');
+    requireRule(c.location !== to.id || input.position, 'Choose a different destination or an explicit reposition.');
+    requireRule(
+      !(
+        c.location === to.id &&
+        input.position &&
+        input.position.x === c.x &&
+        input.position.y === c.y &&
+        (input.position.rotation ?? 0) === (c.rotation ?? 0) &&
+        (input.position.support ?? null) === (c.support ?? null)
+      ),
+      c.name + ' is already there.',
+    );
+    const from = this.repo.get(c.location);
+    requireRule(['yard', 'site', 'truck'].includes(from.kind), 'Finish the current handling task first.');
+    let handling = from.kind === 'truck' ? this.repo.get(from.at) : from;
+    if (to.kind === 'truck') {
+      requireRule(to.at === handling.id, 'The truck must be at this pickup location.');
+      requireRule(
+        to.destination === null || !input.site || to.destination === input.site,
+        'One destination per truck trip.',
+      );
+    }
+    if (from.kind === 'truck') {
+      requireRule(
+        ['AT_YARD', 'AT_SITE'].includes(from.status) && from.at === to.id,
+        'Truck must arrive at the destination before unloading.',
+      );
+    }
+    requireRule(
+      from.kind === 'truck' || to.kind === 'truck' || from.id === to.id,
+      'Use a truck to move between a yard and site.',
+    );
+    const candidate = input.position ?? this.positionFor(c, to.id),
+      position = {
+        x: candidate.x,
+        y: candidate.y,
+        rotation: candidate.rotation ?? 0,
+        support: candidate.support ?? null,
+      };
+    this.validatePlacement(c, to.id, position);
+    const task = this.makeTask({
+      type: 'MOVE',
+      container: c.id,
+      from: c.location,
+      to: to.id,
+      handling: handling.id,
+      position,
+      request: null,
+      actor: this.user.id,
+      state: 'QUEUED',
+    });
+    for (const line of this.repo.lines(c.id)) this.reserve(c.id, line.product_id, line.quantity, task.id);
     return task;
   },
   // Load stillages onto a truck parked at their yard or site, in one request. Everything stacked on a chosen stillage comes too (any shape of
   // pile), top first: within each pile every task waits (task.dependency) for the one before it, so nothing is lifted from under another
   // stillage and custody never skips a step. A stillage above that is already being loaded onto this truck is waited for, not re-queued.
   // All or nothing: one refusal leaves nothing queued.
-  loadTruck(input){
-    const truck=this.repo.get(input.truck,'truck');requireRule(!truck.retired,truck.name+' has been removed.');requireRule(['AT_YARD','AT_SITE'].includes(truck.status)&&truck.at,truck.name+' is travelling. Load it when it has arrived.');
-    const here=this.repo.get(truck.at);this.assertSite(here.id);requireRule(['yard','site'].includes(here.kind),truck.name+' is not at a yard or site.');
-    requireRule(Array.isArray(input.containers)&&input.containers.length>0&&input.containers.length<=100,'Choose the stillages to load (up to 100 at a time).');
-    const stored=this.containers().filter(c=>c.location===here.id&&!c.retired),byId=new Map(stored.map(c=>[c.id,c])),onTop=c=>stored.filter(o=>o.support===c.id);
-    const busy=this.tasks().filter(active),loadingHere=new Map(busy.filter(t=>t.type==='MOVE'&&t.to===truck.id&&t.from===here.id).map(t=>[t.container,t]));
-    const want=new Set(),waitFor=new Map();// pile root -> an existing load onto this truck (of a stillage above) that the pile must wait for
-    const rootOf=c=>{let cur=c;for(let g=0;cur.support&&byId.has(cur.support)&&g<20;g++)cur=byId.get(cur.support);return cur.id;};
-    for(const id of input.containers){requireRule(typeof id==='string','Choose the stillages to load.');const c=byId.get(id)??this.repo.get(id,'container');requireRule(!c.retired,c.name+' has been removed from storage.');requireRule(c.location===here.id,c.name+' is not at '+here.name+', where '+truck.name+' is.');
-      const queue=[c];for(let g=0;queue.length&&g<200;g++){const cur=queue.shift(),existing=loadingHere.get(cur.id);if(existing&&cur!==c){const root=rootOf(cur),prev=waitFor.get(root);requireRule(!prev||prev.id===existing.id,'Wait until '+(byId.get(prev?.container)?.name??'the stillages on top')+' and '+cur.name+' are on '+truck.name+', then load the rest of the pile.');waitFor.set(root,existing);continue;}want.add(cur.id);queue.push(...onTop(cur));}}
-    const level=c=>{let n=0;for(let cur=c;cur.support&&byId.has(cur.support)&&n<20;cur=byId.get(cur.support))n++;return n;},asked=[...want].map(id=>byId.get(id)),order=asked.map((c,i)=>({c,i,l:level(c)})).sort((a,b)=>b.l-a.l||a.i-b.i).map(o=>o.c);
-    const manual=this.repo.all('resource').filter(m=>m.enabled!==false&&(m.cargo||m.drive?.container)),taskOf=new Map(),last=new Map(),tasks=[];
-    for(const c of order){
-      requireRule(c.condition==='SERVICEABLE',c.name+' is marked damaged. Only serviceable stock can be loaded; change its condition first.');
-      requireRule(!manual.some(m=>m.cargo===c.id||m.drive?.container===c.id),c.name+' is assigned to a manual forklift.');
-      requireRule(!busy.some(t=>t.container===c.id||t.sourceContainer===c.id),c.name+' already has a movement waiting or in progress. Let it finish or cancel it in Movement activity.');
-      requireRule(!busy.some(t=>t.position?.support===c.id),'A stillage is on its way onto '+c.name+'. Load it after that one has been set down.');
-      this.assertCountFree(c);
-      requireRule(onTop(c).every(o=>taskOf.has(o.id)||loadingHere.has(o.id)),'Move the top stillage first.');
-      const root=rootOf(c),spot=this.positionFor(c,truck.id),position={x:spot.x,y:spot.y,rotation:spot.rotation??0,support:spot.support??null};this.validatePlacement(c,truck.id,position);
-      const task=this.makeTask({type:'MOVE',container:c.id,from:here.id,to:truck.id,handling:here.id,position,request:null,actor:this.user.id,state:'QUEUED',dependency:last.get(root)??waitFor.get(root)?.id??null});
-      for(const line of this.repo.lines(c.id))this.reserve(c.id,line.product_id,line.quantity,task.id);
-      taskOf.set(c.id,task.id);last.set(root,task.id);tasks.push(task);}
-    const names=order.map(c=>c.name),machine=here.kind==='site'?'crane':'forklift',piled=order.some(c=>c.support&&byId.has(c.support))||waitFor.size>0;
-    return {ok:true,tasks,message:'Loading '+(names.length>1?names.length+' stillages ('+names.join(', ')+')':names[0])+' onto '+truck.name+'.'+(piled?' The top one goes first; each one below waits until the one above it is on the truck.':'')+' The crew and '+machine+' will do it.'};
-  },
-  makeTask(data){return this.repo.add('task',{...data,picked:false,resources:[],due:0,reason:null,createdAt:new Date().toISOString()});},
-  reserve(container,product,quantity,task){const stock=this.repo.quantity(container,product),reserved=this.repo.all('reservation').filter(r=>r.active&&r.container===container&&r.product===product).reduce((s,r)=>s+r.quantity,0);requireRule(stock-reserved>=quantity,'INSUFFICIENT STOCK: another request has reserved these units.');return this.repo.add('reservation',{container,product,quantity,task,active:true});},
-  request(input){const site=this.repo.get(input.site,'site');this.assertSite(site.id);requireRule(site.status==='ACTIVE','Choose an active site.');const product=this.effective(input.product);const quantity=integer(input.quantity,'Requested quantity',1,1000000);const neededOn=parseDay(input.neededOn,{required:false,cal:this.calendar()}),slot=parseSlot(input.slot);return this.repo.add('request',{site:site.id,product:product.id,quantity,status:'REQUESTED',allocated:0,delivered:0,actor:this.user.id,notes:input.notes??'',createdAt:new Date().toISOString(),neededOn,slot,plannedTruck:null});},
-  allocate(input){const request=this.repo.get(input.id,'request');requireRule(request.status==='REQUESTED','This request is already allocated or closed.');const truck=this.repo.get(input.truck,'truck');requireRule(truck.status==='AT_YARD','Truck must be at the yard.');this.assertTruckTrip(truck,request.site);const product=this.effective(request.product);requireRule(product.packQuantity!==null,'Full-pack quantity has not been configured.');const planHeld=new Set(this.repo.all('reservation').filter(r=>r.active&&r.plan).map(r=>r.container));const candidates=this.containers().filter(c=>c.location===truck.at&&!planHeld.has(c.id)&&!this.repo.all('resource').some(m=>m.cargo===c.id||m.drive?.container===c.id)&&c.condition==='SERVICEABLE'&&!this.containers().some(o=>o.support===c.id)&&!this.tasks().some(t=>active(t)&&(t.container===c.id||t.sourceContainer===c.id))&&this.repo.lines(c.id).length===1&&this.repo.quantity(c.id,product.id)>0).sort((a,b)=>{const aq=this.repo.quantity(a.id,product.id),bq=this.repo.quantity(b.id,product.id);return Number(bq===product.packQuantity)-Number(aq===product.packQuantity)||a.name.localeCompare(b.name)||a.id.localeCompare(b.id);});
-    requireRule(candidates.reduce((sum,c)=>sum+this.repo.quantity(c.id,product.id),0)>=request.quantity,'INSUFFICIENT STOCK: no exact allocation is available.');
-    let left=request.quantity;const tasks=[];
-    for(const source of candidates){if(!left)break;this.assertCountFree(source);const quantity=Math.min(left,this.repo.quantity(source.id,product.id));let target=source,dependency=null;
-      if(quantity<this.repo.quantity(source.id,product.id)){
-        const empty=this.containers().find(c=>c.location===truck.at&&!this.repo.all('resource').some(m=>m.cargo===c.id||m.drive?.container===c.id)&&c.id!==source.id&&!this.repo.lines(c.id).length&&!c.support&&!this.containers().some(o=>o.support===c.id)&&!this.tasks().some(t=>active(t)&&t.container===c.id)&&c.condition==='SERVICEABLE');requireRule(empty,'A partial pack needs a real empty container in the yard. Add an empty container first.');this.assertCountFree(empty);
-        target=empty;const repack=this.makeTask({type:'REPACK',container:empty.id,sourceContainer:source.id,product:product.id,quantity,from:truck.at,to:truck.at,handling:truck.at,position:{x:empty.x,y:empty.y,rotation:empty.rotation,support:null},request:request.id,actor:this.user.id,state:'QUEUED'});this.reserve(source.id,product.id,quantity,repack.id);dependency=repack.id;tasks.push(repack);
+  loadTruck(input) {
+    const truck = this.repo.get(input.truck, 'truck');
+    requireRule(!truck.retired, truck.name + ' has been removed.');
+    requireRule(
+      ['AT_YARD', 'AT_SITE'].includes(truck.status) && truck.at,
+      truck.name + ' is travelling. Load it when it has arrived.',
+    );
+    const here = this.repo.get(truck.at);
+    this.assertSite(here.id);
+    requireRule(['yard', 'site'].includes(here.kind), truck.name + ' is not at a yard or site.');
+    requireRule(
+      Array.isArray(input.containers) && input.containers.length > 0 && input.containers.length <= 100,
+      'Choose the stillages to load (up to 100 at a time).',
+    );
+    const stored = this.containers().filter((c) => c.location === here.id && !c.retired),
+      byId = new Map(stored.map((c) => [c.id, c])),
+      onTop = (c) => stored.filter((o) => o.support === c.id);
+    const busy = this.tasks().filter(active),
+      loadingHere = new Map(
+        busy.filter((t) => t.type === 'MOVE' && t.to === truck.id && t.from === here.id).map((t) => [t.container, t]),
+      );
+    const want = new Set(),
+      waitFor = new Map(); // pile root -> an existing load onto this truck (of a stillage above) that the pile must wait for
+    const rootOf = (c) => {
+      let cur = c;
+      for (let g = 0; cur.support && byId.has(cur.support) && g < 20; g++) cur = byId.get(cur.support);
+      return cur.id;
+    };
+    for (const id of input.containers) {
+      requireRule(typeof id === 'string', 'Choose the stillages to load.');
+      const c = byId.get(id) ?? this.repo.get(id, 'container');
+      requireRule(!c.retired, c.name + ' has been removed from storage.');
+      requireRule(c.location === here.id, c.name + ' is not at ' + here.name + ', where ' + truck.name + ' is.');
+      const queue = [c];
+      for (let g = 0; queue.length && g < 200; g++) {
+        const cur = queue.shift(),
+          existing = loadingHere.get(cur.id);
+        if (existing && cur !== c) {
+          const root = rootOf(cur),
+            prev = waitFor.get(root);
+          requireRule(
+            !prev || prev.id === existing.id,
+            'Wait until ' +
+              (byId.get(prev?.container)?.name ?? 'the stillages on top') +
+              ' and ' +
+              cur.name +
+              ' are on ' +
+              truck.name +
+              ', then load the rest of the pile.',
+          );
+          waitFor.set(root, existing);
+          continue;
+        }
+        want.add(cur.id);
+        queue.push(...onTop(cur));
       }
-      const extra=dependency?[{product_id:product.id,quantity}]:[];const position=this.positionFor(target,truck.id,extra);const task=this.makeTask({type:'MOVE',container:target.id,from:truck.at,to:truck.id,handling:truck.at,position,request:request.id,actor:this.user.id,state:'QUEUED',dependency});if(!dependency)this.reserve(source.id,product.id,quantity,task.id);tasks.push(task);left-=quantity;
     }
-    truck.destination=request.site;this.repo.save(truck);request.status='ALLOCATED';request.allocated=request.quantity;request.truck=truck.id;if(!request.loadList)request.plannedTruck=truck.id;this.repo.save(request);if(request.loadList){const list=this.repo.get(request.loadList,'loadList');if(!list.truck)list.truck=truck.id;list.plannedTruck=truck.id;this.repo.save(list);}this.notify('Request allocated',`${request.quantity} × ${product.name} reserved for ${this.repo.get(request.site).name}.`,request.site);return {request,tasks};
+    const level = (c) => {
+        let n = 0;
+        for (let cur = c; cur.support && byId.has(cur.support) && n < 20; cur = byId.get(cur.support)) n++;
+        return n;
+      },
+      asked = [...want].map((id) => byId.get(id)),
+      order = asked
+        .map((c, i) => ({ c, i, l: level(c) }))
+        .sort((a, b) => b.l - a.l || a.i - b.i)
+        .map((o) => o.c);
+    const manual = this.repo.all('resource').filter((m) => m.enabled !== false && (m.cargo || m.drive?.container)),
+      taskOf = new Map(),
+      last = new Map(),
+      tasks = [];
+    for (const c of order) {
+      requireRule(
+        c.condition === 'SERVICEABLE',
+        c.name + ' is marked damaged. Only serviceable stock can be loaded; change its condition first.',
+      );
+      requireRule(
+        !manual.some((m) => m.cargo === c.id || m.drive?.container === c.id),
+        c.name + ' is assigned to a manual forklift.',
+      );
+      requireRule(
+        !busy.some((t) => t.container === c.id || t.sourceContainer === c.id),
+        c.name + ' already has a movement waiting or in progress. Let it finish or cancel it in Movement activity.',
+      );
+      requireRule(
+        !busy.some((t) => t.position?.support === c.id),
+        'A stillage is on its way onto ' + c.name + '. Load it after that one has been set down.',
+      );
+      this.assertCountFree(c);
+      requireRule(
+        onTop(c).every((o) => taskOf.has(o.id) || loadingHere.has(o.id)),
+        'Move the top stillage first.',
+      );
+      const root = rootOf(c),
+        spot = this.positionFor(c, truck.id),
+        position = { x: spot.x, y: spot.y, rotation: spot.rotation ?? 0, support: spot.support ?? null };
+      this.validatePlacement(c, truck.id, position);
+      const task = this.makeTask({
+        type: 'MOVE',
+        container: c.id,
+        from: here.id,
+        to: truck.id,
+        handling: here.id,
+        position,
+        request: null,
+        actor: this.user.id,
+        state: 'QUEUED',
+        dependency: last.get(root) ?? waitFor.get(root)?.id ?? null,
+      });
+      for (const line of this.repo.lines(c.id)) this.reserve(c.id, line.product_id, line.quantity, task.id);
+      taskOf.set(c.id, task.id);
+      last.set(root, task.id);
+      tasks.push(task);
+    }
+    const names = order.map((c) => c.name),
+      machine = here.kind === 'site' ? 'crane' : 'forklift',
+      piled = order.some((c) => c.support && byId.has(c.support)) || waitFor.size > 0;
+    return {
+      ok: true,
+      tasks,
+      message:
+        'Loading ' +
+        (names.length > 1 ? names.length + ' stillages (' + names.join(', ') + ')' : names[0]) +
+        ' onto ' +
+        truck.name +
+        '.' +
+        (piled ? ' The top one goes first; each one below waits until the one above it is on the truck.' : '') +
+        ' The crew and ' +
+        machine +
+        ' will do it.',
+    };
   },
-  cancel(input){const task=this.repo.get(input.id,'task');requireRule(active(task),'This task is already closed.');requireRule(!task.picked,'Cargo is on handling equipment. Resume placement; it cannot teleport back.');if(input.withDependents===true){const later=[],seen=new Set([task.id]);for(let i=-1,cur=task;cur&&later.length<200;cur=later[++i])for(const t of this.tasks())if(active(t)&&t.dependency===cur.id&&!seen.has(t.id)){seen.add(t.id);later.push(t);}requireRule(!later.some(t=>t.picked),'A movement that waits for this one is already on handling equipment. Let it finish first.');for(const t of later.reverse())this.cancel({id:t.id});}requireRule(!this.tasks().some(t=>active(t)&&t.dependency===task.id),'Cancel the dependent load first.');task.state='CANCELLED';this.repo.save(task);this.release(task);if(task.request){const request=this.repo.get(task.request,'request');if(['ALLOCATED','PARTIALLY ALLOCATED'].includes(request.status)){const rest=this.tasks().filter(t=>t.request===request.id&&t.state!=='CANCELLED');if(!rest.length&&request.delivered===0&&!request.loadList){const truck=request.truck;request.status='REQUESTED';request.allocated=0;request.truck=null;this.repo.save(request);this.releaseTruck(truck);}else{request.status='PARTIALLY ALLOCATED';this.repo.save(request);}}this.reconcileDeliveries();}if(String(task.actor??'').startsWith('engine:')){let from=null;try{from=this.repo.get(task.from);}catch{}if(from?.kind==='truck'&&from.delivery&&from.autoUnloadDeclined!==from.delivery){from.autoUnloadDeclined=from.delivery;this.repo.save(from);}}this.releaseTruck(task.to);return task;},
-  retry(input){const task=this.repo.get(input.id,'task');requireRule(task.state==='BLOCKED','Only blocked tasks can be retried.');task.state=task.resumeState??'RESERVED';task.reason=null;task.due=0;task.routeReviewed=null;return this.repo.save(task);},
-  release(task){for(const r of this.repo.all('reservation').filter(r=>r.task===task.id&&r.active)){r.active=false;this.repo.save(r);}for(const r of this.repo.all('resource').filter(r=>r.task===task.id)){r.task=null;this.repo.save(r);}},
-  dispatch(input){const truck=this.repo.get(input.id,'truck'),destination=this.repo.get(input.destination??truck.destination);requireRule(['yard','site'].includes(destination.kind),'Choose a yard or site destination.');this.assertSite(destination.id);requireRule(destination.status!=='ARCHIVED','This destination is archived.');requireRule(['AT_YARD','AT_SITE'].includes(truck.status),'Truck is already travelling.');requireRule(truck.at!==destination.id,'Truck is already at this location.');requireRule(!this.tasks().some(t=>active(t)&&(t.to===truck.id||t.from===truck.id)),'Finish or cancel all loading tasks before departure.');for(const c of this.containers().filter(c=>c.location===truck.id)){this.assertCountFree(c);this.validatePlacement(c,truck.id,c);}requireRule(!this.repo.all('request').some(r=>r.truck===truck.id&&['ALLOCATED','PARTIALLY ALLOCATED'].includes(r.status)&&r.site!==destination.id),'This load is reserved for a different site.');const lists=this.repo.all('loadList').filter(l=>l.truck===truck.id&&!l.cancelled&&!l.delivery).map(l=>this.loadListView(l));requireRule(!lists.some(l=>l.lines.some(x=>x.status==='PARTIALLY ALLOCATED')),'A yard-list line is short because its loading task was cancelled. Cancel the yard list and re-list it before departure.');if(truck.delivery){const prev=this.repo.get(truck.delivery,'delivery');if(prev.status==='ARRIVED'){prev.containers=prev.containers.filter(id=>{const c=this.repo.get(id,'container');return c.location!==truck.id||c.delivery===prev.id;});if(prev.containers.length){prev.status='DELIVERED';prev.completedAt=new Date().toISOString();}else prev.status='RETURNED';this.repo.save(prev);}}truck.status='IN_TRANSIT';truck.destination=destination.id;truck.remainingMs=3000;truck.travelActor=this.user.id;const delivery=this.repo.add('delivery',{truck:truck.id,from:truck.at,to:destination.id,status:'IN_TRANSIT',containers:this.containers().filter(c=>c.location===truck.id).map(c=>c.id),createdAt:new Date().toISOString()});truck.delivery=delivery.id;this.repo.save(truck);for(const r of this.repo.all('request'))if(r.truck===truck.id&&!r.loadList&&!r.delivery&&['ALLOCATED','PARTIALLY ALLOCATED'].includes(r.status)){r.delivery=delivery.id;r.departedAt=delivery.createdAt;this.repo.save(r);}// a single request on board has left the yard: its date and truck are fixed now
-    for(const view of lists){const list=this.repo.get(view.id,'loadList');list.delivery=delivery.id;list.departedAt=delivery.createdAt;list.lines=list.lines.map(line=>({...line,sent:view.lines.find(x=>x.product===line.product)?.loaded??0}));this.repo.save(list);}this.notify('Truck departed',`${truck.name} is travelling to ${destination.name}.`,destination.kind==='site'?destination.id:null);return truck;},
-  unload(input){const truck=this.repo.get(input.id,'truck');requireRule(['AT_SITE','AT_YARD'].includes(truck.status),'Truck must arrive before unloading.');const tasks=[];const cargo=this.containers().filter(c=>c.location===truck.id).sort((a,b)=>Number(!!b.support)-Number(!!a.support));for(const c of cargo){if(this.containers().some(o=>o.support===c.id))continue;if(this.tasks().some(t=>active(t)&&t.container===c.id))continue;tasks.push(this.queue({container:c.id,destination:truck.at}));}requireRule(tasks.length,'No accessible cargo to unload. Finish the top containers first.');return tasks;},
-  returnStock(input){const c=this.repo.get(input.container,'container');this.assertSite(c.location);const location=this.repo.get(c.location);requireRule(location.kind==='site','Select a container at the site.');const truck=this.repo.get(input.truck,'truck');requireRule(truck.at===location.id&&truck.status==='AT_SITE','Send an empty truck to this site first.');return this.queue({container:c.id,destination:truck.id});},
-  plannedPath(task,c){const loc=this.repo.get(task.handling),from=this.repo.get(task.from),to=this.repo.get(task.to);const source=task.type==='REPACK'?this.repo.get(task.sourceContainer,'container'):c;const start=from.kind==='truck'?loc.loading:{x:source.x,y:source.y},end=to.kind==='truck'?loc.loading:task.position;const all=this.containers(),chain=id=>{const out=[];let cur=id,n=0;while(cur&&n++<9){out.push(cur);cur=all.find(o=>o.id===cur)?.support;}return out;};const skip=new Set([c.id,task.sourceContainer,...chain(c.support),...chain(task.position.support)]);const obstacles=[...all.filter(o=>o.location===loc.id&&!skip.has(o.id)).map(o=>rect(o)),...this.fixtureObstacles(loc)];if(from.id===to.id&&from.kind!=='truck'&&task.type==='MOVE'&&(task.position.rotation??0)!==(c.rotation??0)){const turn=turnPath(loc.points,c,{x:c.x,y:c.y,rotation:c.rotation??0},task.position,obstacles);requireRule(turn,'No room to turn '+c.name+': the forklift needs a clear '+(Math.hypot(c.envelopeLength,c.envelopeWidth)/1000).toFixed(1)+' m circle nearby to turn it in. Move a neighbour or use Plan a new layout, then retry.');task.turnAt=turn.turnAt;return turn.path;}
-    const path=carryRoute(start,end,rect(c),loc.points,obstacles);requireRule(path,'No clear path for the machine and load. Relocate blocking containers first.');return path;}
+  makeTask(data) {
+    return this.repo.add('task', {
+      ...data,
+      picked: false,
+      resources: [],
+      due: 0,
+      reason: null,
+      createdAt: new Date().toISOString(),
+    });
+  },
+  reserve(container, product, quantity, task) {
+    const stock = this.repo.quantity(container, product),
+      reserved = this.repo
+        .all('reservation')
+        .filter((r) => r.active && r.container === container && r.product === product)
+        .reduce((s, r) => s + r.quantity, 0);
+    requireRule(stock - reserved >= quantity, 'INSUFFICIENT STOCK: another request has reserved these units.');
+    return this.repo.add('reservation', { container, product, quantity, task, active: true });
+  },
+  request(input) {
+    const site = this.repo.get(input.site, 'site');
+    this.assertSite(site.id);
+    requireRule(site.status === 'ACTIVE', 'Choose an active site.');
+    const product = this.effective(input.product);
+    const quantity = integer(input.quantity, 'Requested quantity', 1, 1000000);
+    const neededOn = parseDay(input.neededOn, { required: false, cal: this.calendar() }),
+      slot = parseSlot(input.slot);
+    return this.repo.add('request', {
+      site: site.id,
+      product: product.id,
+      quantity,
+      status: 'REQUESTED',
+      allocated: 0,
+      delivered: 0,
+      actor: this.user.id,
+      notes: input.notes ?? '',
+      createdAt: new Date().toISOString(),
+      neededOn,
+      slot,
+      plannedTruck: null,
+    });
+  },
+  allocate(input) {
+    const request = this.repo.get(input.id, 'request');
+    requireRule(request.status === 'REQUESTED', 'This request is already allocated or closed.');
+    const truck = this.repo.get(input.truck, 'truck');
+    requireRule(truck.status === 'AT_YARD', 'Truck must be at the yard.');
+    this.assertTruckTrip(truck, request.site);
+    const product = this.effective(request.product);
+    requireRule(product.packQuantity !== null, 'Full-pack quantity has not been configured.');
+    const planHeld = new Set(
+      this.repo
+        .all('reservation')
+        .filter((r) => r.active && r.plan)
+        .map((r) => r.container),
+    );
+    const candidates = this.containers()
+      .filter(
+        (c) =>
+          c.location === truck.at &&
+          !planHeld.has(c.id) &&
+          !this.repo.all('resource').some((m) => m.cargo === c.id || m.drive?.container === c.id) &&
+          c.condition === 'SERVICEABLE' &&
+          !this.containers().some((o) => o.support === c.id) &&
+          !this.tasks().some((t) => active(t) && (t.container === c.id || t.sourceContainer === c.id)) &&
+          this.repo.lines(c.id).length === 1 &&
+          this.repo.quantity(c.id, product.id) > 0,
+      )
+      .sort((a, b) => {
+        const aq = this.repo.quantity(a.id, product.id),
+          bq = this.repo.quantity(b.id, product.id);
+        return (
+          Number(bq === product.packQuantity) - Number(aq === product.packQuantity) ||
+          a.name.localeCompare(b.name) ||
+          a.id.localeCompare(b.id)
+        );
+      });
+    requireRule(
+      candidates.reduce((sum, c) => sum + this.repo.quantity(c.id, product.id), 0) >= request.quantity,
+      'INSUFFICIENT STOCK: no exact allocation is available.',
+    );
+    let left = request.quantity;
+    const tasks = [];
+    for (const source of candidates) {
+      if (!left) break;
+      this.assertCountFree(source);
+      const quantity = Math.min(left, this.repo.quantity(source.id, product.id));
+      let target = source,
+        dependency = null;
+      if (quantity < this.repo.quantity(source.id, product.id)) {
+        const empty = this.containers().find(
+          (c) =>
+            c.location === truck.at &&
+            !this.repo.all('resource').some((m) => m.cargo === c.id || m.drive?.container === c.id) &&
+            c.id !== source.id &&
+            !this.repo.lines(c.id).length &&
+            !c.support &&
+            !this.containers().some((o) => o.support === c.id) &&
+            !this.tasks().some((t) => active(t) && t.container === c.id) &&
+            c.condition === 'SERVICEABLE',
+        );
+        requireRule(empty, 'A partial pack needs a real empty container in the yard. Add an empty container first.');
+        this.assertCountFree(empty);
+        target = empty;
+        const repack = this.makeTask({
+          type: 'REPACK',
+          container: empty.id,
+          sourceContainer: source.id,
+          product: product.id,
+          quantity,
+          from: truck.at,
+          to: truck.at,
+          handling: truck.at,
+          position: { x: empty.x, y: empty.y, rotation: empty.rotation, support: null },
+          request: request.id,
+          actor: this.user.id,
+          state: 'QUEUED',
+        });
+        this.reserve(source.id, product.id, quantity, repack.id);
+        dependency = repack.id;
+        tasks.push(repack);
+      }
+      const extra = dependency ? [{ product_id: product.id, quantity }] : [];
+      const position = this.positionFor(target, truck.id, extra);
+      const task = this.makeTask({
+        type: 'MOVE',
+        container: target.id,
+        from: truck.at,
+        to: truck.id,
+        handling: truck.at,
+        position,
+        request: request.id,
+        actor: this.user.id,
+        state: 'QUEUED',
+        dependency,
+      });
+      if (!dependency) this.reserve(source.id, product.id, quantity, task.id);
+      tasks.push(task);
+      left -= quantity;
+    }
+    truck.destination = request.site;
+    this.repo.save(truck);
+    request.status = 'ALLOCATED';
+    request.allocated = request.quantity;
+    request.truck = truck.id;
+    if (!request.loadList) request.plannedTruck = truck.id;
+    this.repo.save(request);
+    if (request.loadList) {
+      const list = this.repo.get(request.loadList, 'loadList');
+      if (!list.truck) list.truck = truck.id;
+      list.plannedTruck = truck.id;
+      this.repo.save(list);
+    }
+    this.notify(
+      'Request allocated',
+      `${request.quantity} × ${product.name} reserved for ${this.repo.get(request.site).name}.`,
+      request.site,
+    );
+    return { request, tasks };
+  },
+  cancel(input) {
+    const task = this.repo.get(input.id, 'task');
+    requireRule(active(task), 'This task is already closed.');
+    requireRule(!task.picked, 'Cargo is on handling equipment. Resume placement; it cannot teleport back.');
+    if (input.withDependents === true) {
+      const later = [],
+        seen = new Set([task.id]);
+      for (let i = -1, cur = task; cur && later.length < 200; cur = later[++i])
+        for (const t of this.tasks())
+          if (active(t) && t.dependency === cur.id && !seen.has(t.id)) {
+            seen.add(t.id);
+            later.push(t);
+          }
+      requireRule(
+        !later.some((t) => t.picked),
+        'A movement that waits for this one is already on handling equipment. Let it finish first.',
+      );
+      for (const t of later.reverse()) this.cancel({ id: t.id });
+    }
+    requireRule(!this.tasks().some((t) => active(t) && t.dependency === task.id), 'Cancel the dependent load first.');
+    task.state = 'CANCELLED';
+    this.repo.save(task);
+    this.release(task);
+    if (task.request) {
+      const request = this.repo.get(task.request, 'request');
+      if (['ALLOCATED', 'PARTIALLY ALLOCATED'].includes(request.status)) {
+        const rest = this.tasks().filter((t) => t.request === request.id && t.state !== 'CANCELLED');
+        if (!rest.length && request.delivered === 0 && !request.loadList) {
+          const truck = request.truck;
+          request.status = 'REQUESTED';
+          request.allocated = 0;
+          request.truck = null;
+          this.repo.save(request);
+          this.releaseTruck(truck);
+        } else {
+          request.status = 'PARTIALLY ALLOCATED';
+          this.repo.save(request);
+        }
+      }
+      this.reconcileDeliveries();
+    }
+    if (String(task.actor ?? '').startsWith('engine:')) {
+      let from = null;
+      try {
+        from = this.repo.get(task.from);
+      } catch {}
+      if (from?.kind === 'truck' && from.delivery && from.autoUnloadDeclined !== from.delivery) {
+        from.autoUnloadDeclined = from.delivery;
+        this.repo.save(from);
+      }
+    }
+    this.releaseTruck(task.to);
+    return task;
+  },
+  retry(input) {
+    const task = this.repo.get(input.id, 'task');
+    requireRule(task.state === 'BLOCKED', 'Only blocked tasks can be retried.');
+    task.state = task.resumeState ?? 'RESERVED';
+    task.reason = null;
+    task.due = 0;
+    task.routeReviewed = null;
+    return this.repo.save(task);
+  },
+  release(task) {
+    for (const r of this.repo.all('reservation').filter((r) => r.task === task.id && r.active)) {
+      r.active = false;
+      this.repo.save(r);
+    }
+    for (const r of this.repo.all('resource').filter((r) => r.task === task.id)) {
+      r.task = null;
+      this.repo.save(r);
+    }
+  },
+  dispatch(input) {
+    const truck = this.repo.get(input.id, 'truck'),
+      destination = this.repo.get(input.destination ?? truck.destination);
+    requireRule(['yard', 'site'].includes(destination.kind), 'Choose a yard or site destination.');
+    this.assertSite(destination.id);
+    requireRule(destination.status !== 'ARCHIVED', 'This destination is archived.');
+    requireRule(['AT_YARD', 'AT_SITE'].includes(truck.status), 'Truck is already travelling.');
+    requireRule(truck.at !== destination.id, 'Truck is already at this location.');
+    requireRule(
+      !this.tasks().some((t) => active(t) && (t.to === truck.id || t.from === truck.id)),
+      'Finish or cancel all loading tasks before departure.',
+    );
+    for (const c of this.containers().filter((c) => c.location === truck.id)) {
+      this.assertCountFree(c);
+      this.validatePlacement(c, truck.id, c);
+    }
+    requireRule(
+      !this.repo
+        .all('request')
+        .some(
+          (r) =>
+            r.truck === truck.id &&
+            ['ALLOCATED', 'PARTIALLY ALLOCATED'].includes(r.status) &&
+            r.site !== destination.id,
+        ),
+      'This load is reserved for a different site.',
+    );
+    const lists = this.repo
+      .all('loadList')
+      .filter((l) => l.truck === truck.id && !l.cancelled && !l.delivery)
+      .map((l) => this.loadListView(l));
+    requireRule(
+      !lists.some((l) => l.lines.some((x) => x.status === 'PARTIALLY ALLOCATED')),
+      'A yard-list line is short because its loading task was cancelled. Cancel the yard list and re-list it before departure.',
+    );
+    if (truck.delivery) {
+      const prev = this.repo.get(truck.delivery, 'delivery');
+      if (prev.status === 'ARRIVED') {
+        prev.containers = prev.containers.filter((id) => {
+          const c = this.repo.get(id, 'container');
+          return c.location !== truck.id || c.delivery === prev.id;
+        });
+        if (prev.containers.length) {
+          prev.status = 'DELIVERED';
+          prev.completedAt = new Date().toISOString();
+        } else prev.status = 'RETURNED';
+        this.repo.save(prev);
+      }
+    }
+    truck.status = 'IN_TRANSIT';
+    truck.destination = destination.id;
+    truck.remainingMs = 3000;
+    truck.travelActor = this.user.id;
+    const delivery = this.repo.add('delivery', {
+      truck: truck.id,
+      from: truck.at,
+      to: destination.id,
+      status: 'IN_TRANSIT',
+      containers: this.containers()
+        .filter((c) => c.location === truck.id)
+        .map((c) => c.id),
+      createdAt: new Date().toISOString(),
+    });
+    truck.delivery = delivery.id;
+    this.repo.save(truck);
+    for (const r of this.repo.all('request'))
+      if (
+        r.truck === truck.id &&
+        !r.loadList &&
+        !r.delivery &&
+        ['ALLOCATED', 'PARTIALLY ALLOCATED'].includes(r.status)
+      ) {
+        r.delivery = delivery.id;
+        r.departedAt = delivery.createdAt;
+        this.repo.save(r);
+      } // a single request on board has left the yard: its date and truck are fixed now
+    for (const view of lists) {
+      const list = this.repo.get(view.id, 'loadList');
+      list.delivery = delivery.id;
+      list.departedAt = delivery.createdAt;
+      list.lines = list.lines.map((line) => ({
+        ...line,
+        sent: view.lines.find((x) => x.product === line.product)?.loaded ?? 0,
+      }));
+      this.repo.save(list);
+    }
+    this.notify(
+      'Truck departed',
+      `${truck.name} is travelling to ${destination.name}.`,
+      destination.kind === 'site' ? destination.id : null,
+    );
+    return truck;
+  },
+  unload(input) {
+    const truck = this.repo.get(input.id, 'truck');
+    requireRule(['AT_SITE', 'AT_YARD'].includes(truck.status), 'Truck must arrive before unloading.');
+    const tasks = [];
+    const cargo = this.containers()
+      .filter((c) => c.location === truck.id)
+      .sort((a, b) => Number(!!b.support) - Number(!!a.support));
+    for (const c of cargo) {
+      if (this.containers().some((o) => o.support === c.id)) continue;
+      if (this.tasks().some((t) => active(t) && t.container === c.id)) continue;
+      tasks.push(this.queue({ container: c.id, destination: truck.at }));
+    }
+    requireRule(tasks.length, 'No accessible cargo to unload. Finish the top containers first.');
+    return tasks;
+  },
+  returnStock(input) {
+    const c = this.repo.get(input.container, 'container');
+    this.assertSite(c.location);
+    const location = this.repo.get(c.location);
+    requireRule(location.kind === 'site', 'Select a container at the site.');
+    const truck = this.repo.get(input.truck, 'truck');
+    requireRule(truck.at === location.id && truck.status === 'AT_SITE', 'Send an empty truck to this site first.');
+    return this.queue({ container: c.id, destination: truck.id });
+  },
+  plannedPath(task, c) {
+    const loc = this.repo.get(task.handling),
+      from = this.repo.get(task.from),
+      to = this.repo.get(task.to);
+    const source = task.type === 'REPACK' ? this.repo.get(task.sourceContainer, 'container') : c;
+    const start = from.kind === 'truck' ? loc.loading : { x: source.x, y: source.y },
+      end = to.kind === 'truck' ? loc.loading : task.position;
+    const all = this.containers(),
+      chain = (id) => {
+        const out = [];
+        let cur = id,
+          n = 0;
+        while (cur && n++ < 9) {
+          out.push(cur);
+          cur = all.find((o) => o.id === cur)?.support;
+        }
+        return out;
+      };
+    const skip = new Set([c.id, task.sourceContainer, ...chain(c.support), ...chain(task.position.support)]);
+    const obstacles = [
+      ...all.filter((o) => o.location === loc.id && !skip.has(o.id)).map((o) => rect(o)),
+      ...this.fixtureObstacles(loc),
+    ];
+    if (
+      from.id === to.id &&
+      from.kind !== 'truck' &&
+      task.type === 'MOVE' &&
+      (task.position.rotation ?? 0) !== (c.rotation ?? 0)
+    ) {
+      const turn = turnPath(loc.points, c, { x: c.x, y: c.y, rotation: c.rotation ?? 0 }, task.position, obstacles);
+      requireRule(
+        turn,
+        'No room to turn ' +
+          c.name +
+          ': the forklift needs a clear ' +
+          (Math.hypot(c.envelopeLength, c.envelopeWidth) / 1000).toFixed(1) +
+          ' m circle nearby to turn it in. Move a neighbour or use Plan a new layout, then retry.',
+      );
+      task.turnAt = turn.turnAt;
+      return turn.path;
+    }
+    const path = carryRoute(start, end, rect(c), loc.points, obstacles);
+    requireRule(path, 'No clear path for the machine and load. Relocate blocking containers first.');
+    return path;
+  },
 };

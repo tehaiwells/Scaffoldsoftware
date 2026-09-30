@@ -1,0 +1,11 @@
+# Prettier (npm run format / npm run format:check) formats the code in src/, public/, test/, e2e/ and scripts/.
+# Left alone: supplier catalogues (transcribed data), installed packages, generated or local output, and prose.
+catalogues/
+node_modules/
+data/
+test-results/
+playwright-report/
+package-lock.json
+*.md
+*.sqlite
+*.sql

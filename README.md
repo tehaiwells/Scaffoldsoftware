@@ -52,11 +52,14 @@ POST /api/commands/loadTruck takes {truck, containers:[ids]} and loads those sti
     npm.cmd test
     npm.cmd run check
     npm.cmd run typecheck
+    npm.cmd run format:check
     npm.cmd run benchmark
     npm.cmd run benchmark:smoke
     npm.cmd run test:e2e -- --list
 
-`typecheck` runs TypeScript over the files marked `// @ts-check` (src/repository.js and the hire, logistics and plan rules; tsconfig.json lists them) using their JSDoc types; nothing is compiled. `benchmark` times the snapshot and the history page on a synthetic yard (`--containers=`, `--ledger=`; `--gate-ms=N` fails when the median snapshot is slower than N ms); `benchmark:smoke` runs a small one of each benchmark with a gate. Tests check behaviour: unit tests render the app's HTML from real snapshots, and e2e/behaviour.spec.js reads the real stylesheets back from the browser, so no test matches source code text.
+`typecheck` runs TypeScript over the files marked `// @ts-check` (src/repository.js and the hire, logistics and plan rules; tsconfig.json lists them) using their JSDoc types; nothing is compiled. `benchmark` times the snapshot and the history page on a synthetic yard (`--containers=`, `--ledger=`; `--gate-ms=N` fails when the median snapshot is slower than N ms); `benchmark:smoke` runs a small one of each benchmark with a gate. Tests check behaviour: unit tests render the app's HTML from real snapshots, and e2e/behaviour.spec.js reads the real stylesheets back from the browser, so tests rarely look at source code; the few that do compare it with the layout taken out (test/helpers/source.js), so formatting never breaks them.
+
+The code is laid out by Prettier (.prettierrc.json: 120 columns, single quotes, semicolons). `npm run format` lays out src/, public/, test/, e2e/ and scripts/; `npm run format:check` only reports files that are out of layout. Supplier catalogues and the Markdown documents are left alone (.prettierignore).
 
 For independent Playwright browser testing:
 
@@ -69,7 +72,7 @@ To use the Edge that is already installed instead of downloading Chromium, and a
 
 The browser tests start their own server with a throwaway database and backup folder in the system temp folder (never data/ or your live database) and use fresh demo emails.
 
-GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml), on Linux and on Windows: npm ci, npm run check, npm run typecheck, npm test and the benchmark smoke check on Node 24, then the browser tests with Playwright's bundled Chromium. Failed tests are never retried: a test that only passes the second time is a bug to fix. The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
+GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml), on Linux and on Windows: npm ci, npm run format:check, npm run check, npm run typecheck, npm test and the benchmark smoke check on Node 24, then the browser tests with Playwright's bundled Chromium. Failed tests are never retried: a test that only passes the second time is a bug to fix. The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
 
 ## Configuration and maintenance
 

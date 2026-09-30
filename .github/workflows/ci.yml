@@ -1,5 +1,5 @@
 # Automatic checks for every push and pull request to main, on Linux and on Windows (the owner's PC runs Windows):
-# syntax check, type check, unit tests and a benchmark smoke check, then the browser tests (Playwright's bundled Chromium,
+# code layout (Prettier), syntax check, type check, unit tests and a benchmark smoke check, then the browser tests (Playwright's bundled Chromium,
 # own throwaway database and port). No retries: a test that only passes the second time is a failure to fix, not to hide.
 name: CI
 on:
@@ -28,6 +28,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Code layout (npm run format fixes it)
+        run: npm run format:check
       - run: npm run check
       - run: npm run typecheck
       - run: npm test

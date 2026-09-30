@@ -16,6 +16,8 @@
     "check": "node scripts/check.js",
     "benchmark:movement": "node scripts/movement-writes.js",
     "typecheck": "tsc -p tsconfig.json",
+    "format": "prettier --write src public test e2e scripts playwright.config.js",
+    "format:check": "prettier --check src public test e2e scripts playwright.config.js",
     "benchmark:smoke": "node scripts/benchmark.js --containers=200 --ledger=2000 --gate-ms=250 && node scripts/movement-writes.js --seconds=5 --warmup=2",
     "restore-drill": "node scripts/restore-drill.js",
     "decrypt-backup": "node scripts/decrypt-backup.js"
@@ -23,6 +25,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "24.19.0",
+    "prettier": "3.9.9",
     "typescript": "5.9.3"
   }
 }

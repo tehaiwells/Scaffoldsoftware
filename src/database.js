@@ -6,10 +6,12 @@ import { readFileSync } from 'node:fs';
 // Migrations are one-way. Before a start-up migration changes an existing database, a copy of it as it was is saved and checked
 // (<backupName>-before-update-v<from>-to-v<to>-<time>.sqlite in backupDirectory; default: a before-update folder next to the database).
 // If the copy cannot be saved, nothing is migrated and opening fails with a plain message. backupDirectory:null skips it (tests only).
-export function openDatabase(path, { backupDirectory, backupName='scaffold' } = {}) {
+export function openDatabase(path, { backupDirectory, backupName = 'scaffold' } = {}) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  const existing = path !== ':memory:' && !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();
+  const existing =
+    path !== ':memory:' &&
+    !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();
   // synchronous=NORMAL: WAL stays consistent; a power cut (not a process crash) can lose the last few commits.
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY);
@@ -26,60 +28,151 @@ export function openDatabase(path, { backupDirectory, backupName='scaffold' } = 
     CREATE INDEX IF NOT EXISTS audit_company_time ON audit_events(company_id,created_at);
     CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);
     INSERT OR IGNORE INTO schema_migrations VALUES(1);`);
-  for (const role of ['OWNER','GENERAL_MANAGER','SUPERVISOR']) db.prepare('INSERT OR IGNORE INTO roles VALUES(?)').run(role);
-  const grants = {OWNER:['company.manage','users.manage','operations.manage','sites.assigned','requests.create','finance.view'],GENERAL_MANAGER:['operations.manage','requests.create'],SUPERVISOR:['sites.assigned','requests.create']};
-  for (const [role, permissions] of Object.entries(grants)) for (const p of permissions) {
-    db.prepare('INSERT OR IGNORE INTO permissions VALUES(?)').run(p);
-    db.prepare('INSERT OR IGNORE INTO role_permissions VALUES(?,?)').run(role,p);
+  for (const role of ['OWNER', 'GENERAL_MANAGER', 'SUPERVISOR'])
+    db.prepare('INSERT OR IGNORE INTO roles VALUES(?)').run(role);
+  const grants = {
+    OWNER: ['company.manage', 'users.manage', 'operations.manage', 'sites.assigned', 'requests.create', 'finance.view'],
+    GENERAL_MANAGER: ['operations.manage', 'requests.create'],
+    SUPERVISOR: ['sites.assigned', 'requests.create'],
+  };
+  for (const [role, permissions] of Object.entries(grants))
+    for (const p of permissions) {
+      db.prepare('INSERT OR IGNORE INTO permissions VALUES(?)').run(p);
+      db.prepare('INSERT OR IGNORE INTO role_permissions VALUES(?,?)').run(role, p);
+    }
+  for (const [id, name] of [
+    ['quickstage', 'Quickstage'],
+    ['at-pac', 'AT-PAC'],
+    ['tube-clip', 'Tube & Clip'],
+  ])
+    db.prepare('INSERT OR IGNORE INTO scaffold_systems VALUES(?,?)').run(id, name);
+  if (existing && backupDirectory !== null) {
+    const pending = pendingMigrations(db);
+    if (pending.length)
+      try {
+        saveBeforeUpdate(db, backupDirectory ?? join(dirname(resolve(path)), 'before-update'), backupName, pending);
+      } catch (error) {
+        db.close();
+        throw error;
+      }
   }
-  for (const [id,name] of [['quickstage','Quickstage'],['at-pac','AT-PAC'],['tube-clip','Tube & Clip']]) db.prepare('INSERT OR IGNORE INTO scaffold_systems VALUES(?,?)').run(id,name);
-  if(existing&&backupDirectory!==null){const pending=pendingMigrations(db);if(pending.length)try{saveBeforeUpdate(db,backupDirectory??join(dirname(resolve(path)),'before-update'),backupName,pending);}catch(error){db.close();throw error;}}
-  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=2').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/002_simulation.sql',import.meta.url),'utf8')));
-  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=3').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/003_memberships.sql',import.meta.url),'utf8')));
-  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=4').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/004_manager_stock_adjust.sql',import.meta.url),'utf8')));
-  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=5').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/005_perf_indexes.sql',import.meta.url),'utf8')));
-  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=6').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/006_invitations.sql',import.meta.url),'utf8')));
+  if (!db.prepare('SELECT version FROM schema_migrations WHERE version=2').get())
+    atomic(db, () => db.exec(readFileSync(new URL('./migrations/002_simulation.sql', import.meta.url), 'utf8')));
+  if (!db.prepare('SELECT version FROM schema_migrations WHERE version=3').get())
+    atomic(db, () => db.exec(readFileSync(new URL('./migrations/003_memberships.sql', import.meta.url), 'utf8')));
+  if (!db.prepare('SELECT version FROM schema_migrations WHERE version=4').get())
+    atomic(db, () =>
+      db.exec(readFileSync(new URL('./migrations/004_manager_stock_adjust.sql', import.meta.url), 'utf8')),
+    );
+  if (!db.prepare('SELECT version FROM schema_migrations WHERE version=5').get())
+    atomic(db, () => db.exec(readFileSync(new URL('./migrations/005_perf_indexes.sql', import.meta.url), 'utf8')));
+  if (!db.prepare('SELECT version FROM schema_migrations WHERE version=6').get())
+    atomic(db, () => db.exec(readFileSync(new URL('./migrations/006_invitations.sql', import.meta.url), 'utf8')));
   return db;
 }
 
 // Migration files (NNN_name.sql in src/migrations) whose version is not recorded yet.
-const MIGRATIONS=new URL('./migrations/',import.meta.url);
-export function pendingMigrations(db){const done=new Set(db.prepare('SELECT version FROM schema_migrations').all().map(r=>r.version));return readdirSync(MIGRATIONS).map(f=>/^(\d+)_.*\.sql$/.exec(f)).filter(Boolean).map(m=>Number(m[1])).filter(v=>!done.has(v)).sort((a,b)=>a-b);}
-const stampNow=(d=new Date())=>{const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;};
-function saveBeforeUpdate(db,directory,name,pending){
-  const from=db.prepare('SELECT MAX(version) v FROM schema_migrations').get().v,file=join(resolve(directory),`${name}-before-update-v${from}-to-v${pending.at(-1)}-${stampNow()}.sqlite`),partial=file+'.partial';
-  try{
-    mkdirSync(dirname(file),{recursive:true});rmSync(partial,{force:true});
-    db.exec(`VACUUM INTO '${partial.replaceAll("'","''")}'`);// a consistent copy, even with other readers
-    const copy=new DatabaseSync(partial);try{const ok=Object.values(copy.prepare('PRAGMA quick_check').get())[0];if(ok!=='ok')throw new Error('the copy failed its check');copy.exec('PRAGMA journal_mode=DELETE');}finally{copy.close();}
-    renameSync(partial,file);console.log(`Saved a copy of the database before updating it: ${file}`);return file;
-  }catch(error){try{rmSync(partial,{force:true});}catch{}throw new Error(`Could not save a copy of the database before updating it (${error.message}). Nothing was changed`);}
+const MIGRATIONS = new URL('./migrations/', import.meta.url);
+export function pendingMigrations(db) {
+  const done = new Set(
+    db
+      .prepare('SELECT version FROM schema_migrations')
+      .all()
+      .map((r) => r.version),
+  );
+  return readdirSync(MIGRATIONS)
+    .map((f) => /^(\d+)_.*\.sql$/.exec(f))
+    .filter(Boolean)
+    .map((m) => Number(m[1]))
+    .filter((v) => !done.has(v))
+    .sort((a, b) => a - b);
+}
+const stampNow = (d = new Date()) => {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+};
+function saveBeforeUpdate(db, directory, name, pending) {
+  const from = db.prepare('SELECT MAX(version) v FROM schema_migrations').get().v,
+    file = join(resolve(directory), `${name}-before-update-v${from}-to-v${pending.at(-1)}-${stampNow()}.sqlite`),
+    partial = file + '.partial';
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    rmSync(partial, { force: true });
+    db.exec(`VACUUM INTO '${partial.replaceAll("'", "''")}'`); // a consistent copy, even with other readers
+    const copy = new DatabaseSync(partial);
+    try {
+      const ok = Object.values(copy.prepare('PRAGMA quick_check').get())[0];
+      if (ok !== 'ok') throw new Error('the copy failed its check');
+      copy.exec('PRAGMA journal_mode=DELETE');
+    } finally {
+      copy.close();
+    }
+    renameSync(partial, file);
+    console.log(`Saved a copy of the database before updating it: ${file}`);
+    return file;
+  } catch (error) {
+    try {
+      rmSync(partial, { force: true });
+    } catch {}
+    throw new Error(`Could not save a copy of the database before updating it (${error.message}). Nothing was changed`);
+  }
 }
 
 // One prepared statement per SQL text per connection (statements are synchronous and reset after every call).
-const statements=new WeakMap();
+const statements = new WeakMap();
 export function cached(db, sql) {
-  let map=statements.get(db); if(!map) statements.set(db,map=new Map());
-  let statement=map.get(sql); if(!statement) map.set(sql,statement=db.prepare(sql));
+  let map = statements.get(db);
+  if (!map) statements.set(db, (map = new Map()));
+  let statement = map.get(sql);
+  if (!statement) map.set(sql, (statement = db.prepare(sql)));
   return statement;
 }
 
 // Told when an atomic() transaction begins, commits or rolls back, and when a savepoint() starts, is released or rolled back to: in-memory
 // state tied to stored rows (src/domain/live.js) follows a rollback.
-const hooks=[];
-export function onAtomic(hook){hooks.push(hook);}
-const tell=(db,phase)=>{for(const hook of hooks)hook(db,phase);};
+const hooks = [];
+export function onAtomic(hook) {
+  hooks.push(hook);
+}
+const tell = (db, phase) => {
+  for (const hook of hooks) hook(db, phase);
+};
 
 export function atomic(db, operation) {
-  db.exec('BEGIN IMMEDIATE'); tell(db,'begin');
-  try { const result=operation(); db.exec('COMMIT'); tell(db,'commit'); return result; }
-  catch(error) { try { db.exec('ROLLBACK'); } finally { tell(db,'rollback'); } throw error; }
+  db.exec('BEGIN IMMEDIATE');
+  tell(db, 'begin');
+  try {
+    const result = operation();
+    db.exec('COMMIT');
+    tell(db, 'commit');
+    return result;
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } finally {
+      tell(db, 'rollback');
+    }
+    throw error;
+  }
 }
 
 // SAVEPOINT name ... RELEASE, or ROLLBACK TO + RELEASE and rethrow, with the hooks told. Use it (not a raw db.exec('SAVEPOINT')) around
 // anything that holds live movement (live.js holdLive / settleLive).
 export function savepoint(db, name, operation) {
-  db.exec('SAVEPOINT '+name); tell(db,'savepoint');
-  try { const result=operation(); db.exec('RELEASE '+name); tell(db,'release'); return result; }
-  catch(error) { try { db.exec('ROLLBACK TO '+name); db.exec('RELEASE '+name); } finally { tell(db,'rollback-to'); } throw error; }
+  db.exec('SAVEPOINT ' + name);
+  tell(db, 'savepoint');
+  try {
+    const result = operation();
+    db.exec('RELEASE ' + name);
+    tell(db, 'release');
+    return result;
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK TO ' + name);
+      db.exec('RELEASE ' + name);
+    } finally {
+      tell(db, 'rollback-to');
+    }
+    throw error;
+  }
 }

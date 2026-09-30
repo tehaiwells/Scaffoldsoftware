@@ -1,8 +1,60 @@
 // Shared simulation fixture used across test files. This module has no tests of its own, so
 // importing it never registers or re-runs test/simulation.test.js's tests (see that file for why).
 import { randomUUID } from 'node:crypto';
-import { openDatabase,atomic } from '../../src/database.js';
+import { openDatabase, atomic } from '../../src/database.js';
 import { Service } from '../../src/service.js';
 import { Simulation } from '../../src/simulation.js';
 
-export function fixture(t){const db=openDatabase(':memory:');t.after(()=>db.close());const auth=new Service(db);const user=auth.authenticate(auth.register({name:'Owner',companyName:'Demo',email:randomUUID()+'@example.com',password:'demonstration-password',systems:['quickstage']}));const sim=new Simulation(db,user);const cmd=(action,input={},key=randomUUID())=>sim.execute(action,input,key);const yard=cmd('yard',{name:'Yard',segments:[{direction:'RIGHT',length:20000},{direction:'DOWN',length:16000},{direction:'LEFT',length:20000}],closed:true});const products=cmd('seed');cmd('resources',{location:yard.id,workers:5,machines:1,stepMs:100,speed:100000,jobs:false});const truck=cmd('truck',{name:'T01',yard:yard.id});const site=cmd('site',{name:'Site A'});cmd('resources',{location:site.id,workers:2,machines:1,stepMs:100,speed:100000,jobs:false});const container=(name,x=4000,y=4000,extra={})=>cmd('container',{name,location:yard.id,type:'STILLAGE',length:2000,width:1000,height:1000,tare:50000,x,y,...extra});const a=container('A'),b=container('B',7000),empty=container('Empty',10000);for(const c of [a,b])cmd('opening',{container:c.id,product:products[0].id,quantity:100,reason:'DEMO ONLY opening'});const tick=(n=30)=>{for(let i=0;i<n;i++)atomic(db,()=>sim.tick(1000));};const total=()=>sim.snapshot().balances.reduce((s,l)=>s+l.quantity,0);return {db,auth,user,sim,cmd,yard,products,truck,site,a,b,empty,container,tick,total};}
+export function fixture(t) {
+  const db = openDatabase(':memory:');
+  t.after(() => db.close());
+  const auth = new Service(db);
+  const user = auth.authenticate(
+    auth.register({
+      name: 'Owner',
+      companyName: 'Demo',
+      email: randomUUID() + '@example.com',
+      password: 'demonstration-password',
+      systems: ['quickstage'],
+    }),
+  );
+  const sim = new Simulation(db, user);
+  const cmd = (action, input = {}, key = randomUUID()) => sim.execute(action, input, key);
+  const yard = cmd('yard', {
+    name: 'Yard',
+    segments: [
+      { direction: 'RIGHT', length: 20000 },
+      { direction: 'DOWN', length: 16000 },
+      { direction: 'LEFT', length: 20000 },
+    ],
+    closed: true,
+  });
+  const products = cmd('seed');
+  cmd('resources', { location: yard.id, workers: 5, machines: 1, stepMs: 100, speed: 100000, jobs: false });
+  const truck = cmd('truck', { name: 'T01', yard: yard.id });
+  const site = cmd('site', { name: 'Site A' });
+  cmd('resources', { location: site.id, workers: 2, machines: 1, stepMs: 100, speed: 100000, jobs: false });
+  const container = (name, x = 4000, y = 4000, extra = {}) =>
+    cmd('container', {
+      name,
+      location: yard.id,
+      type: 'STILLAGE',
+      length: 2000,
+      width: 1000,
+      height: 1000,
+      tare: 50000,
+      x,
+      y,
+      ...extra,
+    });
+  const a = container('A'),
+    b = container('B', 7000),
+    empty = container('Empty', 10000);
+  for (const c of [a, b])
+    cmd('opening', { container: c.id, product: products[0].id, quantity: 100, reason: 'DEMO ONLY opening' });
+  const tick = (n = 30) => {
+    for (let i = 0; i < n; i++) atomic(db, () => sim.tick(1000));
+  };
+  const total = () => sim.snapshot().balances.reduce((s, l) => s + l.quantity, 0);
+  return { db, auth, user, sim, cmd, yard, products, truck, site, a, b, empty, container, tick, total };
+}

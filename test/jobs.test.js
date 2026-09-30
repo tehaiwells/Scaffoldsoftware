@@ -4,138 +4,827 @@ import { randomUUID } from 'node:crypto';
 import { atomic } from '../src/database.js';
 import { Simulation } from '../src/simulation.js';
 import { fixture } from './helpers/fixture.js';
-import { SKILLS,LADDER } from '../src/domain/jobs.js';
+import { SKILLS, LADDER } from '../src/domain/jobs.js';
 
-const jobsOn=(f,extra={})=>f.cmd('jobsMode',{jobs:true,routineJobs:false,...extra});
-const liveJobs=f=>f.sim.repo.all('job').filter(j=>['OPEN','ASSIGNED','IN_PROGRESS','BLOCKED'].includes(j.state));
-const until=(f,pred,n=200)=>{for(let i=0;i<n&&!pred();i++)f.tick(1);return pred();};
-const worker=(f,i=0)=>f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id)[i];
+const jobsOn = (f, extra = {}) => f.cmd('jobsMode', { jobs: true, routineJobs: false, ...extra });
+const liveJobs = (f) =>
+  f.sim.repo.all('job').filter((j) => ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'].includes(j.state));
+const until = (f, pred, n = 200) => {
+  for (let i = 0; i < n && !pred(); i++) f.tick(1);
+  return pred();
+};
+const worker = (f, i = 0) =>
+  f.sim.repo.all('resource').filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id)[i];
 
-test('a returned stillage derives one returns-check job, a worker walks to it and completes it, the key never returns and a clean-up follows',t=>{const f=fixture(t);const request=f.cmd('request',{site:f.site.id,product:f.products[0].id,quantity:100});f.cmd('allocate',{id:request.id,truck:f.truck.id});f.tick(60);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});f.tick(60);f.cmd('returnStock',{container:f.a.id,truck:f.truck.id});f.tick(60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);f.cmd('unload',{id:f.truck.id});f.tick(60);assert.equal(f.sim.repo.get(f.a.id).location,f.yard.id);
-  jobsOn(f,{jobEffects:{UNLOAD:false}});f.tick(2);const checks=liveJobs(f).filter(j=>j.key.startsWith('P4:RETURN_CHECK:'+f.a.id));assert.equal(checks.length,1,'one returns check for A');assert.equal(checks[0].priority,4);assert.equal(checks[0].category,'RETURNS');assert.ok(checks[0].target,'the job has a standing spot');
-  assert.ok(until(f,()=>['ASSIGNED','IN_PROGRESS'].includes(f.sim.repo.get(checks[0].id).state),10),'assigned within a few ticks');const j=f.sim.repo.get(checks[0].id);const w=f.sim.repo.get(j.worker,'resource');assert.equal(w.job,j.id);assert.ok(!w.workerMode||w.workerMode==='AUTO','a job walk keeps the worker automatic');
-  assert.ok(until(f,()=>f.sim.repo.get(checks[0].id).state==='DONE',120),'the check completes');assert.equal(f.sim.repo.get(f.a.id).returnChecked,f.sim.repo.get(f.a.id).delivery);assert.equal(!!f.sim.repo.get(f.a.id).countedAt,f.sim.repo.all('job').some(j=>j.key==='P6:COUNT:'+f.a.id&&j.state==='DONE'),'countedAt comes only from a cycle count, never from a returns check');assert.match(f.sim.repo.get(checks[0].id).result,/Returns check recorded/);
-  f.tick(3);assert.equal(liveJobs(f).filter(j=>j.key===checks[0].key).length,0,'the key does not come back');assert.ok(f.sim.repo.all('job').some(j=>j.key.startsWith('P8:CLEAN:'+f.a.id)),'cleaning follows the check');assert.equal(f.total(),200);assert.equal(f.sim.repo.history(500).filter(l=>!['COMMAND','PICKUP','PLACEMENT','OPENING_BALANCE'].includes(l.event)).length,0,'recorded work writes no stock ledger rows');});
+test('a returned stillage derives one returns-check job, a worker walks to it and completes it, the key never returns and a clean-up follows', (t) => {
+  const f = fixture(t);
+  const request = f.cmd('request', { site: f.site.id, product: f.products[0].id, quantity: 100 });
+  f.cmd('allocate', { id: request.id, truck: f.truck.id });
+  f.tick(60);
+  f.cmd('dispatch', { id: f.truck.id, destination: f.site.id });
+  f.tick(5);
+  f.cmd('unload', { id: f.truck.id });
+  f.tick(60);
+  f.cmd('returnStock', { container: f.a.id, truck: f.truck.id });
+  f.tick(60);
+  f.cmd('dispatch', { id: f.truck.id, destination: f.yard.id });
+  f.tick(5);
+  f.cmd('unload', { id: f.truck.id });
+  f.tick(60);
+  assert.equal(f.sim.repo.get(f.a.id).location, f.yard.id);
+  jobsOn(f, { jobEffects: { UNLOAD: false } });
+  f.tick(2);
+  const checks = liveJobs(f).filter((j) => j.key.startsWith('P4:RETURN_CHECK:' + f.a.id));
+  assert.equal(checks.length, 1, 'one returns check for A');
+  assert.equal(checks[0].priority, 4);
+  assert.equal(checks[0].category, 'RETURNS');
+  assert.ok(checks[0].target, 'the job has a standing spot');
+  assert.ok(
+    until(f, () => ['ASSIGNED', 'IN_PROGRESS'].includes(f.sim.repo.get(checks[0].id).state), 10),
+    'assigned within a few ticks',
+  );
+  const j = f.sim.repo.get(checks[0].id);
+  const w = f.sim.repo.get(j.worker, 'resource');
+  assert.equal(w.job, j.id);
+  assert.ok(!w.workerMode || w.workerMode === 'AUTO', 'a job walk keeps the worker automatic');
+  assert.ok(
+    until(f, () => f.sim.repo.get(checks[0].id).state === 'DONE', 120),
+    'the check completes',
+  );
+  assert.equal(f.sim.repo.get(f.a.id).returnChecked, f.sim.repo.get(f.a.id).delivery);
+  assert.equal(
+    !!f.sim.repo.get(f.a.id).countedAt,
+    f.sim.repo.all('job').some((j) => j.key === 'P6:COUNT:' + f.a.id && j.state === 'DONE'),
+    'countedAt comes only from a cycle count, never from a returns check',
+  );
+  assert.match(f.sim.repo.get(checks[0].id).result, /Returns check recorded/);
+  f.tick(3);
+  assert.equal(liveJobs(f).filter((j) => j.key === checks[0].key).length, 0, 'the key does not come back');
+  assert.ok(
+    f.sim.repo.all('job').some((j) => j.key.startsWith('P8:CLEAN:' + f.a.id)),
+    'cleaning follows the check',
+  );
+  assert.equal(f.total(), 200);
+  assert.equal(
+    f.sim.repo.history(500).filter((l) => !['COMMAND', 'PICKUP', 'PLACEMENT', 'OPENING_BALANCE'].includes(l.event))
+      .length,
+    0,
+    'recorded work writes no stock ledger rows',
+  );
+});
 
-test('the forklift engine keeps first pick: a truck load takes the only worker off a consolidation job, which resumes and conserves stock',t=>{const f=fixture(t);for(let i=0;i<4;i++)f.cmd('quickAdjust',{kind:'WORKER',delta:-1,location:f.yard.id});assert.equal(f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id).length,1);
-  const c=f.container('C',4000,7000),d=f.container('D',7000,7000);f.cmd('opening',{container:c.id,product:f.products[0].id,quantity:40,reason:'DEMO ONLY'});f.cmd('opening',{container:d.id,product:f.products[0].id,quantity:30,reason:'DEMO ONLY'});const before=f.total();
-  jobsOn(f);f.tick(2);const cons=liveJobs(f).find(j=>j.effect==='CONSOLIDATE');assert.ok(cons,'partial stillages derive a consolidation job');assert.equal(cons.params.to,c.id);assert.equal(cons.params.from,d.id);assert.equal(cons.params.quantity,30);
-  assert.ok(until(f,()=>['ASSIGNED','IN_PROGRESS'].includes(f.sim.repo.get(cons.id).state),10));const w=worker(f);
-  const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});assert.ok(until(f,()=>f.sim.repo.get(task.id).resources?.length>0,10),'the engine claims the worker');const j=f.sim.repo.get(cons.id);assert.equal(j.state,'OPEN');assert.match(j.reason,/Needed for Load T01/);assert.equal(f.sim.repo.get(w.id).job,null);assert.equal(f.sim.repo.get(w.id).task,task.id);
-  assert.ok(until(f,()=>f.sim.repo.get(task.id).state==='COMPLETE',120));assert.ok(until(f,()=>f.sim.repo.get(cons.id).state==='DONE',200),'the job resumes after the movement');assert.equal(f.sim.repo.quantity(c.id,f.products[0].id),70);assert.equal(f.sim.repo.quantity(d.id,f.products[0].id),0);assert.equal(f.total(),before);const row=f.sim.repo.history(500).find(l=>l.event==='CONSOLIDATED');assert.ok(row);assert.equal(row.actor,'engine:'+f.yard.id);assert.equal(row.command_key,cons.id+':done');assert.equal(f.sim.snapshot().tasks.length,0);});
+test('the forklift engine keeps first pick: a truck load takes the only worker off a consolidation job, which resumes and conserves stock', (t) => {
+  const f = fixture(t);
+  for (let i = 0; i < 4; i++) f.cmd('quickAdjust', { kind: 'WORKER', delta: -1, location: f.yard.id });
+  assert.equal(
+    f.sim.repo.all('resource').filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id).length,
+    1,
+  );
+  const c = f.container('C', 4000, 7000),
+    d = f.container('D', 7000, 7000);
+  f.cmd('opening', { container: c.id, product: f.products[0].id, quantity: 40, reason: 'DEMO ONLY' });
+  f.cmd('opening', { container: d.id, product: f.products[0].id, quantity: 30, reason: 'DEMO ONLY' });
+  const before = f.total();
+  jobsOn(f);
+  f.tick(2);
+  const cons = liveJobs(f).find((j) => j.effect === 'CONSOLIDATE');
+  assert.ok(cons, 'partial stillages derive a consolidation job');
+  assert.equal(cons.params.to, c.id);
+  assert.equal(cons.params.from, d.id);
+  assert.equal(cons.params.quantity, 30);
+  assert.ok(until(f, () => ['ASSIGNED', 'IN_PROGRESS'].includes(f.sim.repo.get(cons.id).state), 10));
+  const w = worker(f);
+  const task = f.cmd('queue', { container: f.a.id, destination: f.truck.id });
+  assert.ok(
+    until(f, () => f.sim.repo.get(task.id).resources?.length > 0, 10),
+    'the engine claims the worker',
+  );
+  const j = f.sim.repo.get(cons.id);
+  assert.equal(j.state, 'OPEN');
+  assert.match(j.reason, /Needed for Load T01/);
+  assert.equal(f.sim.repo.get(w.id).job, null);
+  assert.equal(f.sim.repo.get(w.id).task, task.id);
+  assert.ok(until(f, () => f.sim.repo.get(task.id).state === 'COMPLETE', 120));
+  assert.ok(
+    until(f, () => f.sim.repo.get(cons.id).state === 'DONE', 200),
+    'the job resumes after the movement',
+  );
+  assert.equal(f.sim.repo.quantity(c.id, f.products[0].id), 70);
+  assert.equal(f.sim.repo.quantity(d.id, f.products[0].id), 0);
+  assert.equal(f.total(), before);
+  const row = f.sim.repo.history(500).find((l) => l.event === 'CONSOLIDATED');
+  assert.ok(row);
+  assert.equal(row.actor, 'engine:' + f.yard.id);
+  assert.equal(row.command_key, cons.id + ':done');
+  assert.equal(f.sim.snapshot().tasks.length, 0);
+});
 
-test('skills gate the engine and the assigner with honest messages',t=>{const f=fixture(t);for(const w of f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id))f.cmd('workerSkills',{id:w.id,skills:{TRUCK:false}});const shown=f.sim.snapshot().resources.find(r=>r.type==='WORKER'&&r.location===f.yard.id);assert.equal(shown.skills.TRUCK,false);assert.equal(shown.skills.YARD,true);assert.equal(Object.keys(shown.skills).length,10);
-  const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});f.tick(3);assert.equal(f.sim.repo.get(task.id).state,'BLOCKED');assert.equal(f.sim.repo.get(task.id).reason,'No worker with the truck operations skill is available.');f.cmd('workerSkills',{id:worker(f).id,skills:{TRUCK:true}});f.cmd('retry',{id:task.id});assert.ok(until(f,()=>f.sim.repo.get(task.id).state==='COMPLETE',120));
-  assert.throws(()=>f.cmd('workerSkills',{id:worker(f).id,skills:{FLYING:true}}),/valid skills/);
-  const w2=worker(f,1);f.cmd('workerSkills',{id:w2.id,skills:{STOCK:false}});for(const w of f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id))f.cmd('workerCommand',{id:w.id,order:'HOLD'});jobsOn(f);f.tick(2);const count=liveJobs(f).find(j=>j.effect==='COUNT'&&j.state==='OPEN');assert.ok(count,'stock never counted derives a cycle count');assert.throws(()=>f.cmd('assignJob',{id:count.id,worker:w2.id}),/Turn on the Stock control skill/);const s=f.sim.snapshot();assert.equal(s.tasks.length,0);assert.ok(s.skillCatalogue.length===10&&SKILLS.length===10&&LADDER.length===8);});
+test('skills gate the engine and the assigner with honest messages', (t) => {
+  const f = fixture(t);
+  for (const w of f.sim.repo
+    .all('resource')
+    .filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id))
+    f.cmd('workerSkills', { id: w.id, skills: { TRUCK: false } });
+  const shown = f.sim.snapshot().resources.find((r) => r.type === 'WORKER' && r.location === f.yard.id);
+  assert.equal(shown.skills.TRUCK, false);
+  assert.equal(shown.skills.YARD, true);
+  assert.equal(Object.keys(shown.skills).length, 10);
+  const task = f.cmd('queue', { container: f.a.id, destination: f.truck.id });
+  f.tick(3);
+  assert.equal(f.sim.repo.get(task.id).state, 'BLOCKED');
+  assert.equal(f.sim.repo.get(task.id).reason, 'No worker with the truck operations skill is available.');
+  f.cmd('workerSkills', { id: worker(f).id, skills: { TRUCK: true } });
+  f.cmd('retry', { id: task.id });
+  assert.ok(until(f, () => f.sim.repo.get(task.id).state === 'COMPLETE', 120));
+  assert.throws(() => f.cmd('workerSkills', { id: worker(f).id, skills: { FLYING: true } }), /valid skills/);
+  const w2 = worker(f, 1);
+  f.cmd('workerSkills', { id: w2.id, skills: { STOCK: false } });
+  for (const w of f.sim.repo
+    .all('resource')
+    .filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id))
+    f.cmd('workerCommand', { id: w.id, order: 'HOLD' });
+  jobsOn(f);
+  f.tick(2);
+  const count = liveJobs(f).find((j) => j.effect === 'COUNT' && j.state === 'OPEN');
+  assert.ok(count, 'stock never counted derives a cycle count');
+  assert.throws(() => f.cmd('assignJob', { id: count.id, worker: w2.id }), /Turn on the Stock control skill/);
+  const s = f.sim.snapshot();
+  assert.equal(s.tasks.length, 0);
+  assert.ok(s.skillCatalogue.length === 10 && SKILLS.length === 10 && LADDER.length === 8);
+});
 
-test('held workers are never auto-assigned but accept manual allocation; orders release the job; take off and jobs-off release cleanly',t=>{const f=fixture(t);const crew=f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id);for(const w of crew)f.cmd('workerCommand',{id:w.id,order:'HOLD'});jobsOn(f,{routineJobs:true});f.tick(5);assert.equal(liveJobs(f).filter(j=>j.worker).length,0,'nothing assigned while everyone holds');assert.ok(liveJobs(f).length>0,'the board fills anyway');
-  const w=crew[0];const job=f.cmd('nextJob',{id:w.id});assert.ok(['ASSIGNED','IN_PROGRESS'].includes(job.state));assert.equal(f.sim.repo.get(w.id).job,job.id);f.cmd('workerCommand',{id:w.id,order:'STOP'});const released=f.sim.repo.get(job.id);assert.equal(released.state,'OPEN');assert.match(released.reason,/Order from the yard office/);assert.equal(f.sim.repo.get(w.id).job,null);assert.equal(f.sim.repo.get(w.id).workerMode,'HOLD');
-  const again=f.cmd('assignJob',{id:job.id,worker:w.id});assert.equal(again.worker,w.id);const off=f.cmd('takeOffJob',{id:job.id});assert.equal(off.state,'OPEN');assert.ok(f.sim.repo.get(w.id).assignHoldUntil);
-  f.cmd('workerCommand',{id:w.id,order:'AUTO'});assert.equal(f.sim.repo.get(w.id).assignHoldUntil,null);f.tick(3);assert.ok(f.sim.repo.get(w.id).job,'an automatic worker is given work');
-  f.cmd('jobsMode',{jobs:false});assert.equal(f.sim.repo.all('resource').filter(r=>r.job).length,0);assert.equal(liveJobs(f).filter(j=>j.worker).length,0);f.tick(3);assert.equal(f.sim.repo.all('resource').filter(r=>r.job).length,0,'nothing is assigned while jobs are off');const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});assert.ok(until(f,()=>f.sim.repo.get(task.id).state==='COMPLETE',120),'the engine still works');});
+test('held workers are never auto-assigned but accept manual allocation; orders release the job; take off and jobs-off release cleanly', (t) => {
+  const f = fixture(t);
+  const crew = f.sim.repo.all('resource').filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id);
+  for (const w of crew) f.cmd('workerCommand', { id: w.id, order: 'HOLD' });
+  jobsOn(f, { routineJobs: true });
+  f.tick(5);
+  assert.equal(liveJobs(f).filter((j) => j.worker).length, 0, 'nothing assigned while everyone holds');
+  assert.ok(liveJobs(f).length > 0, 'the board fills anyway');
+  const w = crew[0];
+  const job = f.cmd('nextJob', { id: w.id });
+  assert.ok(['ASSIGNED', 'IN_PROGRESS'].includes(job.state));
+  assert.equal(f.sim.repo.get(w.id).job, job.id);
+  f.cmd('workerCommand', { id: w.id, order: 'STOP' });
+  const released = f.sim.repo.get(job.id);
+  assert.equal(released.state, 'OPEN');
+  assert.match(released.reason, /Order from the yard office/);
+  assert.equal(f.sim.repo.get(w.id).job, null);
+  assert.equal(f.sim.repo.get(w.id).workerMode, 'HOLD');
+  const again = f.cmd('assignJob', { id: job.id, worker: w.id });
+  assert.equal(again.worker, w.id);
+  const off = f.cmd('takeOffJob', { id: job.id });
+  assert.equal(off.state, 'OPEN');
+  assert.ok(f.sim.repo.get(w.id).assignHoldUntil);
+  f.cmd('workerCommand', { id: w.id, order: 'AUTO' });
+  assert.equal(f.sim.repo.get(w.id).assignHoldUntil, null);
+  f.tick(3);
+  assert.ok(f.sim.repo.get(w.id).job, 'an automatic worker is given work');
+  f.cmd('jobsMode', { jobs: false });
+  assert.equal(f.sim.repo.all('resource').filter((r) => r.job).length, 0);
+  assert.equal(liveJobs(f).filter((j) => j.worker).length, 0);
+  f.tick(3);
+  assert.equal(f.sim.repo.all('resource').filter((r) => r.job).length, 0, 'nothing is assigned while jobs are off');
+  const task = f.cmd('queue', { container: f.a.id, destination: f.truck.id });
+  assert.ok(
+    until(f, () => f.sim.repo.get(task.id).state === 'COMPLETE', 120),
+    'the engine still works',
+  );
+});
 
-test('routine rotation keeps automatic workers busy without ledger rows, is excluded from done work and can be switched off',t=>{const f=fixture(t);jobsOn(f,{routineJobs:true});const rows=()=>f.sim.repo.history(500).filter(l=>l.event!=='COMMAND').length;const before=rows();f.tick(8);const crew=f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id);assert.ok(crew.every(w=>w.job||w.walk||w.task),'nobody is static: '+crew.map(w=>w.name+':'+(w.job?'job':w.walk?'walk':'idle')).join(','));const routine=liveJobs(f).filter(j=>j.origin==='ROUTINE');assert.ok(routine.length>0);assert.ok(routine.every(j=>['ASSIGNED','IN_PROGRESS'].includes(j.state)),'routine jobs exist only while someone does them');assert.equal(new Set(routine.map(j=>j.key)).size,routine.length,'distinct verbs');
-  f.tick(40);assert.equal(rows()-before,0,'no stock ledger rows from routine or recorded work');const s=f.sim.snapshot();assert.ok(s.recentJobs.every(j=>j.origin!=='ROUTINE'));assert.ok(s.resources.filter(r=>r.type==='WORKER'&&r.location===f.yard.id).every(r=>r.board&&r.board.now&&r.board.now.title));
-  f.cmd('jobsMode',{routineJobs:false});assert.equal(liveJobs(f).filter(j=>j.origin==='ROUTINE').length,0);assert.ok(f.sim.repo.all('job').some(j=>j.origin==='ROUTINE'&&j.state==='EXPIRED'));});
+test('routine rotation keeps automatic workers busy without ledger rows, is excluded from done work and can be switched off', (t) => {
+  const f = fixture(t);
+  jobsOn(f, { routineJobs: true });
+  const rows = () => f.sim.repo.history(500).filter((l) => l.event !== 'COMMAND').length;
+  const before = rows();
+  f.tick(8);
+  const crew = f.sim.repo.all('resource').filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id);
+  assert.ok(
+    crew.every((w) => w.job || w.walk || w.task),
+    'nobody is static: ' + crew.map((w) => w.name + ':' + (w.job ? 'job' : w.walk ? 'walk' : 'idle')).join(','),
+  );
+  const routine = liveJobs(f).filter((j) => j.origin === 'ROUTINE');
+  assert.ok(routine.length > 0);
+  assert.ok(
+    routine.every((j) => ['ASSIGNED', 'IN_PROGRESS'].includes(j.state)),
+    'routine jobs exist only while someone does them',
+  );
+  assert.equal(new Set(routine.map((j) => j.key)).size, routine.length, 'distinct verbs');
+  f.tick(40);
+  assert.equal(rows() - before, 0, 'no stock ledger rows from routine or recorded work');
+  const s = f.sim.snapshot();
+  assert.ok(s.recentJobs.every((j) => j.origin !== 'ROUTINE'));
+  assert.ok(
+    s.resources
+      .filter((r) => r.type === 'WORKER' && r.location === f.yard.id)
+      .every((r) => r.board && r.board.now && r.board.now.title),
+  );
+  f.cmd('jobsMode', { routineJobs: false });
+  assert.equal(liveJobs(f).filter((j) => j.origin === 'ROUTINE').length, 0);
+  assert.ok(f.sim.repo.all('job').some((j) => j.origin === 'ROUTINE' && j.state === 'EXPIRED'));
+});
 
-test('the job engine is fault-isolated: a failing derive pass never stops the forklift engine and trips the breaker',t=>{const f=fixture(t);jobsOn(f);const original=Simulation.prototype.deriveJobs;Simulation.prototype.deriveJobs=function(){throw new Error('boom');};t.after(()=>{Simulation.prototype.deriveJobs=original;});const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});assert.ok(until(f,()=>f.sim.repo.get(task.id).state==='COMPLETE',60),'the movement engine keeps running');const cfg=f.sim.repo.all('config')[0];assert.ok(cfg.jobsFault,'the breaker tripped');assert.ok(f.sim.snapshot().notifications.some(n=>n.title==='Yard jobs paused'));Simulation.prototype.deriveJobs=original;f.cmd('jobsMode',{jobs:true});assert.equal(f.sim.repo.all('config')[0].jobsFault,null);f.tick(3);assert.ok(liveJobs(f).length>0,'derivation resumes after the fault is cleared');});
+test('the job engine is fault-isolated: a failing derive pass never stops the forklift engine and trips the breaker', (t) => {
+  const f = fixture(t);
+  jobsOn(f);
+  const original = Simulation.prototype.deriveJobs;
+  Simulation.prototype.deriveJobs = function () {
+    throw new Error('boom');
+  };
+  t.after(() => {
+    Simulation.prototype.deriveJobs = original;
+  });
+  const task = f.cmd('queue', { container: f.a.id, destination: f.truck.id });
+  assert.ok(
+    until(f, () => f.sim.repo.get(task.id).state === 'COMPLETE', 60),
+    'the movement engine keeps running',
+  );
+  const cfg = f.sim.repo.all('config')[0];
+  assert.ok(cfg.jobsFault, 'the breaker tripped');
+  assert.ok(f.sim.snapshot().notifications.some((n) => n.title === 'Yard jobs paused'));
+  Simulation.prototype.deriveJobs = original;
+  f.cmd('jobsMode', { jobs: true });
+  assert.equal(f.sim.repo.all('config')[0].jobsFault, null);
+  f.tick(3);
+  assert.ok(liveJobs(f).length > 0, 'derivation resumes after the fault is cleared');
+});
 
-test('move orders can name a place, resume returns the worker to automatic, and an arrived return truck is unloaded automatically',t=>{const f=fixture(t);const w=worker(f);const moved=f.cmd('workerCommand',{id:w.id,order:'MOVE',target:'loading',resume:true});assert.equal(moved.workerMode,'MOVING');assert.equal(moved.walk.resume,true);assert.ok(until(f,()=>f.sim.repo.get(w.id).workerMode!=='MOVING',60));const arrived=f.sim.repo.get(w.id);assert.equal(arrived.workerMode,'AUTO');assert.ok(arrived.dwellUntil);assert.ok(Math.abs(arrived.x-(f.yard.loading.x+750))<1&&Math.abs(arrived.y-(f.yard.loading.y+500))<1);
-  const beside=f.cmd('workerCommand',{id:w.id,order:'MOVE',target:f.b.id});const end=beside.walk.path.at(-1);assert.ok(end.x>=f.b.x+2000||end.x+500<=f.b.x||end.y>=f.b.y+1000||end.y+500<=f.b.y,'the spot is beside the stillage, not on it');assert.throws(()=>f.cmd('workerCommand',{id:w.id,order:'MOVE',target:f.site.id}),/Choose/);assert.throws(()=>f.cmd('workerCommand',{id:w.id,order:'MOVE',x:1000,y:1000,resume:'yes'}),/resume/);
-  assert.ok(until(f,()=>f.sim.repo.get(w.id).workerMode!=='MOVING',60));assert.equal(f.sim.repo.get(w.id).workerMode,'HOLD','without resume the worker holds, as before');
-  const request=f.cmd('request',{site:f.site.id,product:f.products[0].id,quantity:100});f.cmd('allocate',{id:request.id,truck:f.truck.id});f.tick(60);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});f.tick(60);f.cmd('returnStock',{container:f.a.id,truck:f.truck.id});f.tick(60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});jobsOn(f);f.tick(5);assert.equal(f.sim.repo.get(f.truck.id).status,'AT_YARD');f.tick(2);const unloads=f.sim.tasks().filter(x=>x.from===f.truck.id&&!['COMPLETE','CANCELLED','FAILED'].includes(x.state));assert.ok(unloads.length>0,'unload moves queued by the yard engine');assert.ok(unloads.every(x=>x.actor==='engine:'+f.yard.id));const rec=f.sim.repo.all('job').find(j=>j.effect==='UNLOAD');assert.equal(rec.state,'DONE');assert.equal(rec.worker,null);assert.ok(until(f,()=>f.sim.repo.get(f.a.id).location===f.yard.id,200));assert.equal(f.total(),200);});
+test('move orders can name a place, resume returns the worker to automatic, and an arrived return truck is unloaded automatically', (t) => {
+  const f = fixture(t);
+  const w = worker(f);
+  const moved = f.cmd('workerCommand', { id: w.id, order: 'MOVE', target: 'loading', resume: true });
+  assert.equal(moved.workerMode, 'MOVING');
+  assert.equal(moved.walk.resume, true);
+  assert.ok(until(f, () => f.sim.repo.get(w.id).workerMode !== 'MOVING', 60));
+  const arrived = f.sim.repo.get(w.id);
+  assert.equal(arrived.workerMode, 'AUTO');
+  assert.ok(arrived.dwellUntil);
+  assert.ok(Math.abs(arrived.x - (f.yard.loading.x + 750)) < 1 && Math.abs(arrived.y - (f.yard.loading.y + 500)) < 1);
+  const beside = f.cmd('workerCommand', { id: w.id, order: 'MOVE', target: f.b.id });
+  const end = beside.walk.path.at(-1);
+  assert.ok(
+    end.x >= f.b.x + 2000 || end.x + 500 <= f.b.x || end.y >= f.b.y + 1000 || end.y + 500 <= f.b.y,
+    'the spot is beside the stillage, not on it',
+  );
+  assert.throws(() => f.cmd('workerCommand', { id: w.id, order: 'MOVE', target: f.site.id }), /Choose/);
+  assert.throws(() => f.cmd('workerCommand', { id: w.id, order: 'MOVE', x: 1000, y: 1000, resume: 'yes' }), /resume/);
+  assert.ok(until(f, () => f.sim.repo.get(w.id).workerMode !== 'MOVING', 60));
+  assert.equal(f.sim.repo.get(w.id).workerMode, 'HOLD', 'without resume the worker holds, as before');
+  const request = f.cmd('request', { site: f.site.id, product: f.products[0].id, quantity: 100 });
+  f.cmd('allocate', { id: request.id, truck: f.truck.id });
+  f.tick(60);
+  f.cmd('dispatch', { id: f.truck.id, destination: f.site.id });
+  f.tick(5);
+  f.cmd('unload', { id: f.truck.id });
+  f.tick(60);
+  f.cmd('returnStock', { container: f.a.id, truck: f.truck.id });
+  f.tick(60);
+  f.cmd('dispatch', { id: f.truck.id, destination: f.yard.id });
+  jobsOn(f);
+  f.tick(5);
+  assert.equal(f.sim.repo.get(f.truck.id).status, 'AT_YARD');
+  f.tick(2);
+  const unloads = f.sim
+    .tasks()
+    .filter((x) => x.from === f.truck.id && !['COMPLETE', 'CANCELLED', 'FAILED'].includes(x.state));
+  assert.ok(unloads.length > 0, 'unload moves queued by the yard engine');
+  assert.ok(unloads.every((x) => x.actor === 'engine:' + f.yard.id));
+  const rec = f.sim.repo.all('job').find((j) => j.effect === 'UNLOAD');
+  assert.equal(rec.state, 'DONE');
+  assert.equal(rec.worker, null);
+  assert.ok(until(f, () => f.sim.repo.get(f.a.id).location === f.yard.id, 200));
+  assert.equal(f.total(), 200);
+});
 
-test('custom jobs, cancellation, snapshot boards and the ladder; supervisors see no board',t=>{const f=fixture(t);jobsOn(f);const w=worker(f);const job=f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'organise straps/chains/timber',where:{kind:'loading'},seconds:2,worker:w.id});assert.equal(job.origin,'MANUAL');assert.equal(job.priority,7);assert.ok(['ASSIGNED','IN_PROGRESS'].includes(job.state));assert.equal(job.target.x,f.yard.loading.x+750);
-  const custom=f.cmd('createJob',{yard:f.yard.id,category:'SAFETY',title:'Check the new barrier',where:{kind:'point',x:15000,y:12000},priority:1,seconds:5});assert.equal(custom.state,'OPEN');assert.equal(custom.priority,1);assert.throws(()=>f.cmd('createJob',{yard:f.yard.id,category:'NOPE',title:'x'}),/category/);assert.throws(()=>f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'x',where:{kind:'point',x:-5000,y:0}}),/open ground/);
-  const s=f.sim.snapshot();assert.ok(s.jobs.some(j=>j.id===custom.id));assert.equal(s.ladder[f.yard.id].length,8);assert.ok(s.ladder[f.yard.id][0].open>=1,'the P1 custom job counts on the ladder');const row=s.resources.find(r=>r.id===w.id);assert.ok(row.board.now.title.includes('organise straps') ||row.board.now.title.includes('Walking to'));assert.ok(Array.isArray(row.board.idle));
-  const cancelled=f.cmd('cancelJob',{id:custom.id,reason:'Not needed'});assert.equal(cancelled.state,'CANCELLED');f.tick(2);const derived=f.sim.repo.all('job').find(j=>j.origin==='DERIVED');assert.ok(derived);assert.throws(()=>f.cmd('cancelJob',{id:derived.id}),/cannot be cancelled/);assert.throws(()=>f.cmd('cancelJob',{id:custom.id}),/already closed/);f.tick(30);assert.equal(f.sim.repo.get(job.id).state,'DONE');assert.match(f.sim.repo.get(job.id).result,/Done by/);
-  f.auth.addUser(f.user,{name:'Supervisor',email:'supervisor@example.com',password:'demonstration-password',roles:['SUPERVISOR']});const sup=f.auth.authenticate(f.auth.login({email:'supervisor@example.com',password:'demonstration-password'}));const theirs=new Simulation(f.db,sup).snapshot();assert.equal(theirs.jobs,undefined);assert.equal(theirs.ladder,undefined);assert.throws(()=>new Simulation(f.db,sup).execute('createJob',{yard:f.yard.id,category:'YARD',title:'x'},randomUUID()),{status:403});});
+test('custom jobs, cancellation, snapshot boards and the ladder; supervisors see no board', (t) => {
+  const f = fixture(t);
+  jobsOn(f);
+  const w = worker(f);
+  const job = f.cmd('createJob', {
+    yard: f.yard.id,
+    category: 'YARD',
+    title: 'organise straps/chains/timber',
+    where: { kind: 'loading' },
+    seconds: 2,
+    worker: w.id,
+  });
+  assert.equal(job.origin, 'MANUAL');
+  assert.equal(job.priority, 7);
+  assert.ok(['ASSIGNED', 'IN_PROGRESS'].includes(job.state));
+  assert.equal(job.target.x, f.yard.loading.x + 750);
+  const custom = f.cmd('createJob', {
+    yard: f.yard.id,
+    category: 'SAFETY',
+    title: 'Check the new barrier',
+    where: { kind: 'point', x: 15000, y: 12000 },
+    priority: 1,
+    seconds: 5,
+  });
+  assert.equal(custom.state, 'OPEN');
+  assert.equal(custom.priority, 1);
+  assert.throws(() => f.cmd('createJob', { yard: f.yard.id, category: 'NOPE', title: 'x' }), /category/);
+  assert.throws(
+    () =>
+      f.cmd('createJob', { yard: f.yard.id, category: 'YARD', title: 'x', where: { kind: 'point', x: -5000, y: 0 } }),
+    /open ground/,
+  );
+  const s = f.sim.snapshot();
+  assert.ok(s.jobs.some((j) => j.id === custom.id));
+  assert.equal(s.ladder[f.yard.id].length, 8);
+  assert.ok(s.ladder[f.yard.id][0].open >= 1, 'the P1 custom job counts on the ladder');
+  const row = s.resources.find((r) => r.id === w.id);
+  assert.ok(row.board.now.title.includes('organise straps') || row.board.now.title.includes('Walking to'));
+  assert.ok(Array.isArray(row.board.idle));
+  const cancelled = f.cmd('cancelJob', { id: custom.id, reason: 'Not needed' });
+  assert.equal(cancelled.state, 'CANCELLED');
+  f.tick(2);
+  const derived = f.sim.repo.all('job').find((j) => j.origin === 'DERIVED');
+  assert.ok(derived);
+  assert.throws(() => f.cmd('cancelJob', { id: derived.id }), /cannot be cancelled/);
+  assert.throws(() => f.cmd('cancelJob', { id: custom.id }), /already closed/);
+  f.tick(30);
+  assert.equal(f.sim.repo.get(job.id).state, 'DONE');
+  assert.match(f.sim.repo.get(job.id).result, /Done by/);
+  f.auth.addUser(f.user, {
+    name: 'Supervisor',
+    email: 'supervisor@example.com',
+    password: 'demonstration-password',
+    roles: ['SUPERVISOR'],
+  });
+  const sup = f.auth.authenticate(
+    f.auth.login({ email: 'supervisor@example.com', password: 'demonstration-password' }),
+  );
+  const theirs = new Simulation(f.db, sup).snapshot();
+  assert.equal(theirs.jobs, undefined);
+  assert.equal(theirs.ladder, undefined);
+  assert.throws(
+    () =>
+      new Simulation(f.db, sup).execute('createJob', { yard: f.yard.id, category: 'YARD', title: 'x' }, randomUUID()),
+    { status: 403 },
+  );
+});
 
-test('retire, resources and a yard resize release jobs safely and jobs never keep a worker from being removed',t=>{const f=fixture(t);jobsOn(f,{routineJobs:true});f.tick(6);const w=f.sim.repo.all('resource').find(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id&&r.job);assert.ok(w,'someone is on a job');const jobId=w.job;f.cmd('retire',{id:w.id});assert.equal(f.sim.repo.get(w.id).enabled,false);assert.ok(['OPEN','EXPIRED'].includes(f.sim.repo.get(jobId).state));
-  f.tick(6);f.cmd('resources',{location:f.yard.id,workers:3,machines:1,stepMs:100,speed:100000});assert.equal(f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id).length,3);assert.equal(f.sim.repo.all('resource').filter(r=>r.enabled&&r.job).length,0);
-  f.tick(6);const busy=f.sim.repo.all('resource').find(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id&&r.job);assert.ok(busy);f.cmd('yard',{id:f.yard.id,name:'Yard',segments:[{direction:'RIGHT',length:20000},{direction:'DOWN',length:14000},{direction:'LEFT',length:20000}],closed:true});assert.equal(f.sim.repo.get(busy.id).job,null);assert.notEqual(f.sim.repo.get(busy.id).workerMode,'HOLD','a job walk does not leave the worker on hold after a resize');});
+test('retire, resources and a yard resize release jobs safely and jobs never keep a worker from being removed', (t) => {
+  const f = fixture(t);
+  jobsOn(f, { routineJobs: true });
+  f.tick(6);
+  const w = f.sim.repo
+    .all('resource')
+    .find((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id && r.job);
+  assert.ok(w, 'someone is on a job');
+  const jobId = w.job;
+  f.cmd('retire', { id: w.id });
+  assert.equal(f.sim.repo.get(w.id).enabled, false);
+  assert.ok(['OPEN', 'EXPIRED'].includes(f.sim.repo.get(jobId).state));
+  f.tick(6);
+  f.cmd('resources', { location: f.yard.id, workers: 3, machines: 1, stepMs: 100, speed: 100000 });
+  assert.equal(
+    f.sim.repo.all('resource').filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id).length,
+    3,
+  );
+  assert.equal(f.sim.repo.all('resource').filter((r) => r.enabled && r.job).length, 0);
+  f.tick(6);
+  const busy = f.sim.repo
+    .all('resource')
+    .find((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id && r.job);
+  assert.ok(busy);
+  f.cmd('yard', {
+    id: f.yard.id,
+    name: 'Yard',
+    segments: [
+      { direction: 'RIGHT', length: 20000 },
+      { direction: 'DOWN', length: 14000 },
+      { direction: 'LEFT', length: 20000 },
+    ],
+    closed: true,
+  });
+  assert.equal(f.sim.repo.get(busy.id).job, null);
+  assert.notEqual(
+    f.sim.repo.get(busy.id).workerMode,
+    'HOLD',
+    'a job walk does not leave the worker on hold after a resize',
+  );
+});
 
-test('the Workers tab renders every control, the board lines, skills, the job board and the add-a-job form from a live snapshot',async t=>{const f=fixture(t);const {__test}=await import('../public/operations.js');jobsOn(f,{routineJobs:true});f.tick(6);const snapshot=f.sim.snapshot();const account={permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}};__test.setState(snapshot,account);__test.setView('WORKERS');const html=__test.workersView();
-  for(const needle of ['data-worker-order="MOVE"','data-worker-order="STOP"','data-worker-order="MOUNT"','data-worker-order="DISMOUNT"','data-worker-order="HOLD"','data-next-job=','data-allocate=','data-skills-open=','data-move-target=','data-mount-select=','data-take-off=','Job board','Add a job','id="create-job"','data-jobs-mode="jobs"','data-allocate-all','data-all-auto','data-hold-all','class="ladder"','<b>NOW</b>','<b>NEXT</b>','<b>IDLE TASKS</b>'])assert.ok(html.includes(needle),'missing '+needle);
-  assert.equal((html.match(/data-crew-row=/g)||[]).length,5,'one row per yard worker');assert.equal((html.match(/<li class="[^"]*">P\d /g)||[]).length,8,'eight ladder rungs');assert.equal((html.match(/<option value="[A-Z]+" [^>]*>[^<]+<\/option>/g)||[]).filter(o=>/Truck operations|Order preparation|Returns processing|Material handling|Stock control|Yard organisation|Equipment checks|Maintenance\/preparation|Safety tasks|Continuous improvement/.test(o)).length,10,'ten categories offered');
-  const first=snapshot.resources.find(r=>r.type==='WORKER'&&r.location===f.yard.id);assert.ok(first.board&&first.board.now.title,'board lines come from the server');assert.ok(html.includes(first.board.now.title.slice(0,20).replace(/&/g,'&amp;')),'the NOW line shows the worker\'s current job');
-  __test.setState({...snapshot,resources:snapshot.resources.map(r=>({...r,skills:{...r.skills,TRUCK:false}}))},account);assert.ok(__test.workersView().includes('Skills 9/10'),'switched-off skills are counted');
-  __test.setState(snapshot,{...account,permissions:['requests.create']});const sup=__test.workersView();assert.ok(sup.includes('Site crew')||sup.includes('No crew'));assert.ok(!sup.includes('data-worker-order'),'supervisors get no orders');});
+test('the Workers tab renders every control, the board lines, skills, the job board and the add-a-job form from a live snapshot', async (t) => {
+  const f = fixture(t);
+  const { __test } = await import('../public/operations.js');
+  jobsOn(f, { routineJobs: true });
+  f.tick(6);
+  const snapshot = f.sim.snapshot();
+  const account = {
+    permissions: ['operations.manage', 'stock.adjust', 'requests.create'],
+    systems: [],
+    users: [],
+    company: { id: 'c', name: 'Demo' },
+    user: { id: f.user.id },
+  };
+  __test.setState(snapshot, account);
+  __test.setView('WORKERS');
+  const html = __test.workersView();
+  for (const needle of [
+    'data-worker-order="MOVE"',
+    'data-worker-order="STOP"',
+    'data-worker-order="MOUNT"',
+    'data-worker-order="DISMOUNT"',
+    'data-worker-order="HOLD"',
+    'data-next-job=',
+    'data-allocate=',
+    'data-skills-open=',
+    'data-move-target=',
+    'data-mount-select=',
+    'data-take-off=',
+    'Job board',
+    'Add a job',
+    'id="create-job"',
+    'data-jobs-mode="jobs"',
+    'data-allocate-all',
+    'data-all-auto',
+    'data-hold-all',
+    'class="ladder"',
+    '<b>NOW</b>',
+    '<b>NEXT</b>',
+    '<b>IDLE TASKS</b>',
+  ])
+    assert.ok(html.includes(needle), 'missing ' + needle);
+  assert.equal((html.match(/data-crew-row=/g) || []).length, 5, 'one row per yard worker');
+  assert.equal((html.match(/<li class="[^"]*">P\d /g) || []).length, 8, 'eight ladder rungs');
+  assert.equal(
+    (html.match(/<option value="[A-Z]+" [^>]*>[^<]+<\/option>/g) || []).filter((o) =>
+      /Truck operations|Order preparation|Returns processing|Material handling|Stock control|Yard organisation|Equipment checks|Maintenance\/preparation|Safety tasks|Continuous improvement/.test(
+        o,
+      ),
+    ).length,
+    10,
+    'ten categories offered',
+  );
+  const first = snapshot.resources.find((r) => r.type === 'WORKER' && r.location === f.yard.id);
+  assert.ok(first.board && first.board.now.title, 'board lines come from the server');
+  assert.ok(
+    html.includes(first.board.now.title.slice(0, 20).replace(/&/g, '&amp;')),
+    "the NOW line shows the worker's current job",
+  );
+  __test.setState(
+    { ...snapshot, resources: snapshot.resources.map((r) => ({ ...r, skills: { ...r.skills, TRUCK: false } })) },
+    account,
+  );
+  assert.ok(__test.workersView().includes('Skills 9/10'), 'switched-off skills are counted');
+  __test.setState(snapshot, { ...account, permissions: ['requests.create'] });
+  const sup = __test.workersView();
+  assert.ok(sup.includes('Site crew') || sup.includes('No crew'));
+  assert.ok(!sup.includes('data-worker-order'), 'supervisors get no orders');
+});
 
-test('a reviewed route block is done once, not re-derived, and a retry clears the review',t=>{const f=fixture(t);const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});const blocked=f.sim.repo.get(task.id);blocked.state='BLOCKED';blocked.resumeState='RESERVED';blocked.reason='No clear path for the machine and load. Relocate blocking containers first.';f.sim.repo.save(blocked);
-  jobsOn(f);const key='P1:ROUTE_CLEAR:'+task.id;assert.ok(until(f,()=>f.sim.repo.all('job').some(j=>j.key===key&&j.state==='DONE'),60),'the route review completes');f.tick(10);assert.equal(f.sim.repo.all('job').filter(j=>j.key===key).length,1,'the review is not re-derived');assert.equal(f.sim.repo.get(task.id).routeReviewed,true);
-  f.cmd('retry',{id:task.id});assert.equal(f.sim.repo.get(task.id).routeReviewed,null);assert.ok(until(f,()=>f.sim.repo.get(task.id).state==='COMPLETE',120));});
+test('a reviewed route block is done once, not re-derived, and a retry clears the review', (t) => {
+  const f = fixture(t);
+  const task = f.cmd('queue', { container: f.a.id, destination: f.truck.id });
+  const blocked = f.sim.repo.get(task.id);
+  blocked.state = 'BLOCKED';
+  blocked.resumeState = 'RESERVED';
+  blocked.reason = 'No clear path for the machine and load. Relocate blocking containers first.';
+  f.sim.repo.save(blocked);
+  jobsOn(f);
+  const key = 'P1:ROUTE_CLEAR:' + task.id;
+  assert.ok(
+    until(f, () => f.sim.repo.all('job').some((j) => j.key === key && j.state === 'DONE'), 60),
+    'the route review completes',
+  );
+  f.tick(10);
+  assert.equal(f.sim.repo.all('job').filter((j) => j.key === key).length, 1, 'the review is not re-derived');
+  assert.equal(f.sim.repo.get(task.id).routeReviewed, true);
+  f.cmd('retry', { id: task.id });
+  assert.equal(f.sim.repo.get(task.id).routeReviewed, null);
+  assert.ok(until(f, () => f.sim.repo.get(task.id).state === 'COMPLETE', 120));
+});
 
-test('cancelling the automatic unload of a returned truck is respected for that delivery',t=>{const f=fixture(t);const request=f.cmd('request',{site:f.site.id,product:f.products[0].id,quantity:100});f.cmd('allocate',{id:request.id,truck:f.truck.id});f.tick(60);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});f.tick(60);f.cmd('returnStock',{container:f.a.id,truck:f.truck.id});f.tick(60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);
-  jobsOn(f);f.tick(2);const first=f.sim.tasks().filter(x=>x.from===f.truck.id&&!['COMPLETE','CANCELLED','FAILED'].includes(x.state));assert.ok(first.length,'the returns are queued for unloading');for(const x of first)f.cmd('cancel',{id:x.id});f.tick(6);assert.equal(f.sim.tasks().filter(x=>x.from===f.truck.id&&!['COMPLETE','CANCELLED','FAILED'].includes(x.state)).length,0,'not re-queued after the office cancelled it');assert.equal(f.sim.repo.all('job').filter(j=>j.effect==='UNLOAD').length,1);assert.equal(f.sim.repo.get(f.a.id).location,f.truck.id);assert.equal(f.sim.repo.get(f.truck.id).autoUnloadDeclined,f.sim.repo.get(f.truck.id).delivery);f.cmd('unload',{id:f.truck.id});assert.ok(until(f,()=>f.sim.repo.get(f.a.id).location===f.yard.id,200),'a manual unload still works');});
+test('cancelling the automatic unload of a returned truck is respected for that delivery', (t) => {
+  const f = fixture(t);
+  const request = f.cmd('request', { site: f.site.id, product: f.products[0].id, quantity: 100 });
+  f.cmd('allocate', { id: request.id, truck: f.truck.id });
+  f.tick(60);
+  f.cmd('dispatch', { id: f.truck.id, destination: f.site.id });
+  f.tick(5);
+  f.cmd('unload', { id: f.truck.id });
+  f.tick(60);
+  f.cmd('returnStock', { container: f.a.id, truck: f.truck.id });
+  f.tick(60);
+  f.cmd('dispatch', { id: f.truck.id, destination: f.yard.id });
+  f.tick(5);
+  jobsOn(f);
+  f.tick(2);
+  const first = f.sim
+    .tasks()
+    .filter((x) => x.from === f.truck.id && !['COMPLETE', 'CANCELLED', 'FAILED'].includes(x.state));
+  assert.ok(first.length, 'the returns are queued for unloading');
+  for (const x of first) f.cmd('cancel', { id: x.id });
+  f.tick(6);
+  assert.equal(
+    f.sim.tasks().filter((x) => x.from === f.truck.id && !['COMPLETE', 'CANCELLED', 'FAILED'].includes(x.state)).length,
+    0,
+    'not re-queued after the office cancelled it',
+  );
+  assert.equal(f.sim.repo.all('job').filter((j) => j.effect === 'UNLOAD').length, 1);
+  assert.equal(f.sim.repo.get(f.a.id).location, f.truck.id);
+  assert.equal(f.sim.repo.get(f.truck.id).autoUnloadDeclined, f.sim.repo.get(f.truck.id).delivery);
+  f.cmd('unload', { id: f.truck.id });
+  assert.ok(
+    until(f, () => f.sim.repo.get(f.a.id).location === f.yard.id, 200),
+    'a manual unload still works',
+  );
+});
 
-test('stacking empties re-checks that both stillages are still empty before the forklift is called',t=>{const f=fixture(t);for(const [n,x,y] of [['E1',13000,4000],['E2',16000,4000],['E3',10000,8000]])f.container(n,x,y);jobsOn(f);f.tick(1);const stack=f.sim.repo.all('job').find(j=>j.effect==='STACK');assert.ok(stack,'four loose empties derive a stacking job');f.cmd('opening',{container:stack.params.base,product:f.products[0].id,quantity:10,reason:'DEMO ONLY'});f.tick(12);assert.ok(!f.sim.tasks().some(x=>x.position?.support===stack.params.base),'nothing is stacked onto a stillage that now holds stock');assert.notEqual(f.sim.repo.get(stack.id).state,'DONE');assert.equal(f.sim.repo.quantity(stack.params.base,f.products[0].id),10);});
+test('stacking empties re-checks that both stillages are still empty before the forklift is called', (t) => {
+  const f = fixture(t);
+  for (const [n, x, y] of [
+    ['E1', 13000, 4000],
+    ['E2', 16000, 4000],
+    ['E3', 10000, 8000],
+  ])
+    f.container(n, x, y);
+  jobsOn(f);
+  f.tick(1);
+  const stack = f.sim.repo.all('job').find((j) => j.effect === 'STACK');
+  assert.ok(stack, 'four loose empties derive a stacking job');
+  f.cmd('opening', { container: stack.params.base, product: f.products[0].id, quantity: 10, reason: 'DEMO ONLY' });
+  f.tick(12);
+  assert.ok(
+    !f.sim.tasks().some((x) => x.position?.support === stack.params.base),
+    'nothing is stacked onto a stillage that now holds stock',
+  );
+  assert.notEqual(f.sim.repo.get(stack.id).state, 'DONE');
+  assert.equal(f.sim.repo.quantity(stack.params.base, f.products[0].id), 10);
+});
 
-test('a worker a stillage was set down on is re-seated before moving or taking a job',t=>{const f=fixture(t);const [w1,w2]=[worker(f,0),worker(f,1)];f.cmd('workerCommand',{id:w1.id,order:'MOVE',x:12000,y:10000});f.cmd('workerCommand',{id:w2.id,order:'MOVE',x:15000,y:12500});assert.ok(until(f,()=>[w1,w2].every(w=>f.sim.repo.get(w.id).workerMode==='HOLD'),60));const c1=f.container('ON1',11800,9800),c2=f.container('ON2',14800,12300);const inside=(w,c)=>w.x<c.x+2000&&w.x+500>c.x&&w.y<c.y+1000&&w.y+500>c.y;assert.ok(inside(f.sim.repo.get(w1.id),c1)&&inside(f.sim.repo.get(w2.id),c2),'both workers are now under stock');
-  const moved=f.cmd('workerCommand',{id:w1.id,order:'MOVE',target:'loading',resume:true});assert.ok(!inside(moved,c1),'a move order re-seats first');assert.equal(moved.workerMode,'MOVING');
-  for(const w of f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id&&r.id!==w2.id&&r.id!==w1.id))f.cmd('workerCommand',{id:w.id,order:'HOLD'});const stuck=f.sim.repo.get(w2.id);stuck.workerMode='AUTO';f.sim.repo.save(stuck);jobsOn(f,{routineJobs:true});f.tick(2);const after=f.sim.repo.get(w2.id);assert.ok(!inside(after,c2),'the assigner re-seats the worker');assert.ok(after.job,'and gives them work');});
+test('a worker a stillage was set down on is re-seated before moving or taking a job', (t) => {
+  const f = fixture(t);
+  const [w1, w2] = [worker(f, 0), worker(f, 1)];
+  f.cmd('workerCommand', { id: w1.id, order: 'MOVE', x: 12000, y: 10000 });
+  f.cmd('workerCommand', { id: w2.id, order: 'MOVE', x: 15000, y: 12500 });
+  assert.ok(until(f, () => [w1, w2].every((w) => f.sim.repo.get(w.id).workerMode === 'HOLD'), 60));
+  const c1 = f.container('ON1', 11800, 9800),
+    c2 = f.container('ON2', 14800, 12300);
+  const inside = (w, c) => w.x < c.x + 2000 && w.x + 500 > c.x && w.y < c.y + 1000 && w.y + 500 > c.y;
+  assert.ok(inside(f.sim.repo.get(w1.id), c1) && inside(f.sim.repo.get(w2.id), c2), 'both workers are now under stock');
+  const moved = f.cmd('workerCommand', { id: w1.id, order: 'MOVE', target: 'loading', resume: true });
+  assert.ok(!inside(moved, c1), 'a move order re-seats first');
+  assert.equal(moved.workerMode, 'MOVING');
+  for (const w of f.sim.repo
+    .all('resource')
+    .filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id && r.id !== w2.id && r.id !== w1.id))
+    f.cmd('workerCommand', { id: w.id, order: 'HOLD' });
+  const stuck = f.sim.repo.get(w2.id);
+  stuck.workerMode = 'AUTO';
+  f.sim.repo.save(stuck);
+  jobsOn(f, { routineJobs: true });
+  f.tick(2);
+  const after = f.sim.repo.get(w2.id);
+  assert.ok(!inside(after, c2), 'the assigner re-seats the worker');
+  assert.ok(after.job, 'and gives them work');
+});
 
-test('routine work carries on in place when the gate is blocked, and an unreachable custom job blocks after three tries without penalising workers',t=>{const f=fixture(t);f.cmd('yard',{id:f.yard.id,name:'Yard',segments:[{direction:'RIGHT',length:20000},{direction:'DOWN',length:16000},{direction:'LEFT',length:20000}],closed:true,gate:{x:14000,y:1000}});f.container('GATEBLOCK',14500,1300);jobsOn(f,{routineJobs:true,jobEffects:{STACK:false}});f.tick(3);const crew=f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id);assert.ok(crew.every(w=>w.job||w.walk||w.task),'nobody is static with the gate spot blocked: '+crew.map(w=>w.name+':'+(w.job?'job':w.walk?'walk':'idle')+':'+(w.workerReason??'')).join(','));
-  f.cmd('jobsMode',{routineJobs:false});for(const [n,x,y,r] of [['TOP',15500,11000,0],['BOT',15500,12500,0],['LEFT',14500,11000,90],['RIGHT',17500,11000,90]])f.container(n,x,y,{rotation:r});const job=f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:'clean yard',where:{kind:'point',x:16000,y:12000},priority:1,seconds:2});assert.ok(until(f,()=>f.sim.repo.get(job.id).state==='BLOCKED',40),'blocked after repeated route failures, state '+f.sim.repo.get(job.id).state+' failures '+f.sim.repo.get(job.id).failures);assert.match(f.sim.repo.get(job.id).blocked,/No clear walking route/);assert.equal(f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.jobSkipUntil&&Date.parse(r.jobSkipUntil)>Date.now()).length,0,'workers are not penalised for an unreachable job');});
+test('routine work carries on in place when the gate is blocked, and an unreachable custom job blocks after three tries without penalising workers', (t) => {
+  const f = fixture(t);
+  f.cmd('yard', {
+    id: f.yard.id,
+    name: 'Yard',
+    segments: [
+      { direction: 'RIGHT', length: 20000 },
+      { direction: 'DOWN', length: 16000 },
+      { direction: 'LEFT', length: 20000 },
+    ],
+    closed: true,
+    gate: { x: 14000, y: 1000 },
+  });
+  f.container('GATEBLOCK', 14500, 1300);
+  jobsOn(f, { routineJobs: true, jobEffects: { STACK: false } });
+  f.tick(3);
+  const crew = f.sim.repo.all('resource').filter((r) => r.enabled && r.type === 'WORKER' && r.location === f.yard.id);
+  assert.ok(
+    crew.every((w) => w.job || w.walk || w.task),
+    'nobody is static with the gate spot blocked: ' +
+      crew
+        .map((w) => w.name + ':' + (w.job ? 'job' : w.walk ? 'walk' : 'idle') + ':' + (w.workerReason ?? ''))
+        .join(','),
+  );
+  f.cmd('jobsMode', { routineJobs: false });
+  for (const [n, x, y, r] of [
+    ['TOP', 15500, 11000, 0],
+    ['BOT', 15500, 12500, 0],
+    ['LEFT', 14500, 11000, 90],
+    ['RIGHT', 17500, 11000, 90],
+  ])
+    f.container(n, x, y, { rotation: r });
+  const job = f.cmd('createJob', {
+    yard: f.yard.id,
+    category: 'YARD',
+    title: 'clean yard',
+    where: { kind: 'point', x: 16000, y: 12000 },
+    priority: 1,
+    seconds: 2,
+  });
+  assert.ok(
+    until(f, () => f.sim.repo.get(job.id).state === 'BLOCKED', 40),
+    'blocked after repeated route failures, state ' +
+      f.sim.repo.get(job.id).state +
+      ' failures ' +
+      f.sim.repo.get(job.id).failures,
+  );
+  assert.match(f.sim.repo.get(job.id).blocked, /No clear walking route/);
+  assert.equal(
+    f.sim.repo
+      .all('resource')
+      .filter((r) => r.enabled && r.type === 'WORKER' && r.jobSkipUntil && Date.parse(r.jobSkipUntil) > Date.now())
+      .length,
+    0,
+    'workers are not penalised for an unreachable job',
+  );
+});
 
-test('allocate all idle leaves a worker who is walking on a move order alone; the snapshot is read-only and carries no per-tick counters',t=>{const f=fixture(t);const w=worker(f);f.cmd('workerCommand',{id:w.id,order:'MOVE',x:15000,y:12000});assert.equal(f.sim.repo.all('jobBoard').length,0);const s0=f.sim.snapshot();assert.equal(f.sim.repo.all('jobBoard').length,0,'a snapshot never creates records');jobsOn(f);f.tick(1);const r=f.cmd('nextJob',{yard:f.yard.id});assert.ok(r.assigned>=0);const walker=f.sim.repo.get(w.id);assert.equal(walker.workerMode,'MOVING','the move order stands');assert.ok(walker.walk&&!walker.walk.job);assert.equal(walker.job??null,null);
-  f.tick(1);const s=f.sim.snapshot();assert.ok(s.jobs.length>0);assert.ok(s.jobs.every(j=>j.version===undefined&&j.cooldownMs===undefined&&j.remainingMs===undefined));assert.ok(s0.resources.length>0);});
+test('allocate all idle leaves a worker who is walking on a move order alone; the snapshot is read-only and carries no per-tick counters', (t) => {
+  const f = fixture(t);
+  const w = worker(f);
+  f.cmd('workerCommand', { id: w.id, order: 'MOVE', x: 15000, y: 12000 });
+  assert.equal(f.sim.repo.all('jobBoard').length, 0);
+  const s0 = f.sim.snapshot();
+  assert.equal(f.sim.repo.all('jobBoard').length, 0, 'a snapshot never creates records');
+  jobsOn(f);
+  f.tick(1);
+  const r = f.cmd('nextJob', { yard: f.yard.id });
+  assert.ok(r.assigned >= 0);
+  const walker = f.sim.repo.get(w.id);
+  assert.equal(walker.workerMode, 'MOVING', 'the move order stands');
+  assert.ok(walker.walk && !walker.walk.job);
+  assert.equal(walker.job ?? null, null);
+  f.tick(1);
+  const s = f.sim.snapshot();
+  assert.ok(s.jobs.length > 0);
+  assert.ok(s.jobs.every((j) => j.version === undefined && j.cooldownMs === undefined && j.remainingMs === undefined));
+  assert.ok(s0.resources.length > 0);
+});
 
-test('sorting a mixed stillage still works for a product with no pack size or weight, and conserves stock',t=>{const f=fixture(t);const m=f.container('MIX',13000,4000);f.cmd('opening',{container:m.id,product:f.products[0].id,quantity:10,reason:'DEMO ONLY'});f.cmd('opening',{container:m.id,product:f.products[2].id,quantity:5,reason:'DEMO ONLY'});jobsOn(f);f.tick(1);const sort=f.sim.repo.all('job').find(j=>j.effect==='SORT');assert.ok(sort,'a mixed stillage derives a sort job');assert.notEqual(sort.state,'BLOCKED',sort.blocked??'');assert.ok(until(f,()=>f.sim.repo.get(sort.id).state==='DONE',120),'the sort completes');assert.equal(f.sim.repo.lines(m.id).length,1,'the mixed stillage now holds one product');assert.equal(f.total(),215);assert.ok(f.sim.repo.history(500).some(l=>l.event==='SORTED'));});
+test('sorting a mixed stillage still works for a product with no pack size or weight, and conserves stock', (t) => {
+  const f = fixture(t);
+  const m = f.container('MIX', 13000, 4000);
+  f.cmd('opening', { container: m.id, product: f.products[0].id, quantity: 10, reason: 'DEMO ONLY' });
+  f.cmd('opening', { container: m.id, product: f.products[2].id, quantity: 5, reason: 'DEMO ONLY' });
+  jobsOn(f);
+  f.tick(1);
+  const sort = f.sim.repo.all('job').find((j) => j.effect === 'SORT');
+  assert.ok(sort, 'a mixed stillage derives a sort job');
+  assert.notEqual(sort.state, 'BLOCKED', sort.blocked ?? '');
+  assert.ok(
+    until(f, () => f.sim.repo.get(sort.id).state === 'DONE', 120),
+    'the sort completes',
+  );
+  assert.equal(f.sim.repo.lines(m.id).length, 1, 'the mixed stillage now holds one product');
+  assert.equal(f.total(), 215);
+  assert.ok(f.sim.repo.history(500).some((l) => l.event === 'SORTED'));
+});
 
-test('the container detail panel offers a per-line stock correction that respects reservations, permission and location; the layout planner is available from Home',async t=>{const f=fixture(t);const {__test}=await import('../public/operations.js');f.sim.repo.add('reservation',{container:f.a.id,product:f.products[0].id,quantity:30,task:null,active:true});const snapshot=f.sim.snapshot();const account={permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}};
-  __test.setState(snapshot,account);__test.setSelected(f.a.id);
-  const html=__test.detail();
-  assert.ok(html.includes('id="remove-line-'+f.a.id+'-'+f.products[0].id+'"'),'a correction control exists for the held line');
-  assert.ok(html.includes('max="70"'),'its maximum is the unreserved amount (100 held, 30 reserved)');
-  __test.setState(snapshot,{...account,permissions:['requests.create']});
-  assert.ok(!__test.detail().includes('remove-line-'),'a user without stock.adjust gets no correction control');
-  __test.setState(snapshot,account);__test.setSelected(f.empty.id);
-  assert.ok(!__test.detail().includes('remove-line-'),'nothing to correct on an empty stillage');
+test('the container detail panel offers a per-line stock correction that respects reservations, permission and location; the layout planner is available from Home', async (t) => {
+  const f = fixture(t);
+  const { __test } = await import('../public/operations.js');
+  f.sim.repo.add('reservation', {
+    container: f.a.id,
+    product: f.products[0].id,
+    quantity: 30,
+    task: null,
+    active: true,
+  });
+  const snapshot = f.sim.snapshot();
+  const account = {
+    permissions: ['operations.manage', 'stock.adjust', 'requests.create'],
+    systems: [],
+    users: [],
+    company: { id: 'c', name: 'Demo' },
+    user: { id: f.user.id },
+  };
+  __test.setState(snapshot, account);
   __test.setSelected(f.a.id);
-  __test.setLayoutDraft(null);__test.setView('HOME');
-  const home=__test.homeView();assert.ok(home.includes('id="planner-start"'),'Home offers the layout planner');assert.ok(!home.includes('LAYOUT PLANNER'),'the planner panel is not open yet');
-  __test.setLayoutDraft({moves:{}});
-  const homePlanning=__test.homeView();assert.ok(homePlanning.includes('LAYOUT PLANNER'),'Home renders the planner panel once a plan is started');assert.ok(!homePlanning.includes('id="planner-start"'),'the start button is gone while a plan is open');
-  __test.setLayoutDraft(null);});
+  const html = __test.detail();
+  assert.ok(
+    html.includes('id="remove-line-' + f.a.id + '-' + f.products[0].id + '"'),
+    'a correction control exists for the held line',
+  );
+  assert.ok(html.includes('max="70"'), 'its maximum is the unreserved amount (100 held, 30 reserved)');
+  __test.setState(snapshot, { ...account, permissions: ['requests.create'] });
+  assert.ok(!__test.detail().includes('remove-line-'), 'a user without stock.adjust gets no correction control');
+  __test.setState(snapshot, account);
+  __test.setSelected(f.empty.id);
+  assert.ok(!__test.detail().includes('remove-line-'), 'nothing to correct on an empty stillage');
+  __test.setSelected(f.a.id);
+  __test.setLayoutDraft(null);
+  __test.setView('HOME');
+  const home = __test.homeView();
+  assert.ok(home.includes('id="planner-start"'), 'Home offers the layout planner');
+  assert.ok(!home.includes('LAYOUT PLANNER'), 'the planner panel is not open yet');
+  __test.setLayoutDraft({ moves: {} });
+  const homePlanning = __test.homeView();
+  assert.ok(homePlanning.includes('LAYOUT PLANNER'), 'Home renders the planner panel once a plan is started');
+  assert.ok(!homePlanning.includes('id="planner-start"'), 'the start button is gone while a plan is open');
+  __test.setLayoutDraft(null);
+});
 
-test('a removal corrects a wrongly listed material and the ledger records why',t=>{const f=fixture(t);const before=f.total();
-  assert.throws(()=>f.cmd('removeStock',{container:f.a.id,product:f.products[0].id,quantity:101,reason:'Materials list correction'}),/Only 100 unreserved/);
-  f.sim.repo.add('reservation',{container:f.a.id,product:f.products[0].id,quantity:20,task:null,active:true});
-  assert.throws(()=>f.cmd('removeStock',{container:f.a.id,product:f.products[0].id,quantity:81,reason:'Materials list correction'}),/Only 80 unreserved/);
-  const c=f.cmd('removeStock',{container:f.a.id,product:f.products[0].id,quantity:80,reason:'Materials list correction'});
-  assert.equal(c.id,f.a.id);
-  assert.equal(f.sim.repo.quantity(f.a.id,f.products[0].id),20,'the still-reserved 20 stay behind');
-  assert.equal(f.total(),before-80);
-  const row=f.sim.repo.history(200).find(l=>l.event==='STOCK_REMOVED'&&l.reason==='Materials list correction');
-  assert.ok(row);assert.equal(row.quantity,80);assert.equal(row.container_id,f.a.id);
-  assert.throws(()=>f.cmd('removeStock',{container:f.b.id,product:f.products[0].id,quantity:1,reason:''}),/Removal reason/);});
+test('a removal corrects a wrongly listed material and the ledger records why', (t) => {
+  const f = fixture(t);
+  const before = f.total();
+  assert.throws(
+    () =>
+      f.cmd('removeStock', {
+        container: f.a.id,
+        product: f.products[0].id,
+        quantity: 101,
+        reason: 'Materials list correction',
+      }),
+    /Only 100 unreserved/,
+  );
+  f.sim.repo.add('reservation', {
+    container: f.a.id,
+    product: f.products[0].id,
+    quantity: 20,
+    task: null,
+    active: true,
+  });
+  assert.throws(
+    () =>
+      f.cmd('removeStock', {
+        container: f.a.id,
+        product: f.products[0].id,
+        quantity: 81,
+        reason: 'Materials list correction',
+      }),
+    /Only 80 unreserved/,
+  );
+  const c = f.cmd('removeStock', {
+    container: f.a.id,
+    product: f.products[0].id,
+    quantity: 80,
+    reason: 'Materials list correction',
+  });
+  assert.equal(c.id, f.a.id);
+  assert.equal(f.sim.repo.quantity(f.a.id, f.products[0].id), 20, 'the still-reserved 20 stay behind');
+  assert.equal(f.total(), before - 80);
+  const row = f.sim.repo
+    .history(200)
+    .find((l) => l.event === 'STOCK_REMOVED' && l.reason === 'Materials list correction');
+  assert.ok(row);
+  assert.equal(row.quantity, 80);
+  assert.equal(row.container_id, f.a.id);
+  assert.throws(
+    () => f.cmd('removeStock', { container: f.b.id, product: f.products[0].id, quantity: 1, reason: '' }),
+    /Removal reason/,
+  );
+});
 
-test('scrapping a loaded stillage writes off its stock, retires the container and cannot be undone by mistake',t=>{const f=fixture(t);const before=f.total();
-  assert.throws(()=>f.cmd('scrapContainer',{id:f.a.id,reason:''}),/Reason for removing this stillage/);
-  const r=f.cmd('scrapContainer',{id:f.a.id,reason:'Stillage crushed on site, contents unrecoverable'});
-  assert.equal(r.pieces,100);assert.equal(r.products,1);assert.match(r.message,/wrote off 100 pieces across 1 product/);
-  assert.equal(f.sim.repo.get(f.a.id).retired,true);
-  assert.equal(f.sim.repo.quantity(f.a.id,f.products[0].id),0);
-  assert.equal(f.total(),before-100);
-  const removed=f.sim.repo.history(200).filter(l=>l.event==='STOCK_REMOVED'&&l.container_id===f.a.id);
-  assert.equal(removed.length,1);assert.equal(removed[0].quantity,100);assert.equal(removed[0].reason,'Stillage crushed on site, contents unrecoverable');
-  const retiredRow=f.sim.repo.history(200).find(l=>l.event==='CONTAINER_RETIRED'&&l.container_id===f.a.id);
-  assert.ok(retiredRow);assert.equal(retiredRow.reason,'Stillage crushed on site, contents unrecoverable');
-  assert.ok(!f.sim.containers().some(c=>c.id===f.a.id),'the container no longer shows as active');
-  assert.throws(()=>f.cmd('scrapContainer',{id:f.a.id,reason:'Again'}),/already removed/);});
+test('scrapping a loaded stillage writes off its stock, retires the container and cannot be undone by mistake', (t) => {
+  const f = fixture(t);
+  const before = f.total();
+  assert.throws(() => f.cmd('scrapContainer', { id: f.a.id, reason: '' }), /Reason for removing this stillage/);
+  const r = f.cmd('scrapContainer', { id: f.a.id, reason: 'Stillage crushed on site, contents unrecoverable' });
+  assert.equal(r.pieces, 100);
+  assert.equal(r.products, 1);
+  assert.match(r.message, /wrote off 100 pieces across 1 product/);
+  assert.equal(f.sim.repo.get(f.a.id).retired, true);
+  assert.equal(f.sim.repo.quantity(f.a.id, f.products[0].id), 0);
+  assert.equal(f.total(), before - 100);
+  const removed = f.sim.repo.history(200).filter((l) => l.event === 'STOCK_REMOVED' && l.container_id === f.a.id);
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].quantity, 100);
+  assert.equal(removed[0].reason, 'Stillage crushed on site, contents unrecoverable');
+  const retiredRow = f.sim.repo.history(200).find((l) => l.event === 'CONTAINER_RETIRED' && l.container_id === f.a.id);
+  assert.ok(retiredRow);
+  assert.equal(retiredRow.reason, 'Stillage crushed on site, contents unrecoverable');
+  assert.ok(!f.sim.containers().some((c) => c.id === f.a.id), 'the container no longer shows as active');
+  assert.throws(() => f.cmd('scrapContainer', { id: f.a.id, reason: 'Again' }), /already removed/);
+});
 
-test('scrapping an empty stillage works like a normal removal',t=>{const f=fixture(t);
-  const r=f.cmd('scrapContainer',{id:f.empty.id,reason:'Damaged beyond repair'});
-  assert.equal(r.pieces,0);assert.equal(r.products,0);assert.match(r.message,/Removed Empty from the yard\./);
-  assert.equal(f.sim.repo.get(f.empty.id).retired,true);});
+test('scrapping an empty stillage works like a normal removal', (t) => {
+  const f = fixture(t);
+  const r = f.cmd('scrapContainer', { id: f.empty.id, reason: 'Damaged beyond repair' });
+  assert.equal(r.pieces, 0);
+  assert.equal(r.products, 0);
+  assert.match(r.message, /Removed Empty from the yard\./);
+  assert.equal(f.sim.repo.get(f.empty.id).retired, true);
+});
 
-test('scrapping refuses a busy stillage, a truck-held stillage, and a supervisor without operations.manage',t=>{const f=fixture(t);
-  const task=f.cmd('queue',{container:f.a.id,destination:f.truck.id});
-  assert.throws(()=>f.cmd('scrapContainer',{id:f.a.id,reason:'Test'}),/active movement/);
-  f.cmd('cancel',{id:task.id});
-  const r=f.cmd('scrapContainer',{id:f.a.id,reason:'Now clear'});assert.equal(r.pieces,100);
-  f.auth.addUser(f.user,{name:'Supervisor',email:'supervisor@example.com',password:'demonstration-password',roles:['SUPERVISOR']});
-  const sup=f.auth.authenticate(f.auth.login({email:'supervisor@example.com',password:'demonstration-password'}));
-  assert.throws(()=>new Simulation(f.db,sup).execute('scrapContainer',{id:f.b.id,reason:'Test'},randomUUID()),{status:403});});
+test('scrapping refuses a busy stillage, a truck-held stillage, and a supervisor without operations.manage', (t) => {
+  const f = fixture(t);
+  const task = f.cmd('queue', { container: f.a.id, destination: f.truck.id });
+  assert.throws(() => f.cmd('scrapContainer', { id: f.a.id, reason: 'Test' }), /active movement/);
+  f.cmd('cancel', { id: task.id });
+  const r = f.cmd('scrapContainer', { id: f.a.id, reason: 'Now clear' });
+  assert.equal(r.pieces, 100);
+  f.auth.addUser(f.user, {
+    name: 'Supervisor',
+    email: 'supervisor@example.com',
+    password: 'demonstration-password',
+    roles: ['SUPERVISOR'],
+  });
+  const sup = f.auth.authenticate(
+    f.auth.login({ email: 'supervisor@example.com', password: 'demonstration-password' }),
+  );
+  assert.throws(
+    () => new Simulation(f.db, sup).execute('scrapContainer', { id: f.b.id, reason: 'Test' }, randomUUID()),
+    { status: 403 },
+  );
+});
