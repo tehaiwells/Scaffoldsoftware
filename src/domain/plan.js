@@ -22,7 +22,7 @@ import { DEMO_NAME } from './team.js';
 import { lineList } from './game.js';
 export { planSimAnswer };
 export const PLAN_OPS=['planTruck','planMaterials','planWorkers','planRestack','planMove','planCancel','planAsk','messageAnswer','messageSeen','teamAdd','teamUpdate','teamRemove','teamStart','teamNames','planReplies'];
-export const PAPERWORK_OPS=['paperworkAdd','paperworkUpdate','paperworkRemove'];
+export const PAPERWORK_OPS=['paperworkAdd','paperworkUpdate','paperworkRemove','paperworkSettings'];
 export const PLAN_OPEN=['PLANNED','ACTIVE'],MSG_OPEN=['WAITING_TO_SEND','SENT'];
 // MISSED: a list whose day ended before it went (its stillages are let go); it waits on the calendar, red, for a new day or Cancel.
 export const PLAN_FIXABLE=[...PLAN_OPEN,'MISSED'];
@@ -281,7 +281,7 @@ export const planMethods={
   planPacking(yardId){return cached(this.db,"SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='planItem' AND json_extract(data,'$.type')='MATERIALS' AND json_extract(data,'$.stage')='PACKING' AND json_extract(data,'$.status') IN ('PLANNED','ACTIVE') AND json_extract(data,'$.yard')=? ORDER BY rowid").all(this.repo.company,yardId).map(row=>this.repo.decode(row));},
   planPrune(today){const cut=addDays(today,-PRUNE_DAYS);
     for(const r of cached(this.db,"SELECT id,kind FROM objects WHERE company_id=? AND ((kind='planItem' AND json_extract(data,'$.status') IN ('DONE','CANCELLED','MISSED')) OR (kind='message' AND json_extract(data,'$.status') NOT IN ('WAITING_TO_SEND','SENT'))) AND json_extract(data,'$.day')<?").all(this.repo.company,cut))this.repo.remove(r.id,r.kind);
-    for(const r of cached(this.db,"SELECT id FROM objects WHERE company_id=? AND kind='paperwork' AND json_extract(data,'$.archived')=1 AND json_extract(data,'$.expiresOn')<?").all(this.repo.company,cut))this.repo.remove(r.id,'paperwork');},
+    for(const r of cached(this.db,"SELECT id FROM objects WHERE company_id=? AND kind='paperwork' AND json_extract(data,'$.archived')=1 AND COALESCE(json_extract(data,'$.expiresOn'),json_extract(data,'$.reviewedOn'))<?").all(this.repo.company,cut))this.repo.remove(r.id,'paperwork');},
   // ---------- hooks from the rest of the app ----------
   // A site removed, archived or being removed: its open lists and allocations are called off (a load already on a truck is left to the board,
   // which brings it home), and people borrowed there go home first.

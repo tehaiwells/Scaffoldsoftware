@@ -2659,7 +2659,7 @@ function tdhNewForm(kind,day,extra={}){const p=tdhP(),taken=tdhTaken(day),sites=
  if(kind==='MATERIALS'){const tr=(p?.items??[]).find(i=>i.type==='TRUCK'&&i.day===day&&i.status==='PLANNED');f.site=sites[0]?.id??'';f.lines=[];f.truckPlan=tr?.id??'';f.pack='SAME_DAY';f.packer='';f.note='';if(tr)f.time=tr.time;}
  if(kind==='WORKERS'){f.count=2;f.site=sites[0]?.id??'';f.who='ANY';f.people=[];}
  if(kind==='RESTACK'){f.consolidate=true;f.stackEmpties=true;}
- if(kind==='PAPER'){f.type='SWMS';f.site=sites[0]?.id??'';f.expiresOn='';f.title='';f.reference='';}
+ if(kind==='PAPER'){f.type='SWMS';f.site=sites[0]?.id??'';f.expiresOn='';f.reviewedOn=tdhToday()??'';f.title='';f.reference='';}
  return {kind,day,f:{...f,...extra},err:null};}
 function tdhForm(p,day){const f=tdForm.f,k=tdForm.kind,taken=tdhTaken(day),dl=tdhShort(day),sites=(p?.sites??[]).filter(s=>!s.finishing),strict=k==='TRUCK'||k==='WORKERS';
  if(f.time&&!tdhSlotOk(day,f.time,strict))f.time=tdhFirstTime(day,strict,f.time)??f.time;
@@ -2704,7 +2704,7 @@ function tdhFormOk(){if(!tdForm)return false;const f=tdForm.f,k=tdForm.kind;
  if(k==='MATERIALS')return !!f.site&&f.lines.length>0;
  if(k==='WORKERS')return !!f.site;
  if(k==='RESTACK')return !!(f.consolidate||f.stackEmpties)&&!tdhTaken(tdForm.day).restack;
- if(k==='PAPER')return !!f.expiresOn&&(!['PERMIT','OTHER'].includes(f.type)||!!String(f.title??'').trim())&&(!!f.site||!!tdhT()?.paperwork?.canAddCompany);
+ if(k==='PAPER')return !!(f.type==='SWMS'?f.reviewedOn:f.expiresOn)&&(!['PERMIT','OTHER'].includes(f.type)||!!String(f.title??'').trim())&&(!!f.site||!!tdhT()?.paperwork?.canAddCompany);
  return false;}
 // ---- the daily updates ----
 const tdhCard=(id,art,title,sub,body,extra='')=>'<section class="panel tdh-card tdh-card-'+id+'" id="tdh-'+id+'" aria-labelledby="tdh-'+id+'-h"><div class="tdh-card-head"><span class="tdh-badge">'+art+'</span><div class="tdh-card-title"><h2 id="tdh-'+id+'-h">'+title+'</h2>'+(sub?'<p>'+sub+'</p>':'')+'</div>'+extra+'</div>'+body+'</section>';
@@ -2736,15 +2736,18 @@ function tdhWho(t,p,today){const ops=isOps(),r=t?.roster,yard=state.yards[0],cre
  return tdhCard('who',trkPic('spr-worker','tdh-badge-img'),'Who’s in today',esc(sub),body,ops?'<button type="button" class="secondary tdh-btn tdh-head-btn" data-tdh-team>Your team</button>':'');}
 function tdhPaper(t,p){const pw=t?.paperwork,art=gaSprite('sg-list','tdh-badge-img');if(!pw)return tdhCard('paper',art,'Paperwork','',tdhWait);
  const form=tdForm?.kind==='PAPER'?tdhPaperForm(p,pw):'';
- const row=x=>{const cls=x.status==='EXPIRED'?'no':x.status==='SOON'?'wait':'yes',renew=tdMini?.id==='paper:'+x.id;
+ const row=x=>{const cls=x.status==='EXPIRED'?(x.review?'wait':'no'):x.status==='SOON'?'wait':'yes',renew=tdMini?.id==='paper:'+x.id;
   const where=x.wholeCompany?'Whole company':x.siteName??'A site',plain=x.title===x.type||x.title===x.typeWords;
   return '<li class="tdh-paper '+cls+'"><span class="tdh-ptype">'+esc(x.typeWords)+'</span><span class="tdh-paper-text"><b>'+esc(plain?where:x.title)+'</b>'+(plain?(x.reference?'<small>'+esc(x.reference)+'</small>':''):'<small>'+esc(where)+(x.reference?' · '+esc(x.reference):'')+'</small>')+'</span><span class="tdh-pill '+cls+'">'+(cls==='yes'?tdhTick():'')+esc(x.words)+'</span>'
-   +(pw.canAdd&&(!x.wholeCompany||pw.canAddCompany)?'<span class="tdh-paper-acts"><button type="button" class="'+(cls==='yes'?'secondary ':'')+'tdh-btn'+(cls==='yes'?'':' tdh-soft')+'" data-tdh-mini="paper:'+esc(x.id)+'|renew">Renew</button><button type="button" class="tdh-link" data-tdh-paper-x="'+esc(x.id)+'">Remove</button></span>':'')
-   +(renew?'<form class="tdh-mini" data-tdh-mini-form="renew" data-id="'+esc(x.id)+'"><div class="tdh-fields"><label class="tdh-field"><span>Good until</span><input type="date" name="expiresOn" value="" min="'+esc(t.today)+'" required>'+tdhDateWords('')+'</label></div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(tdBusy?' disabled':'')+'>Save the new date</button><button type="button" class="tdh-link" data-tdh-mini-x>Never mind</button></div>'+(tdMini.err?'<p class="tdh-form-err" role="alert">'+esc(tdMini.err)+'</p>':'')+'</form>':'')+'</li>';};
+   +(pw.canAdd&&(!x.wholeCompany||pw.canAddCompany)?'<span class="tdh-paper-acts"><button type="button" class="'+(cls==='yes'?'secondary ':'')+'tdh-btn'+(cls==='yes'?'':' tdh-soft')+'" data-tdh-mini="paper:'+esc(x.id)+'|renew">'+(x.review?'Reviewed':'Renew')+'</button><button type="button" class="tdh-link" data-tdh-paper-x="'+esc(x.id)+'">Remove</button></span>':'')
+   +(renew?'<form class="tdh-mini" data-tdh-mini-form="renew" data-id="'+esc(x.id)+'"><div class="tdh-fields">'+(x.review?'<label class="tdh-field"><span>Reviewed on</span><input type="date" name="reviewedOn" value="'+esc(t.today)+'" max="'+esc(t.today)+'" required>'+tdhDateWords(t.today)+'</label>':'<label class="tdh-field"><span>Good until</span><input type="date" name="expiresOn" value="" min="'+esc(t.today)+'" required>'+tdhDateWords('')+'</label>')+'</div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(tdBusy?' disabled':'')+'>'+(x.review?'Save the review date':'Save the new date')+'</button><button type="button" class="tdh-link" data-tdh-mini-x>Never mind</button></div>'+(tdMini.err?'<p class="tdh-form-err" role="alert">'+esc(tdMini.err)+'</p>':'')+'</form>':'')+'</li>';};
  const urgent=pw.items.filter(x=>x.status!=='OK'),good=pw.items.filter(x=>x.status==='OK'),all=tdOpen.has('paper-all');
- let body=urgent.length||good.length?'<ul class="tdh-papers">'+urgent.map(row).join('')+(all||!urgent.length?good.map(row).join(''):'')+'</ul>':'<p class="tdh-quiet">Nothing on file yet. Add your SWMS, JHSAs and permits with their expiry dates, and the app will warn you before they run out.</p>';
+ let body=urgent.length||good.length?'<ul class="tdh-papers">'+urgent.map(row).join('')+(all||!urgent.length?good.map(row).join(''):'')+'</ul>':'<p class="tdh-quiet">Nothing on file yet. Add your SWMS with the day each was last reviewed, and your JHSAs and permits with their expiry dates. The app flags them in good time.</p>';
  if(urgent.length&&good.length)body+='<button type="button" class="tdh-link tdh-fold" data-tdh-toggle="paper-all" aria-expanded="'+all+'">'+(all?'Show only what needs doing':'All good: '+good.length+' more')+'</button>';
- if(pw.missing?.length)body+='<p class="tdh-missing">'+tdhDot('amber')+'<span>No SWMS on file for '+pw.missing.map(m=>esc(m.siteName)).join(', ')+'</span>'+(pw.canAdd?'<button type="button" class="secondary tdh-btn" data-tdh-paper-add="SWMS" data-site="'+esc(pw.missing[0].site)+'">+ Add</button>':'')+'</p>';
+ if(pw.missing?.length)body+='<p class="tdh-missing">'+tdhDot('amber')+'<span>'+(pw.companySwms?'No SWMS of its own for ':'No SWMS on file for ')+pw.missing.map(m=>esc(m.siteName)).join(', ')+'</span>'+(pw.canAdd?'<button type="button" class="secondary tdh-btn" data-tdh-paper-add="SWMS" data-site="'+esc(pw.missing[0].site)+'">+ Add</button>':'')+'</p>';
+ if(pw.canSetReview&&pw.items.some(x=>x.type==='SWMS')){const m=pw.reviewMonths??12,open=tdMini?.id==='paper:review';
+  body+='<p class="tdh-quiet tdh-review-every">A SWMS is flagged for review '+m+(m===1?' month':' months')+' after its last review. <button type="button" class="tdh-link" data-tdh-mini="paper:review|review">Change</button></p>'
+   +(open?'<form class="tdh-mini" data-tdh-mini-form="review"><div class="tdh-fields"><label class="tdh-field"><span>Flag a SWMS for review after</span><select name="months">'+[3,6,12,18,24].concat([3,6,12,18,24].includes(m)?[]:[m]).map(n=>tdhOpt(String(n),n+' months',n===m)).join('')+'</select></label></div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(tdBusy?' disabled':'')+'>Save</button><button type="button" class="tdh-link" data-tdh-mini-x>Never mind</button></div>'+(tdMini.err?'<p class="tdh-form-err" role="alert">'+esc(tdMini.err)+'</p>':'')+'</form>':'');}
  const add=pw.canAdd&&!form?'<button type="button" class="secondary tdh-btn tdh-head-btn" data-tdh-paper-add="SWMS">+ Add paperwork</button>':'';
  return tdhCard('paper',art,'Paperwork',esc(pw.words),body+form,add);}
 const tdhDot=c=>'<i class="tdh-key '+c+'" aria-hidden="true"></i>';
@@ -2752,11 +2755,11 @@ const tdhDot=c=>'<i class="tdh-key '+c+'" aria-hidden="true"></i>';
 const tdhDateWords=v=>{const w=tdDateWords(v);return '<small class="tdh-date-words" data-tdh-date-words aria-live="polite">'+(w?esc(w.short+' '+w.day+' '+w.mon+' '+w.year):'')+'</small>';};
 function tdhPaperForm(p,pw){const f=tdForm.f,sites=(p?.sites??[]).filter(s=>!s.finishing),named=f.type==='PERMIT'||f.type==='OTHER';
  const field=(label,html)=>'<label class="tdh-field"><span>'+label+'</span>'+html+'</label>';
- const ok=!!f.expiresOn&&(!named||!!String(f.title??'').trim())&&(!!f.site||pw.canAddCompany);
- return '<form class="tdh-form tone-paper" data-tdh-form="PAPER" id="tdh-form" novalidate><div class="tdh-form-head">'+gaSprite('sg-list','tdh-form-img')+'<h3>Add paperwork<small>It warns you 14 days before it runs out</small></h3><button type="button" class="tdh-x" data-tdh-form-x aria-label="Close">&times;</button></div><div class="tdh-fields">'
+ const swms=f.type==='SWMS',months=pw.reviewMonths??12,ok=!!(swms?f.reviewedOn:f.expiresOn)&&(!named||!!String(f.title??'').trim())&&(!!f.site||pw.canAddCompany);
+ return '<form class="tdh-form tone-paper" data-tdh-form="PAPER" id="tdh-form" novalidate><div class="tdh-form-head">'+gaSprite('sg-list','tdh-form-img')+'<h3>Add paperwork<small>'+(swms?'Flagged for review '+months+(months===1?' month':' months')+' after its last review':'It warns you 14 days before it runs out')+'</small></h3><button type="button" class="tdh-x" data-tdh-form-x aria-label="Close">&times;</button></div><div class="tdh-fields">'
   +field('What','<select name="type">'+tdhOpt('SWMS','SWMS',f.type==='SWMS')+tdhOpt('JHSA','JHSA',f.type==='JHSA')+tdhOpt('PERMIT','Permit',f.type==='PERMIT')+tdhOpt('OTHER','Other paperwork',f.type==='OTHER')+'</select>')
   +field('For','<select name="site">'+sites.map(s=>tdhOpt(s.id,s.name,s.id===f.site)).join('')+(pw.canAddCompany?tdhOpt('','The whole company',!f.site):'')+'</select>')
-  +field('Runs out on','<input type="date" name="expiresOn" value="'+esc(f.expiresOn??'')+'" required>'+tdhDateWords(f.expiresOn))
+  +(swms?field('Last reviewed','<input type="date" name="reviewedOn" value="'+esc(f.reviewedOn??'')+'" max="'+esc(tdhToday()??'')+'" required>'+tdhDateWords(f.reviewedOn)):field('Runs out on','<input type="date" name="expiresOn" value="'+esc(f.expiresOn??'')+'" required>'+tdhDateWords(f.expiresOn)))
   +(named?field('Name','<input name="title" maxlength="80" value="'+esc(f.title??'')+'" placeholder="Council footpath permit">'):field('Reference (optional)','<input name="reference" maxlength="60" value="'+esc(f.reference??'')+'" placeholder="SWMS-014">'))
   +'</div><div class="tdh-form-acts"><button type="submit" class="tdh-go"'+(ok&&!tdBusy?'':' disabled')+'>Save it</button><button type="button" class="tdh-link" data-tdh-form-x>Cancel</button></div>'+(tdForm.err?'<p class="tdh-form-err" role="alert">'+esc(tdForm.err)+'</p>':'')+'</form>';}
 function tdhBusiness(t){if(!isOps())return '';const b=t?.business,art=gaSprite('hr-tag','tdh-badge-img');if(!b)return t?'':tdhCard('biz',art,'The business','',tdhWait);
@@ -2784,7 +2787,7 @@ async function tdSubmit(){const f=tdForm.f,k=tdForm.kind,day=tdForm.day;tdForm.e
   if(k==='MATERIALS')return command('planMaterials',{day,time:f.time,site:f.site,lines:f.lines,pack:f.pack,truckPlan:f.truckPlan||null,packer:f.packer||null,note:f.note||null});
   if(k==='WORKERS')return command('planWorkers',{day,time:f.time,site:f.site,count:f.count,people:f.who==='PICK'?f.people:null});
   if(k==='RESTACK')return command('planRestack',{day,time:f.time,consolidate:!!f.consolidate,stackEmpties:!!f.stackEmpties});
-  if(k==='PAPER')return command('paperworkAdd',{type:f.type,site:f.site||null,expiresOn:f.expiresOn,title:f.title||null,reference:f.reference||null});},{keep:true});
+  if(k==='PAPER')return command('paperworkAdd',{type:f.type,site:f.site||null,...(f.type==='SWMS'?{reviewedOn:f.reviewedOn}:{expiresOn:f.expiresOn}),title:f.title||null,reference:f.reference||null});},{keep:true});
  if(r){tdForm=null;tdRedraw();if(r.item?.id)requestAnimationFrame(()=>document.getElementById('tdh-item-'+r.item.id)?.scrollIntoView({block:'nearest',behavior:tdCalm()?'auto':'smooth'}));}}
 function tdPick(title,lines,done){if(typeof document==='undefined')return;const layer=document.createElement('div');layer.className='tdh-layer';layer.setAttribute('role','dialog');layer.setAttribute('aria-modal','true');layer.setAttribute('aria-label',title);
  const sheet=document.createElement('div');sheet.className='tdh-sheet';layer.append(sheet);document.body.append(layer);document.body.classList.add('tdh-sheet-open');
@@ -2832,7 +2835,8 @@ function tdBindOnce(){if(tdBound||typeof document==='undefined')return;tdBound=t
    else if(kind==='driver')tdRun(()=>command('planAsk',{item:id,person:v.person}),{keep:true}).then(r=>{if(r){tdMini=null;tdRedraw();}});
    else if(kind==='truck')tdRun(()=>command('planMove',{id,truckPlan:v.truckPlan||null}),{keep:true}).then(r=>{if(r){tdMini=null;tdRedraw();}});
    else if(kind==='ask')tdRun(()=>command('planAsk',{item:id,person:v.person,...(v.replace?{replace:v.replace}:{})}),{keep:true}).then(r=>{if(r){tdMini=null;tdRedraw();}});
-   else if(kind==='renew')tdRun(()=>command('paperworkUpdate',{id,expiresOn:v.expiresOn}),{keep:true,flash:false}).then(r=>{if(r){tdMini=null;tdRedraw();}});}});
+   else if(kind==='renew')tdRun(()=>command('paperworkUpdate',{id,...(v.reviewedOn?{reviewedOn:v.reviewedOn}:{expiresOn:v.expiresOn})}),{keep:true,flash:false}).then(r=>{if(r){tdMini=null;tdRedraw();}});
+   else if(kind==='review')tdRun(()=>command('paperworkSettings',{swmsReviewMonths:Number(v.months)}),{keep:true,flash:false}).then(r=>{if(r){tdMini=null;tdRedraw();}});}});
  document.addEventListener('keydown',e=>{const c=e.target;if(view!=='TODAY'||!c?.matches?.('.tdh-cell')||!onPage())return;const step={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7}[e.key];if(!step)return;e.preventDefault();const day=tdhAdd(c.dataset.tdhDay,step);tdSelect(day);requestAnimationFrame(()=>document.querySelector('.tdh-cell[data-tdh-day="'+day+'"]')?.focus());});}
 // ---- Team (the Office Workers page, "Your team"): names, jobs and mobiles; messages go to these people. Data: GET /api/team. ----
 let tmData=null,tmAt=0,tmBusyLoad=false,tmRev=null,tmErr=null,tmAddDraft={name:'',role:'SCAFFOLDER',mobile:''};
