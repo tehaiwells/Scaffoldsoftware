@@ -21652,7 +21652,7 @@ const tdhTaken = (day) => tdhP()?.taken?.[day] ?? { trucks: [], drivers: [], peo
 function tdFetch(force = false) {
   if (typeof document === 'undefined' || !api) return;
   if (tdFetching) {
-    if (force) tdAgain = true;
+    if (force || tdAsk.month !== tdhMonth()) tdAgain = true; // a month turned while a fetch was out is asked for next
     return;
   }
   const month = tdhMonth(),
@@ -21670,21 +21670,27 @@ function tdFetch(force = false) {
     return;
   tdFetching = true;
   tdAsk = { month, rev, day, at: Date.now() };
-  Promise.all([api('plan?month=' + month), api('today')])
+  const ask = () => Promise.all([api('plan?month=' + month), api('today')]);
+  ask()
+    .then(([plan, today]) => {
+      // The Practice yard's demo drivers and first names are added before the page shows its first data: a booking form never
+      // opens without a driver to pick (a redraw waits while a form field has focus, so a driver who came later would not show).
+      if ((plan?.team?.needsStart || plan?.team?.needsNames) && plan.canPlan && !tdStarted) {
+        tdStarted = true;
+        return (plan.team.needsStart ? command('teamStart', {}) : Promise.resolve())
+          .then(() => (plan.team.needsNames ? command('teamNames', {}) : null))
+          .then(() => {
+            refresh(false).catch(() => {});
+            return ask();
+          })
+          .catch(() => [plan, today]);
+      }
+      return [plan, today];
+    })
     .then(([plan, today]) => {
       tdData = { plan, today };
       tdFetchedAt = Date.now();
       tdErr = null;
-      if ((plan?.team?.needsStart || plan?.team?.needsNames) && plan.canPlan && !tdStarted) {
-        tdStarted = true;
-        (plan.team.needsStart ? command('teamStart', {}) : Promise.resolve())
-          .then(() => (plan.team.needsNames ? command('teamNames', {}) : null))
-          .then(() => {
-            tdFetch(true);
-            refresh(false).catch(() => {});
-          })
-          .catch(() => {});
-      }
     })
     .catch((e) => {
       if (e?.status === 401) {
@@ -22521,10 +22527,24 @@ const tdhWhen = (iso) => {
   try {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    const day =
-      d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    // the moment in the company's day, not the browser's (a phone abroad, CI on UTC)
+    let zone = tdhP()?.timeZone || undefined,
+      day;
+    try {
+      day = new Intl.DateTimeFormat('en-CA', {
+        timeZone: zone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(d);
+    } catch {
+      zone = undefined;
+      day =
+        d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
     return (
-      (day === tdhToday() ? '' : tdhShort(day) + ' ') + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      (day === tdhToday() ? '' : tdhShort(day) + ' ') +
+      d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: zone })
     );
   } catch {
     return '';
@@ -22646,22 +22666,40 @@ const tdhNowMs = () => {
   const b = Date.parse(tdhP()?.now ?? '');
   return Number.isFinite(b) ? b + (Date.now() - tdFetchedAt) : Date.now();
 };
-// The company's time of day now, in minutes: the server's hm (planMonth), moved on by the time since it was read. Never the browser's
-// calendar: a computer on another clock (CI runs on UTC) would otherwise think the company's today was over, or not begun.
-const tdhNowMin = () => {
-  const p = tdhP();
-  if (typeof p?.hm !== 'string') return null;
-  const [h, m] = p.hm.split(':').map(Number);
-  return h * 60 + m + (Date.now() - tdFetchedAt) / 60000;
+const tdhMinutes = (hm) => {
+  const [h, m] = String(hm ?? '')
+    .split(':')
+    .map(Number);
+  return (h || 0) * 60 + (m || 0);
 };
+// The company's clock as minutes since midnight, moved on by the time since the plan was read: the server's hm (planMonth) when it is
+// there, else the plan's `now` read in the company's time zone. Never the browser's own calendar: a computer on another clock (CI runs
+// on UTC; a phone abroad) would otherwise think the company's today was over, or not begun.
+function tdhClockMinutes() {
+  const p = tdhP();
+  if (typeof p?.hm === 'string') return tdhMinutes(p.hm) + (Date.now() - tdFetchedAt) / 60000;
+  const d = new Date(tdhNowMs()),
+    zone = p?.timeZone;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone || undefined,
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(d);
+    const h = Number(parts.find((x) => x.type === 'hour')?.value) % 24,
+      m = Number(parts.find((x) => x.type === 'minute')?.value);
+    if (Number.isFinite(h) && Number.isFinite(m)) return h * 60 + m;
+  } catch {
+    // an unknown zone name: the browser's clock is the best there is
+  }
+  return d.getHours() * 60 + d.getMinutes();
+}
 function tdhSlotOk(day, hm, strict) {
   if (!day || day !== tdhToday()) return true;
-  const [h, m] = String(hm).split(':').map(Number),
-    now = tdhNowMin();
-  if (now !== null) return strict ? h * 60 + m > now : h * 60 + m + 30 > now;
-  const d = new Date(tdhNowMs()),
-    at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m).getTime();
-  return strict ? at > d.getTime() : at + 1800000 > d.getTime();
+  const now = tdhClockMinutes(),
+    at = tdhMinutes(hm);
+  return strict ? at > now : at + 30 > now;
 }
 const tdhFirstTime = (day, strict, want = '07:00') =>
   tdhSlotOk(day, want, strict) ? want : (PLAN_TIMES.find((t) => tdhSlotOk(day, t, strict)) ?? null);
@@ -23263,8 +23301,7 @@ function tdhForm(p, day) {
     go = 'Book ' + tdhPlural(f.count, 'worker') + ' for ' + siteName + ' on ' + dl;
     ok = !!f.site;
     const today = tdhToday(),
-      now = Date.parse(p?.now ?? '') || Date.now(),
-      late = day === today || (day === tdhAdd(today, 1) && new Date(now).getHours() >= 15);
+      late = day === today || (day === tdhAdd(today, 1) && tdhClockMinutes() >= 15 * 60);
     const n = free.pool.length;
     note =
       (late ? 'They get a message now' : 'They get a message the day before at 3 pm') +
@@ -24843,6 +24880,7 @@ export const tdTest = {
     tdData = { plan: plan ?? null, today: today ?? null };
     tdFetchedAt = Date.now(); // read just now: today's times count from the plan's own clock
   },
+  clockMinutes: () => tdhClockMinutes(),
   reset() {
     tdData = { plan: null, today: null };
     tdSel = null;
