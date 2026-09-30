@@ -363,7 +363,7 @@ export function cardHTML(s,p){const yard=yardOf(s),yr=rowsAt(s,yard?.id).get(p.i
 // number is always what is free in the yard now; the amount picked is its own tag at the top (amber when it is more than is free). Any amount can
 // be typed, because the yard may be restocked by then. + and - step one stillage at a time.
 // gmPlanPicker(host, {state, lift}, {title, lines, onDone(lines), onCancel}) draws into host (the Today page's sheet) and keeps its own state.
-const PP={host:null,ctx:null,opts:null,picks:new Map(),sel:null,tab:null,sys:null};
+const PP={host:null,ctx:null,opts:null,picks:new Map(),sel:null,tab:null,sys:null,asked:null};
 const ppLift=()=>PP.ctx?.lift>0?PP.ctx.lift:1500000;
 const ppPer=p=>gpPerStillage(p,ppLift());
 const ppAll=()=>products(PP.ctx?.state).filter(p=>ppPer(p)>0);
@@ -378,11 +378,15 @@ function ppSlot(x){const p=x.p,q=PP.picks.get(p.id)??0,tag=gaLenTag(p),label=p.n
  const corner=(x.count?'<b class="gm-n">'+gpCount(x.count)+'</b>':'')+(q?'<b class="pp-q'+(q>x.count?' over':'')+'">'+gpCount(q)+'</b>':'');
  return '<button type="button" class="gm-slot'+(x.count||q?'':' dim')+(q?' picked':'')+(PP.sel===p.id?' sel':'')+'" data-pp-slot="'+esc(p.id)+'" aria-label="'+esc(label)+'" aria-pressed="'+(!!q)+'">'+gaItem(p)+(tag?'<i class="gm-len">'+esc(tag)+'</i>':'')+corner+'</button>';}
 function ppAmount(){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return '<div class="gm-amt pp-amt pp-amt-empty"><p class="gm-empty-line">Tap a part, then how many.</p></div>';
- const q=PP.picks.get(p.id)??0,have=ppFree(ppHave().get(p.id)),per=ppPer(p),n=q?Math.ceil(q/per):0;
- const words=q?num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages')+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
+ const q=PP.picks.get(p.id)??0,have=ppFree(ppHave().get(p.id)),per=ppPer(p),n=q?Math.ceil(q/per):0,asked=PP.asked?.id===p.id&&PP.asked.q<q?PP.asked.q:0;
+ const words=q?(asked?'You asked for '+num(asked)+'. They come in stillages of '+num(per)+', so '+num(q)+' will go.':num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages'))+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
  return '<div class="gm-amt pp-amt"><div class="gm-amt-top">'+gaItem(p,'gm-amt-pic')+'<div class="gm-amt-name"><b>'+esc(p.name)+'</b><small data-pp-words>'+words+'</small></div>'+(q?'<button type="button" class="gm-chip" data-pp-unpick>Remove</button>':'')+'</div>'
   +'<div class="pp-amt-row"><button type="button" class="gm-step" data-pp-step="-1" aria-label="One stillage less">&minus;</button><input type="number" class="gm-num" data-pp-num min="0" max="100000" step="1" value="'+q+'" inputmode="numeric" aria-label="How many '+esc(p.name)+'"><button type="button" class="gm-step" data-pp-step="1" aria-label="One stillage more">+</button></div>'
-  +'<p class="pp-per">+ and &minus; add or take away one stillage ('+num(per)+' pieces). You can type any number.</p></div>';}
+  +'<p class="pp-per">+ and &minus; add or take away one stillage ('+num(per)+' pieces). A number you type goes up to whole stillages, as on the yard board.</p></div>';}
+// A typed amount goes up to whole stillages at once, as the board's amount box does (the crew packs whole stillages: game-pick.js), and the
+// words say so: "You asked for 30. They come in stillages of 145, so 145 will go."
+function ppType(id,value){const p=ppAll().find(x=>x.id===id);const q=Math.max(0,Math.min(100000,Math.floor(Number(value)||0))),per=p?ppPer(p):0,snap=per>0&&q>0?Math.ceil(q/per)*per:q;
+ ppSet(id,snap);PP.asked=snap>q&&q>0?{id,q}:null;}
 function ppHTML(){const {sys,list}=ppList(),tabs=ppTabs(list),here=PP.tab==='all'||!tabs?list:list.filter(x=>gaTab(x.p)===PP.tab),picks=[...PP.picks].filter(([,q])=>q>0),ps=new Map(ppAll().map(p=>[p.id,p]));
  const sorted=[...here].sort((a,b)=>GA_TABS.findIndex(t=>t.id===gaTab(a.p))-GA_TABS.findIndex(t=>t.id===gaTab(b.p))||sortKey(a,b));
  const sysbar=sys.length>1?'<div class="gm-sysbar pp-sys" role="radiogroup" aria-label="Scaffold system">'+sys.map(id=>'<button type="button" role="radio" class="gm-sysopt'+(id===PP.sys?' on':'')+'" data-pp-sys="'+esc(id)+'" aria-checked="'+(id===PP.sys)+'"><s class="gm-sys '+(SYS_CLASS[id]??'')+'"></s>'+esc(SYS_NAME[id]??id)+'</button>').join('')+'</div>':'';
@@ -395,21 +399,21 @@ function ppDraw(){if(!PP.host||ppDrawing)return;ppDrawing=true;try{const a=PP.ho
 function ppSet(id,q){q=Math.max(0,Math.min(100000,Math.floor(Number(q)||0)));if(q)PP.picks.set(id,q);else PP.picks.delete(id);}
 function ppClose(done){const o=PP.opts,lines=[...PP.picks].filter(([,q])=>q>0).map(([product,quantity])=>({product,quantity}));const host=PP.host;PP.host=null;if(host){host.removeEventListener('click',ppClick);host.removeEventListener('change',ppChange);host.removeEventListener('keydown',ppKey);host.innerHTML='';}if(done)o?.onDone?.(lines);else o?.onCancel?.();}
 function ppClick(e){const b=e.target.closest?.('button');if(!b||!PP.host?.contains(b)||b.disabled)return;
- if(b.dataset.ppSlot){const id=b.dataset.ppSlot,p=ppAll().find(x=>x.id===id);if(p&&!PP.picks.get(id)&&PP.sel!==id)ppSet(id,ppPer(p));PP.sel=id;ppDraw();PP.host?.querySelector('[data-pp-num]')?.focus({preventScroll:true});return;}
+ if(b.dataset.ppSlot){const id=b.dataset.ppSlot,p=ppAll().find(x=>x.id===id);if(p&&!PP.picks.get(id)&&PP.sel!==id)ppSet(id,ppPer(p));if(PP.sel!==id)PP.asked=null;PP.sel=id;ppDraw();PP.host?.querySelector('[data-pp-num]')?.focus({preventScroll:true});return;}
  if(b.dataset.ppTab){PP.tab=b.dataset.ppTab;ppDraw();return;}
  if(b.dataset.ppSys){PP.sys=b.dataset.ppSys;PP.tab=null;ppDraw();return;}
- if(b.dataset.ppStep){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return;const per=ppPer(p),q=PP.picks.get(p.id)??0,step=Number(b.dataset.ppStep);ppSet(p.id,step>0?(Math.floor(q/per)+1)*per:Math.max(0,(Math.ceil(q/per)-1)*per));ppDraw();return;}
+ if(b.dataset.ppStep){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return;const per=ppPer(p),q=PP.picks.get(p.id)??0,step=Number(b.dataset.ppStep);ppSet(p.id,step>0?(Math.floor(q/per)+1)*per:Math.max(0,(Math.ceil(q/per)-1)*per));PP.asked=null;ppDraw();return;}
  if(b.hasAttribute('data-pp-unpick')){PP.picks.delete(PP.sel);PP.sel=null;ppDraw();return;}
  if(b.hasAttribute('data-pp-done')){ppClose(true);return;}
  if(b.hasAttribute('data-pp-cancel'))ppClose(false);}
-function ppChange(e){const t=e.target;if(t.matches?.('[data-pp-num]')&&PP.sel){ppSet(PP.sel,t.value);ppDraw();}}
-function ppKey(e){if(e.key==='Escape'){e.preventDefault();ppClose(false);return;}if(e.key==='Enter'&&e.target.matches?.('[data-pp-num]')){e.preventDefault();if(PP.sel)ppSet(PP.sel,e.target.value);e.target.blur?.();ppDraw();}}
-export function gmPlanPicker(host,ctx,opts={}){if(PP.host&&PP.host!==host)ppClose(false);PP.host=host;PP.ctx=ctx;PP.opts=opts;PP.picks=new Map();for(const l of opts.lines??[])if(l?.product&&l.quantity>0)PP.picks.set(l.product,Math.floor(l.quantity));PP.sel=null;PP.tab=null;PP.sys=null;
+function ppChange(e){const t=e.target;if(t.matches?.('[data-pp-num]')&&PP.sel){ppType(PP.sel,t.value);ppDraw();}}
+function ppKey(e){if(e.key==='Escape'){e.preventDefault();ppClose(false);return;}if(e.key==='Enter'&&e.target.matches?.('[data-pp-num]')){e.preventDefault();if(PP.sel)ppType(PP.sel,e.target.value);e.target.blur?.();ppDraw();}}
+export function gmPlanPicker(host,ctx,opts={}){if(PP.host&&PP.host!==host)ppClose(false);PP.host=host;PP.ctx=ctx;PP.opts=opts;PP.picks=new Map();for(const l of opts.lines??[])if(l?.product&&l.quantity>0)PP.picks.set(l.product,Math.floor(l.quantity));PP.sel=null;PP.tab=null;PP.sys=null;PP.asked=null;
  const first=(opts.lines??[])[0]?.product;if(first){const p=ppAll().find(x=>x.id===first);if(p){PP.sel=first;PP.sys=p.system;}}
  host.addEventListener('click',ppClick);host.addEventListener('change',ppChange);host.addEventListener('keydown',ppKey);ppDraw();
  if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>host.querySelector?.('.pp-grid .gm-slot:not(.dim),[data-pp-cancel]')?.focus({preventScroll:true}));}
 export const gmPlanPickerOpen=()=>!!PP.host;
 // The picker in node (tests): draw into a stand-in host, pick amounts, read the lines back.
 export const gmTest={planPick(ctx,lines=[]){let out=null;const host={innerHTML:'',addEventListener(){},removeEventListener(){},querySelector:()=>null,contains:()=>true};gmPlanPicker(host,ctx,{title:'Parts',lines,onDone:l=>{out=l;},onCancel:()=>{out=null;}});
- return {html:()=>ppHTML(),select(id){PP.sel=id;},set(id,q){ppSet(id,q);PP.sel=id;return ppHTML();},step(n){const b={dataset:{ppStep:String(n)},hasAttribute:()=>false,disabled:false};ppClick({target:{closest:()=>b}});return PP.picks.get(PP.sel)??0;},done(){ppClose(true);return out;},cancel(){ppClose(false);return out;}};}};
+ return {html:()=>ppHTML(),select(id){PP.sel=id;},set(id,q){ppSet(id,q);PP.sel=id;return ppHTML();},type(id,q){PP.sel=id;ppType(id,q);return ppHTML();},step(n){const b={dataset:{ppStep:String(n)},hasAttribute:()=>false,disabled:false};ppClick({target:{closest:()=>b}});return PP.picks.get(PP.sel)??0;},done(){ppClose(true);return out;},cancel(){ppClose(false);return out;}};}};
 export const __gm={learn:s=>learn(s),sysbar:s=>sysbarHTML(s),state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setTruck:id=>{G.mode='truck';G.truck=id;},head:s=>headHTML(s),setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;},run:(a,d,ok)=>run(a,d,ok),resumeAndGo:b=>resumeAndGo(b),popInner:(t,k,a)=>popInner(t,k,a),setCtx:c=>{G.ctx=c;}};

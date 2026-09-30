@@ -326,12 +326,18 @@ export const planMethods={
     const tp=this.planTruckItem(input.truckPlan,day);let packer=null;if(input.packer!==undefined&&input.packer!==null&&input.packer!==''){let w=null;try{w=this.repo.get(input.packer,'resource');}catch{}requireRule(w&&w.type==='WORKER'&&w.enabled&&w.location===yard.id,'Choose someone at the yard to pack it.');packer=w;}
     const packDay=pack==='SAME_DAY'?day:(addDays(day,-1)<cal.today?cal.today:addDays(day,-1));this.planWhen('MATERIALS',day,time,now);
     // a soft check against what is free in the yard now, made before anything is packed (never an error: planning is for the future)
-    const free=this.planFree(yard),low=lines.find(l=>(free.get(l.product)??0)<l.quantity);
+    const free=this.planFree(yard),low=lines.find(l=>(free.get(l.product)??0)<l.quantity),snap=this.planSnapWords(lines,yard);
     const it=this.repo.add('planItem',{type:'MATERIALS',day,time,site:site.id,yard:yard.id,status:'PLANNED',stage:'WAITING',note:note(input.note),problem:null,log:[{at:iso(now),text:'Planned by '+this.user.name+'.'}],createdAt:iso(now),createdBy:this.user.id,updatedAt:iso(now),doneAt:null,cancelledAt:null,cancelledBy:null,cancelReason:null,
       lines,pack,packDay,truckPlan:tp?.id??null,packer:null,packMessage:null,held:[],got:{},short:[],left:[],trips:[]});
     const who=packer??this.planPacker(it);if(who)this.planEdit(it.id,x=>{x.packer=who.id;});
     this.planStep(it.id);
-    return this.planReply(it,'List for '+site.name+' on '+dayLabel(day)+' planned. '+(who?who.name:'The crew')+' packs it '+(pack==='SAME_DAY'?'on the day.':'the day before.')+(low?' Only '+(free.get(low.product)??0)+' of '+this.planName(low.product,'that part')+' in the yard now.':''));},
+    return this.planReply(it,'List for '+site.name+' on '+dayLabel(day)+' planned. '+(who?who.name:'The crew')+' packs it '+(pack==='SAME_DAY'?'on the day.':'the day before.')+(low?' Only '+(free.get(low.product)??0)+' of '+this.planName(low.product,'that part')+' in the yard now.':'')+snap);},
+  // The crew packs whole stillages (planPack, as the board's Send): what would go from the yard now for each line, said at booking when it is
+  // more than was asked. " You asked for 30 Kwikstage standard 3.0 m. They come in stillages of 145, so 145 will go." ('' when every line is exact)
+  planSnapWords(lines,yard){const {got}=gpChoose(this.gameItems([yard.id]).get(yard.id),lines),lift=this.gameLift(yard),out=[];
+    for(const l of lines){const will=got.get(l.product)??0;if(will<=l.quantity)continue;const p=this.effective(l.product),per=gpPerStillage(p,lift);
+      out.push('You asked for '+l.quantity+' '+p.name+'. '+(per>0&&will%per===0?'They come in stillages of '+per+', so ':'They go in whole stillages, so ')+will+' will go.');}
+    return out.length?' '+out.slice(0,2).join(' ')+(out.length>2?' The same for '+plural(out.length-2,'more part')+'.':''):'';},
   // Pieces of each part free in the yard now (not held, not on a move).
   planFree(yard=this.planYard()){const free=new Map();if(!yard)return free;for(const c of this.gameItems([yard.id]).get(yard.id)??[])if(!c.busy)for(const [p,q] of c.lines)free.set(p,(free.get(p)??0)+q);return free;},
   // Who is free for a WORKERS item: scaffolders and leading hands at the yard first, then spare site crew from sites with no crane work that day
@@ -384,7 +390,7 @@ export const planMethods={
     const hasLines=input.lines!==undefined&&input.lines!==null,hasTruck=input.truckPlan!==undefined;
     if(hasLines||hasTruck)requireRule(it.type==='MATERIALS'&&it.stage==='WAITING',"The list can only be changed before it's packed.");
     const yard=this.planYard(),lines=hasLines?this.planMaterialLines(input.lines,yard):null,tp=hasTruck?this.planTruckItem(input.truckPlan,day):undefined;
-    const sameLines=!lines||JSON.stringify(lines)===JSON.stringify(it.lines),sameTruck=tp===undefined||(tp?.id??null)===(it.truckPlan??null);
+    const snap=lines?this.planSnapWords(lines,yard):'',sameLines=!lines||JSON.stringify(lines)===JSON.stringify(it.lines),sameTruck=tp===undefined||(tp?.id??null)===(it.truckPlan??null);
     if(day===it.day&&time===it.time&&sameLines&&sameTruck)return {...this.planReply(it,what+' is already on '+dayLabel(day)+' at '+timeWords(time)+'.'),changed:false};
     if(it.type==='TRUCK')requireRule(it.status==='MISSED'||(now<atLocal(it.day,DAY_START)&&it.status==='PLANNED'),'The truck day has started. Cancel it instead.');
     if(day!==it.day||time!==it.time)this.planWhen(it.type,day,time,now);
@@ -401,7 +407,7 @@ export const planMethods={
       if(x.type==='WORKERS'){for(const p of x.people){this.planCallOff(p.message,'Moved to '+dayLabel(day),now);p.message=null;}x.stage='BOOKED';}
       this.planLog(x,'Moved from '+was+' to '+dayLabel(day)+' '+timeWords(time)+'.',now);});
     if(it.type==='TRUCK'&&moved)this.planUnlinkTruck(it.id,this.planWhat(it)+' moved to '+dayLabel(day)+', so this list goes on the next free truck.',now);
-    this.planStep(it.id);return {...this.planReply(it,what+' moved to '+dayLabel(day)+' at '+timeWords(time)+'.'+(it.type==='WORKERS'&&it.people.some(p=>p.message)?' Everyone is asked again with the new time.':'')),changed:true};},
+    this.planStep(it.id);return {...this.planReply(it,what+' moved to '+dayLabel(day)+' at '+timeWords(time)+'.'+(it.type==='WORKERS'&&it.people.some(p=>p.message)?' Everyone is asked again with the new time.':'')+snap),changed:true};},
   planWhat(it){if(it.type==='TRUCK')return it.hire?'The hire truck':this.planName(it.truck,'The truck');if(it.type==='MATERIALS')return 'The list for '+this.planSiteName(it.site);if(it.type==='WORKERS')return 'The workers for '+this.planSiteName(it.site);return 'The re-stack';},
   planCancel(input){const it=this.planItemFor(input?.id),now=this.planNow();requireRule(PLAN_FIXABLE.includes(it.status),'This is already '+(it.status==='DONE'?'done':'cancelled')+'.');
     requireRule(!(it.type==='MATERIALS'&&['LOADING','ON_THE_WAY'].includes(it.stage)),'The truck is already loading this list. Bring it back from the yard board instead.');
