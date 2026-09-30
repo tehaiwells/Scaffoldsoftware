@@ -1,0 +1,3 @@
+# Commits that only change code layout. GitHub skips them in blame; locally: git blame --ignore-revs-file .git-blame-ignore-revs <file>
+# Format the code base (Prettier, 120 columns); no behaviour change
+b723f4641d34845c0eb51f1016204c98b2ee4a66

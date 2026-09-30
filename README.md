@@ -59,7 +59,7 @@ POST /api/commands/loadTruck takes {truck, containers:[ids]} and loads those sti
 
 `typecheck` runs TypeScript over the files marked `// @ts-check` (src/repository.js and the hire, logistics and plan rules; tsconfig.json lists them) using their JSDoc types; nothing is compiled. `benchmark` times the snapshot and the history page on a synthetic yard (`--containers=`, `--ledger=`; `--gate-ms=N` fails when the median snapshot is slower than N ms); `benchmark:smoke` runs a small one of each benchmark with a gate. Tests check behaviour: unit tests render the app's HTML from real snapshots, and e2e/behaviour.spec.js reads the real stylesheets back from the browser, so tests rarely look at source code; the few that do compare it with the layout taken out (test/helpers/source.js), so formatting never breaks them.
 
-The code is laid out by Prettier (.prettierrc.json: 120 columns, single quotes, semicolons). `npm run format` lays out src/, public/, test/, e2e/ and scripts/; `npm run format:check` only reports files that are out of layout. Supplier catalogues and the Markdown documents are left alone (.prettierignore).
+The code is laid out by Prettier (.prettierrc.json: 120 columns, single quotes, semicolons). `npm run format` lays out src/, public/, test/, e2e/ and scripts/; `npm run format:check` only reports files that are out of layout. Supplier catalogues and the Markdown documents are left alone (.prettierignore). The one big layout commit is listed in .git-blame-ignore-revs, so `git blame --ignore-revs-file .git-blame-ignore-revs` (and GitHub's blame view) shows who last changed the code itself.
 
 For independent Playwright browser testing:
 
