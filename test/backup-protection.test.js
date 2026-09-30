@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../src/database.js';
@@ -181,7 +181,7 @@ test('with an encrypted copy folder set, every backup is also copied there encry
   // (secrev case.mjs: the backup folder in other letter case was accepted, and the encrypted copies landed next to the plain ones)
   mkdirSync(join(backups, 'inside'), { recursive: true });
   const other = process.platform === 'win32' ? backups.toUpperCase() : backups;
-  for (const folder of [other, join(backups, 'inside'), backups + '\\', dir])
+  for (const folder of [other, join(backups, 'inside'), backups + sep, dir])
     await assert.rejects(
       b.setOffsite({ folder, passphrase: PASS }),
       /different place from the normal backup folder and the live database/,
