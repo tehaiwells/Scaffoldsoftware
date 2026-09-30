@@ -10,14 +10,14 @@ const settle=(f,n=150)=>{f.tick(n);for(const task of f.sim.tasks().filter(t=>t.s
 const deliver=f=>{f.cmd('loadTruck',{truck:f.truck.id,containers:[f.a.id]});settle(f);f.cmd('dispatch',{id:f.truck.id,destination:f.site.id});f.tick(5);f.cmd('unload',{id:f.truck.id});settle(f,60);f.cmd('dispatch',{id:f.truck.id,destination:f.yard.id});f.tick(5);};
 const setup=t=>{t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-09-21T00:00:00Z')});const f=fixture(t);t.mock.timers.setTime(Date.parse('2026-09-23T00:00:00Z'));deliver(f);return f;};
 
-test('the Reports page: hero counters, period switch, five cards with the ledger check, and a nav entry after Stock',async t=>{const f=setup(t),{T,H}=await load();
+test('the Reports page: hero counters, period switch, five cards with the ledger check, and a tile in the Office drawer',async t=>{const f=setup(t),{T,H}=await load();
  T.setState(f.sim.snapshot(),acct(f));T.setView('REPORTS');H.setData(f.sim.reports(30),30);const html=H.view();
  assert.ok(html.includes('<h1>Reports</h1>'));assert.ok(html.includes('class="hc-hero page-hero"'),'the page hero style');
  for(const key of ['pieces','weeks','trucks','materials','systems'])assert.ok(html.includes('data-hc-card="'+key+'"'),'card '+key);
  assert.ok(html.includes('Matches today&rsquo;s live count (100)'),'the rebuilt yard equals the live yard');
  assert.ok(/data-hc-days="30" aria-pressed="true"/.test(html)&&/data-hc-days="90" aria-pressed="false"/.test(html));
  assert.ok(/1 delivery \(100 pieces\) and 0 returns/.test(html),'the weekly summary in words');
- const src=(await import('node:fs')).readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(src.includes("['STOCK','Stock'],['REPORTS','Reports'],['MATERIALS'"),'nav: Reports right after Stock');});
+ const {officeHTML}=await import('../public/game.js');for(const a of [acct(f,f.user,['operations.manage','requests.create','finance.view']),acct(f,f.user,['operations.manage','requests.create'])]){T.setState(f.sim.snapshot(),a);assert.ok(officeHTML(T.gameCtx()).includes('data-view="REPORTS"'),'a Reports tile in the Office drawer');}});
 
 test('charts are SVG drawn to the width, with clean ticks, labelled axes and a tooltip per value',async t=>{const f=setup(t),{T,H}=await load();
  T.setState(f.sim.snapshot(),acct(f));T.setView('REPORTS');H.setData(f.sim.reports(30),30);

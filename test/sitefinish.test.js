@@ -192,17 +192,11 @@ test('the board: Remove under every site tile, in the new-site window, in the si
 test('the map says a site is being removed on its tag',async t=>{
   const f=game(t);const p=f.stock(100);const {site}=f.cmd('gameSite',{name:'Wharf'});f.cmd('gameSend',{site:site.id,lines:[{product:p.id,quantity:100}]});assert.ok(f.until(()=>f.idle()));
   f.cmd('gameRemoveSite',{site:site.id,bringBack:true});const s=f.sim.snapshot(0,{lean:true,world:'1'});assert.ok(s.sites.find(x=>x.id===site.id).finishing,'the snapshot carries it for the tag');
-  const src=(await import('node:fs')).readFileSync(new URL('../public/world.js',import.meta.url),'utf8');assert.match(src,/Removing — bringing it all home/);
+  // the map tag reads 'Removing — bringing it all home' in the browser (e2e/sitefinish.spec.js)
   assert.ok(f.until(()=>f.site(site.id).status==='ARCHIVED',3000));assert.equal(f.sim.snapshot(0,{world:'1'}).world.lots[site.id],undefined,'then it goes');
 });
 
-test('the board new module is served to the browser (every module game.js and operations.js import is)',async()=>{
-  const {readFileSync}=await import('node:fs'),read=f=>readFileSync(new URL('../'+f,import.meta.url),'utf8'),server=read('src/server.js');
-  for(const f of ['public/game.js','public/operations.js'])for(const m of read(f).matchAll(/from '\.\/([\w-]+\.js)'/g))assert.ok(server.includes("'/"+m[1]+"':"),m[1]+' is served');
-  assert.match(read('public/game.css'),/Site undo and finish/);assert.ok(!/style="/.test(read('public/game-finish.js')),'no inline styles (CSP)');
-});
-
-// ---------- review fixes ----------
+// Every module the page imports is served (test/served-app.test.js); the site-finish look and CSP are checked in the browser (e2e).
 test('Undo of a never-used site puts back the very same site: its Office details, its drawn shape, its id; in a free block when its own was taken',t=>{
   const f=game(t);f.stock(100);
   const o=f.cmd('site',{name:'Office Job',address:'9 Main Rd',client:'BuildCo',contact:'Jan',phone:'0400'});const full=f.site(o.id);

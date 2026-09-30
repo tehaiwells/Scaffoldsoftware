@@ -41,6 +41,10 @@ test('sign up, choose a yard size, load the parts, add stock, send it to a site,
   await page.getByRole('button',{name:'Send to George St'}).click();
   // the trip card says what happens (no second message in a pop)
   await expect(page.locator('.gm-trip').filter({hasText:'George St'}).first()).toBeVisible({timeout:20000});
+  // on the board's map a truck is named by what it is, never by its fleet code (the codes stay in the Office)
+  const tags=()=>page.locator('.gm-board .wm-ttag').allTextContents().then(l=>l.filter(Boolean));
+  await expect.poll(async()=>(await tags()).length,{timeout:60000}).toBeGreaterThan(0);
+  for(const tag of await tags())expect(tag).toMatch(/^(Big truck|Truck)( →|$)/);
   await expect(page.locator('.gm-pop').filter({hasText:'Delivered to George St!'})).toBeVisible({timeout:150000});
   const site=(await api(page,'state?page=0')).sites.find(x=>x.name==='George St');
   await expect.poll(async()=>(await api(page,'state?page=0')).stock?.[site.id]?.pieces??0,{timeout:30000}).toBe(added);

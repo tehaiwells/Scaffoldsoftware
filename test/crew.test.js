@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { fixture } from './helpers/fixture.js';
 import { Simulation } from '../src/simulation.js';
 import { createApp } from '../src/server.js';
@@ -10,7 +9,6 @@ const load=async()=>(await import('../public/operations.js'));
 const acct=(f,perms=['operations.manage','stock.adjust','requests.create'])=>({permissions:perms,systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}});
 const crewOf=f=>f.sim.repo.all('resource').filter(r=>r.enabled&&r.type==='WORKER'&&r.location===f.yard.id);
 const until=(f,pred,n=200)=>{for(let i=0;i<n&&!pred();i++)f.tick(1);return pred();};
-const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
 
 test('status pill: Working, Walking, Driving forklift, Idle or On hold, with what exactly',async()=>{const {cwTest}=await load();
  const s={resources:[{id:'m1',type:'FORKLIFT',name:'Forklift 1'}],tasks:[{id:'t1',to:'k1'},{id:'t2',to:'y1'}],trucks:[{id:'k1'}],sites:[]};
@@ -104,13 +102,9 @@ test('every worker opens the crew view: Workers cards and rows, Today crew list,
  __test.setView('TODAY');const td=tdTest.view();for(const w of crew)assert.ok(td.includes('data-cw-open="'+w.id+'"'),'Today chip for '+w.name);
  const {cwTest}=await load();__test.setState(f.sim.snapshot(),acct(f));const yard=f.sim.snapshot().yards[0],panel=cwTest.panel(yard,crew[0].id);assert.ok(panel.includes('class="secondary cw-panel-btn" data-cw-open="'+crew[0].id+'"'),'the selected-worker panel has the crew phone view button');
  assert.ok(!cwTest.panel(yard,null).includes('cw-panel-btn'),'no button without a selected worker');
- const src=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(!/function workerPanel\(yard\)[^\n]*cwPanelButton/.test(src),'workerPanel itself is left as it is (the Home page is changed by another team)');
  assert.ok(wk.includes('class="secondary cw-card-btn" data-cw-open="'+crew[0].id+'"'),'each Workers card has a Phone view button');});
 
-test('the crew page stylesheet is one block at the end of design.css, phone first',()=>{const at=css.lastIndexOf('/* ===== Crew phone view');assert.ok(at>0,'block present');assert.ok(css.indexOf('Crew phone view')===at+9,'one block');
- const block=css.slice(at);assert.ok(block.includes('max-width:640px'),'centred column on desktop');assert.ok(/@media\(max-width:650px\)/.test(block)&&/@media\(max-width:360px\)/.test(block),'phone rules down to 320 px');assert.ok(/min-height:(4[89]|[5-9]\d)px/.test(block),'big buttons');
- assert.ok(!css.slice(0,at).includes('.page-crew'),'nothing about the crew page before its block');});
-
+// The crew page's look (a centred column, big buttons, phone rules, hover only on buttons that can be pressed) is checked in the browser, on the real stylesheet: e2e/behaviour.spec.js.
 test('crew-day counts every job finished today, past the 100 closed jobs the yard keeps, and a count never drops on its own',async t=>{const f=fixture(t);const crew=crewOf(f);
  f.cmd('jobsMode',{jobs:true,routineJobs:false});
  const batch=(n,tag)=>{for(let i=0;i<n;i++)f.cmd('createJob',{yard:f.yard.id,category:'YARD',title:tag+' '+i,where:{kind:'here'},priority:5,seconds:1});};
@@ -166,6 +160,3 @@ test('plain words: priority, results, the supervisor who follows a link to someo
  __test.setState(f.sim.snapshot(),acct(f));cwTest.open(w.id);const card=cwTest.nowCard();assert.ok(/<svg aria-hidden="true" focusable="false"/.test(card),'the map picture is hidden from screen readers (the figure describes it)');assert.ok(card.includes('role="img"'));
  assert.ok(!/top rung/.test(cwTest.view()),'no engine words');});
 
-test('crew page buttons: hover only where a mouse hovers, and never over the open or current button',()=>{const block=css.slice(css.lastIndexOf('/* ===== Crew phone view'));
- const outside=block.split('\n').filter(l=>!l.startsWith('@media(hover:hover)')).join('\n');assert.ok(!/cw-big-btn:hover/.test(outside),'no big-button hover outside @media(hover:hover)');
- assert.ok(block.includes('cw-big-btn:hover:not(:disabled):not(.is-open)')&&block.includes('cw-big-btn.is-open:hover{background:#cdea5c}'),'the open button keeps its light fill under the pointer');});

@@ -5,7 +5,6 @@ import { fixture } from './helpers/fixture.js';
 import { readdirSync } from 'node:fs';
 import { materialFacts, materialCardHTML, tileLabels, tileCount } from '../public/operations.js';
 // The stockpile tiles' hover card: its content builders are pure (client state + product id -> facts -> HTML), so every case runs in node without a DOM.
-const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
 const P={id:'P',name:'Standard 3.0 m',system:'quickstage',category:'Standards / verticals',manufacturer:'Synthetic demonstration',reference:'QS-STD-3000',region:'DEMO',unitWeight:12700,packQuantity:10,verification:'DEMO ONLY'};
 const row=(product,quantity,extra={})=>({product,name:'Standard 3.0 m',quantity,reserved:0,unserviceable:0,free:quantity,containers:1,...extra});
 const site=(id,name,status='ACTIVE')=>({id,name,status});
@@ -81,11 +80,8 @@ test('stockpile tiles carry an accessible name instead of a native title, and th
   const ledger=tileOf('DEMO ledger — 2 m'),fitting=tileOf('DEMO fitting — unknown weight');
   assert.ok(ledger.includes(' data-size="2 m"')&&ledger.includes('<span class="tile-name">DEMO ledger</span>'),'a name ending in a size keeps the size whole (data-size, drawn by CSS) and drops the dash: '+ledger);
   assert.ok(!fitting.includes('data-size')&&fitting.includes('<span class="tile-name">DEMO fitting — unknown weight</span>'),'no size, whole name: '+fitting);
-  assert.match(css,/\.stockpile \.tile\[data-size\]::after\{content:attr\(data-size\)/);assert.match(css,/\.stockpile \.tile\[data-variant\]::before\{content:attr\(data-variant\)/);
-  assert.match(css,/\.stockpile \.tile\{height:86px;/);assert.match(css,/\.stockpile \.tile:nth-child\(n\+26\)\{content-visibility:auto;contain-intrinsic-size:auto 86px\}/,'the off-screen estimate equals the fixed tile height, so a restored grid scroll lands on the same tile');
+  // the tiles' look (86 px, the size and variant drawn by CSS, off-screen tiles skipped) and the card's: e2e/behaviour.spec.js
   const reg=s.register.find(r=>r.yard>0);assert.ok(html.includes('aria-label="'+reg.name+', '+reg.yard+' in yard"'));
-  assert.match(css,/\.stockpile \.tile-grid\{grid-template-columns:repeat\(auto-fill,minmax\(66px,1fr\)\)/);assert.match(css,/\.stockpile \.tile-icon\{width:32px;height:32px/);
-  assert.match(css,/\.mat-card\{position:fixed;[^}]*pointer-events:none/);assert.match(css,/\.mat-card\[hidden\]\{display:none\}/);
 });
 
 test('building the card for one product of a ~580-product catalogue is cheap (it is built on hover, not per tile)',()=>{
@@ -137,5 +133,4 @@ test('a card too tall for the screen can ask for fewer site and truck rows; head
   assert.deepEqual(small.trucks.map(t=>t.quantity),[5]);assert.deepEqual(small.moreTrucks,{count:4,quantity:1+2+3+4});assert.equal(small.onTrucks,15,'totals do not change');assert.equal(small.total,full.total);
   const html=materialCardHTML(small);assert.ok(html.includes('+ 4 more trucks')&&html.includes('+ 6 more sites'));
   assert.match(html,/^<div class="mc-head">.*<\/div><div class="mc-body">.*<\/div><div class="mc-total">/s,'head, body, total');
-  assert.match(css,/\.mat-card\{[^}]*display:flex;flex-direction:column;[^}]*max-height:calc\(100vh - 16px\)/);assert.match(css,/\.mc-body\{flex:0 1 auto;min-height:0;overflow:hidden\}/);
 });

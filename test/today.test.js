@@ -13,7 +13,6 @@ const acct=(f,perms=['operations.manage','stock.adjust','requests.create'])=>({p
 const WED=Date.parse('2026-09-23T00:00:00Z');
 const setup=t=>{const f=fixture(t);t.mock.timers.enable({apis:['Date'],now:WED});return f;};
 const list=(f,extra={})=>f.cmd('createLoadList',{site:f.site.id,lines:[{product:f.products[0].id,quantity:10}],...extra});
-const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
 
 test('a link picks the page to open: ?view=TODAY (any case) or any other page, nothing for unknown pages',async()=>{const {tdTest}=await load();
  assert.equal(tdTest.viewFrom('?view=TODAY'),'TODAY');assert.equal(tdTest.viewFrom('?view=today'),'TODAY');assert.equal(tdTest.viewFrom('?view=SCHEDULE&x=1'),'SCHEDULE');
@@ -66,20 +65,7 @@ test('an overdue load shows on today under Still to go from before, with its Mov
  assert.ok(html.includes('Still to go from before')&&html.includes('data-td-load="'+late.id+'"'));assert.match(html,/Move or open/);
  assert.match(html,/class="tdh-cell today sel[^"]*" data-tdh-day="2026-09-25"/,'Friday is today');});
 
-test('the design has one Today block in design.css, scoped to the page, with phone rules and 44 px targets',()=>{
- const at=css.indexOf('/* ===== TODAY PAGE (td-)');assert.ok(at>0);const next=css.indexOf('/* ===== ',at+10),block=css.slice(at,next<0?undefined:next);// the merge appends later features' blocks after it
- const flat=block.replace(/\/\*[\s\S]*?\*\//g,'').replace(/@keyframes td-flash\{(?:[^{}]*\{[^{}]*\})*\s*\}/g,'').replace(/@media[^{]*\{/g,'');
- const selectors=[...flat.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap(m=>m[1].split(',').map(x=>x.trim())).filter(Boolean);
- assert.ok(selectors.length>80);for(const sel of selectors)assert.ok(/^(\.content )?\.page-today\b/.test(sel),'scoped to the page: '+sel);
- assert.match(block,/@media\(max-width:650px\)/);assert.match(block,/\.td-btn\{[^}]*min-height:44px/);});
-
-test('the Today hub block is the last one in design.css, scoped to its pages, with phone rules and 44 px targets',()=>{
- const at=css.indexOf('/* ===== TODAY HUB (tdh-)');assert.ok(at>0,'block present');assert.equal(css.indexOf('/* ===== ',at+10),-1,'nothing after it');const block=css.slice(at);
- const flat=block.replace(/\/\*[\s\S]*?\*\//g,'').replace(/@keyframes [\w-]+\{(?:[^{}]*\{[^{}]*\})*\s*\}/g,'').replace(/@media[^{]*\{/g,'');
- const selectors=[...flat.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap(m=>m[1].split(',').map(x=>x.trim())).filter(Boolean);assert.ok(selectors.length>150);
- for(const sel of selectors)assert.ok(/^(\.page-today\b|\.page-crew\b|\.tm-team\b|\.tdh-layer\b|body\.tdh-sheet-open|\.home-hero \.tdh-replies)/.test(sel),'scoped: '+sel);
- assert.match(block,/@media\(max-width:750px\)/);assert.match(block,/\.page-today \.tdh-btn\{[^}]*min-height:44px/);assert.ok(!/style=/.test(block));});
-
+// The Today page's look (its rules apply only on Today, 44 px targets, phone rules) is checked in the browser: e2e/behaviour.spec.js.
 test('the installable app: manifest, icons and the page links, served with the right types',async t=>{
  const manifest=JSON.parse(readFileSync(new URL('../public/manifest.webmanifest',import.meta.url),'utf8'));
  assert.equal(manifest.name,'Scaffold Yard');assert.ok(manifest.short_name&&manifest.short_name.length<=14);assert.equal(manifest.start_url,'/?view=TODAY');assert.equal(manifest.display,'standalone');assert.equal(manifest.theme_color,'#16382c');
@@ -87,8 +73,7 @@ test('the installable app: manifest, icons and the page links, served with the r
  const png=file=>{const b=readFileSync(new URL('../public'+file,import.meta.url));assert.equal(b.toString('latin1',1,4),'PNG',file);return [b.readUInt32BE(16),b.readUInt32BE(20)];};
  for(const i of manifest.icons){const [w,h]=png(i.src);assert.equal(w+'x'+h,i.sizes,i.src);}
  for(const i of ICONS){assert.ok(existsSync(new URL('../public/icons/'+i.file,import.meta.url)),i.file);assert.deepEqual(png('/icons/'+i.file),[i.size,i.size]);}
- const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
- for(const s of ['<link rel="manifest" href="/manifest.webmanifest">','<meta name="theme-color" content="#16382c">','<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">'])assert.ok(html.includes(s),s);
+ // the page links them (manifest, theme colour, home-screen icon): checked on the live page, e2e/behaviour.spec.js
  for(const art of [{},{rounded:true},{maskable:true},{small:true}]){const svg=tdAppIcon(art);assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'));assert.ok(!/<image|href="http|url\(http/.test(svg),'self-contained');}
  const db=openDatabase(':memory:'),server=createApp(db);await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{await new Promise(r=>server.close(r));db.close();});
  const base='http://127.0.0.1:'+server.address().port;

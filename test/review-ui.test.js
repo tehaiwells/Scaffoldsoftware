@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { fixture } from './helpers/fixture.js';
 import { yardSVG } from '../public/visual.js';
 import { stopOperations } from '../public/operations.js';
 // Regression tests for the review of the shape editor and one-click turning (UI side). The operations page runs in node with no DOM.
 const ops=f=>({permissions:['operations.manage','stock.adjust','requests.create'],systems:[],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}});
 const load=async()=>(await import('../public/operations.js')).__test;
-const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
 const workspace={querySelector:s=>s===':scope>.workspace'?{}:null},accountPage={querySelector:()=>null};
 // A fake server: turn-preview answers from the live simulation (optionally slowly), state returns a snapshot, rotate commands go through fetch.
 function wire(t,T,f,{delay=0}={}){const calls=[],notes=[],rotates=[];const realFetch=globalThis.fetch;
@@ -71,10 +69,6 @@ test('n12: a carried turn that is blocked says BLOCKED, without the turn symbol'
 
 test('n14: corner badges sit under the stillages and never take a click',t=>{const f=fixture(t);const s=f.sim.snapshot(),y=s.yards.find(x=>x.id===f.yard.id);
   const svg=yardSVG(y,[{...s.containers.find(c=>c.id===f.a.id),x:0,y:0}],[],null,[],[],null,{cornerNumbers:true});
-  assert.match(svg,/<g class="corner-number" data-corner="1" transform="[^"]+" pointer-events="none">/);assert.ok(svg.indexOf('class="corner-number"')<svg.indexOf('data-select='),'badges are drawn before the stillages');
-  assert.match(css,/\.corner-number,\.corner-number \*\{pointer-events:none\}/);});
+  assert.match(svg,/<g class="corner-number" data-corner="1" transform="[^"]+" pointer-events="none">/);assert.ok(svg.indexOf('class="corner-number"')<svg.indexOf('data-select='),'badges are drawn before the stillages');});
 
-test('n10, n11, n13: shape editor rows fit their column (measured in headless Edge at 1920, 1400, 1280, 1024 and 375 px)',()=>{
-  assert.ok(!/\.shape-fixture\{[^}]*minmax\(110px/.test(css),'fixture rows have no 521 px minimum');assert.match(css,/\.shape-fixture\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);assert.match(css,/@container \(min-width:560px\)\{\.shape-fixture\{/,'one line only where the column has room');
-  assert.match(css,/\.shape-corners\{width:auto;min-width:0;/,'the corner table ignores the global 520 px phone minimum');
-  assert.match(css,/\.shape-sides li\{display:flex;flex-wrap:wrap;/);assert.match(css,/\.side-len\{display:inline-flex;[^}]*white-space:nowrap\}/,'the input and its unit stay together');assert.match(css,/@container \(max-width:430px\)\{\.side-actions\{flex-basis:100%/,'on a narrow column the actions take their own line');});
+// That the corner badges never take a click and the shape editor rows fit their column is checked in the browser, on the real stylesheet: e2e/behaviour.spec.js.

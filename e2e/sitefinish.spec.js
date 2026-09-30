@@ -25,6 +25,8 @@ async function newSite(page,name){
 }
 test('Remove site: undo a new site, remove a practice site from its tile and undo that, remove a site with scaffold on it, and the Office',async({page})=>{
   test.setTimeout(300000);
+  // nothing on these windows may break the content security policy (an inline style attribute would be dropped by the browser)
+  await page.addInitScript(()=>{window.__csp=[];document.addEventListener('securitypolicyviolation',e=>window.__csp.push(e.violatedDirective+' at '+e.sourceFile+':'+e.lineNumber));});
   await page.goto('/');await signUp(page,'Remove DEMO');await expect(page.getByRole('heading',{level:1,name:'How big is your yard?'})).toBeVisible({timeout:45000});
   await page.locator('[data-gm-size="S"]').click();const bar=page.getByRole('navigation',{name:'What do you want to do?'});await expect(bar).toBeVisible({timeout:45000});
   const yard=(await state(page)).yards[0];await api(page,'commands/resources',{location:yard.id,workers:4,machines:2,stepMs:120,speed:20000});
@@ -54,6 +56,8 @@ test('Remove site: undo a new site, remove a practice site from its tile and und
   await expect(win.getByText('George St still has scaffold on it. Bring it all back and remove the site?')).toBeVisible();await expect(win.getByRole('button',{name:'Keep it'})).toBeVisible();
   await win.getByRole('button',{name:'Bring it back and remove'}).click();
   await expect(win.getByText('Removing — bringing it all home')).toBeVisible({timeout:20000});await expect(win.getByRole('button',{name:'Keep it'})).toBeVisible();
+  // the site's tag on the map says it too
+  await expect.poll(()=>page.getByText('Removing — bringing it all home').count(),{timeout:20000}).toBeGreaterThanOrEqual(2);
   await expect(page.locator('.gm-pop').filter({hasText:'George St is finished and removed.'})).toBeVisible({timeout:180000});
   const done=await state(page);expect(done.sites.find(s=>s.id===site.id).status).toBe('ARCHIVED');expect(done.register.find(r=>r.product===std.id).yard).toBe(Q);
   await expect(page.locator('[data-wm-site="'+site.id+'"]')).toHaveCount(0,{timeout:20000});
@@ -70,4 +74,5 @@ test('Remove site: undo a new site, remove a practice site from its tile and und
   const list=page.locator('#si-finished');await expect(list.getByRole('heading',{name:'Removed / finished sites'})).toBeVisible();
   await list.getByRole('button',{name:'Open again'}).click();await expect.poll(async()=>(await state(page)).sites.find(s=>s.id===site.id).status,{timeout:20000}).toBe('ACTIVE');
   await page.getByRole('button',{name:'Back to the yard',exact:true}).click();await expect(bar).toBeVisible();await expect(page.locator('[data-wm-site="'+site.id+'"]')).toHaveCount(1,{timeout:20000});
+  expect(await page.evaluate(()=>window.__csp)).toEqual([]);
 });
