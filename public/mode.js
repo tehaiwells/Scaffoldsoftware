@@ -16,6 +16,13 @@ export const LIVE_CHIP =
 export const LIVE_NEXT =
   'Sending to a site and bringing back come next in your real yard. For now, add the stock you have and count it.';
 export const LIVE_SITE_NEXT = 'Recording a delivery to this site comes next. It shows here once someone confirms it.';
+// The Office pages of a real yard: what is not there yet, said once, calmly, where the simulation's controls are in the Practice yard.
+export const LIVE_TRUCK_NEXT =
+  'Loading a truck and sending it out come next in your real yard. For now it shows where it was last parked.';
+export const LIVE_SITES_NEXT =
+  'Site requests and yard lists come next in your real yard. To plan a delivery now, book Materials on Today.';
+export const LIVE_CREW_NEXT =
+  'Nobody signs on in the app yet, so nobody shows as at the yard or working. That comes next. Your people are on Workers, Your team.';
 // The Office pages' strip under the title: the Practice yard keeps its simulation strip; the real yard says, calmly, what it is.
 export const LIVE_STRIP =
   '<div class="simulation-banner live-banner"><span class="status-dot"></span> Live &middot; your real yard <span>Only what your team records. Nothing moves or answers by itself.</span></div>';

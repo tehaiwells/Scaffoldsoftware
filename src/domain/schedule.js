@@ -92,7 +92,7 @@ export const runOrder = (a, b) =>
 const CLOSED_REQUEST = ['DELIVERED', 'CANCELLED', 'RETURNED'];
 export const scheduleMethods = {
   calendar() {
-    return calendarNow();
+    return this.live() ? this.clockCal(this.planNow()) : calendarNow(); // a real yard: company time (ADR 0002)
   },
   // Can its date and truck still change? A list until it is cancelled or leaves the yard; a single request while nothing is delivered.
   // A single request leaves the yard when its truck is dispatched (dispatch stamps request.delivery), exactly like a list.

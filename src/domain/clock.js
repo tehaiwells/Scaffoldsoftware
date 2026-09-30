@@ -212,14 +212,19 @@ export const clockMethods = {
       siteName = this.planSiteName(it.site);
     if (this.clockOver(it, now)) {
       const yes = it.people.filter((/** @type {any} */ p) => this.planMsg(p.message)?.status === 'YES');
+      // the computer was off from before the 3 pm ask until the day was over: the people were never asked, and it says so
+      const never = it.people.filter((/** @type {any} */ p) => !p.message);
+      for (const p of never) p.notAsked ??= iso(now);
       this.clockUnconfirmed(
         it,
         now,
         !it.people.length
           ? 'nobody was booked'
-          : !yes.length
-            ? 'nobody said they were coming'
-            : 'nobody recorded who went to ' + siteName,
+          : never.length === it.people.length
+            ? 'not asked in time (nobody got the ask)'
+            : !yes.length
+              ? 'nobody said they were coming'
+              : 'nobody recorded who went to ' + siteName,
       );
       return;
     }
@@ -283,13 +288,13 @@ export const clockMethods = {
     try {
       site = this.repo.get(it.site, 'site');
     } catch {}
+    // the site is gone (normally Remove site cancels its lists first): flagged for the office to cancel, never ended by the clock
     if (!site || site.status !== 'ACTIVE') {
-      this.planCallOffAll(it, 'The site was removed', now);
-      it.status = 'CANCELLED';
-      it.cancelledAt = iso(now);
-      it.cancelReason = 'Site removed';
-      it.problem = null;
-      this.planLog(it, 'Cancelled: ' + (site?.name ?? 'the site') + ' was removed.', now);
+      const words = (site?.name ?? 'The site') + ' was removed. Cancel this list.';
+      if (it.problem !== words) {
+        it.problem = words;
+        this.planLog(it, words, now);
+      }
       return;
     }
     if (this.clockOver(it, now)) {

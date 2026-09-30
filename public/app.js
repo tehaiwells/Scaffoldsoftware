@@ -42,6 +42,8 @@ function notify(text) {
       text.length > 120 ? 10000 : 6000,
     );
 }
+// the board's size step clears the toast that pointed to it (game.js), so two top messages never sit on each other
+addEventListener('sy:toast-clear', () => notify(''));
 message.addEventListener('click', () => {
   clearTimeout(toastTimer);
   toastTimer = null;
@@ -670,7 +672,7 @@ function settingsHome() {
   // "Start your real yard": an owner (or whoever runs the server) with no real yard yet. The Practice yard stays as it is.
   const startLive =
     state.canStartLive && !state.memberships.some((m) => m.mode === 'LIVE')
-      ? `<section class="panel acct-card acct-live" id="start-live">${cardHead('ac-cabin', 'Start your real yard', 'Your Practice yard stays exactly as it is. Your real yard starts empty and shows only what you and your team record: nothing moves or answers by itself.')}<form id="live-company"><label>Your company’s name<input name="name" required maxlength="120" autocomplete="organization" placeholder="e.g. Tee Scaffolding"></label><label>Your time<select name="timeZone">${LIVE_ZONES.map(([z, n]) => `<option value="${z}">${n}</option>`).join('')}</select></label><p class="acct-note">Next you pick the size of your yard. Then add your trucks, your team and the stock you have.</p><div class="actions"><button>Start my real yard</button></div></form></section>`
+      ? `<section class="panel acct-card acct-live" id="start-live">${cardHead('ac-cabin', 'Start your real yard', 'Your Practice yard stays exactly as it is. Your real yard starts empty and shows only what you and your team record: nothing moves or answers by itself.')}<form id="live-company"><label>Your company’s name<input name="name" required maxlength="120" autocomplete="organization" placeholder="e.g. Tee Scaffolding"></label><label>Your time zone<select name="timeZone">${LIVE_ZONES.map(([z, n]) => `<option value="${z}">${n}</option>`).join('')}</select></label><p class="acct-note">Next you pick the size of your yard. Then add your trucks, your team and the stock you have.</p><div class="actions"><button>Start my real yard</button></div></form></section>`
       : '';
   const catalogue = owner
     ? `<section class="panel acct-card acct-catalogue">${cardHead('spr-bundle', 'Catalogue', 'Your components, weights and pack sizes.')}${ops ? `<div class="acct-pointer"><span class="acct-pointer-art">${sprite('spr-stillage')}</span><div><strong>Import your supplier’s list on the Materials list</strong><p>Paste or upload a spreadsheet with Import materials, then fix any missing weights and pack sizes there.</p></div><button type="button" class="secondary" id="acct-materials">Open the Materials list</button></div>` : ''}<div class="acct-cat-admin">${catalogueSettings()}</div></section>`

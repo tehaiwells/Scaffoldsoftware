@@ -71,3 +71,23 @@ module; the pages touched in `operations.js` changed in place by a line or two e
   `test/clock.test.js` (3 pm ask, 8-hour catch-up, too late to ask, Perth on a Sydney server, zone arithmetic across daylight saving),
   `test/live-migration.test.js` (every company DEMO and nothing else changed, on a made database and, with SCAFFOLD_MIGRATION_SAMPLE, a
   copy of a real one), `test/live-ui.test.js` and `e2e/live.spec.js`. The ticking tests remain the DEMO suite, unchanged.
+
+## After review (fixes)
+
+- **Company time everywhere a day is decided on Today**: the Today page, its month, the phone view's "can still answer", "no answer",
+  the snapshot's calendar (`scheduleMethods.calendar`) and the crane hold read the company's zone through `planNowCal`, `planToday`,
+  `planAt`, `planDayOfIso` and `planParts`; the Practice yard keeps the process's local time. Hire and Reports still use the server's.
+- **One real yard per owner** (`createLiveCompany` refuses a second with 409, whoever calls it and from wherever).
+- **The Office in a real yard offers only what it can record**: the Control room and Schedule are unreachable from any link (render
+  redirects, links hidden); Big trucks shows the truck as a record (parked, payload) with one "comes next" line; Client sites has no
+  requests, yard lists or drag-to-return; Yard layout has no crew orders, Turn/Load, planner, truck drop zones or DEMO resources form;
+  Equipment, Overview and Today say how many people are on the team, never who is at the yard, idle or working; the Today legend lists
+  only Truck, Materials and Workers. `e2e/live-office.spec.js` walks every Office page of a real yard and fails on any simulation
+  control or refused command.
+- **Remove site in a real yard** (`gameRemoveSite`, `gameRestoreSite`, `gameReopen` and `siteBoundary` are record keeping): a site with
+  nothing recorded goes (with Undo); one with scaffolding recorded is refused in plain words, never "brought back" by a simulated crew.
+- **People by name only**: `quickAdjust` WORKER is refused in LIVE (people come from Your team).
+- **ON_BEHALF provenance**: an answer recorded by the office (or on the office's phone view) is `ON_BEHALF` of that person; a real yard
+  stores it as via OFFICE until people sign in on their own phones. The enum stays `ON_BEHALF` (the name in the Phase 1A brief).
+- **The clock only flags**: a list whose site is gone is flagged for the office to cancel; a whole day with the computer off says "not
+  asked in time". A booking that ended "Not confirmed" can be moved to a new day and starts again.

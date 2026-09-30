@@ -16,7 +16,17 @@ import { AppError } from '../service.js';
 import { cached, savepoint } from '../database.js';
 import { active } from './inventory.js';
 import { localDay, addDays, dayLabel, calendarNow } from './schedule.js';
-import { DAY_START, SEND_BEFORE, DAY_END, atLocal, parseTime, timeWords, planSimAnswer } from './plantime.js';
+import {
+  DAY_START,
+  SEND_BEFORE,
+  DAY_END,
+  atLocal,
+  localParts,
+  parseTime,
+  timeWords,
+  planSimAnswer,
+} from './plantime.js';
+import { zoneParts } from './zonetime.js';
 import { gpChoose, gpPerStillage } from '../../public/game-pick.js';
 import { idleWorker } from './fleet.js';
 import { DEMO_NAME } from './team.js';
@@ -112,6 +122,14 @@ export const planMethods = {
   },
   planAt(day, hm) {
     return this.live() ? this.clockAt(day, hm) : atLocal(day, hm);
+  },
+  // The day a stored moment (an ISO time) fell on, and a moment's day and time of day: company time in a real yard, the process's time in the
+  // Practice yard (as before).
+  planDayOfIso(s) {
+    return s ? this.planToday(Date.parse(s)) : null;
+  },
+  planParts(ms) {
+    return this.live() ? zoneParts(ms, this.clockZone()) : localParts(ms);
   },
   planDay(v, cal) {
     requireRule(typeof v === 'string' && DAY.test(v) && addDays(v, 0) === v, 'Choose a day on the calendar.');
@@ -964,7 +982,7 @@ export const planMethods = {
     }
     // the next free truck, but never one booked today whose driver hasn't said yes (it would drive with nobody confirmed)
     const unsure = new Set();
-    for (const x of this.planDayItems(dayOf(now), 'TRUCK')) {
+    for (const x of this.planDayItems(this.planToday(now), 'TRUCK')) {
       if (!PLAN_OPEN.includes(x.status)) continue;
       const tt = this.planTruckOf(x);
       if (!tt) continue;
@@ -1780,7 +1798,7 @@ export const planMethods = {
     for (const o of [...this.repo.all('loadList'), ...this.repo.all('request'), ...this.repo.all('collection')])
       if (o.neededOn === day && this.schedulable(o)) set.add(o.site);
     for (const x of items) if (x.type === 'MATERIALS' && x.day === day && PLAN_OPEN.includes(x.status)) set.add(x.site);
-    if (day === dayOf(this.planNow()))
+    if (day === this.planToday())
       for (const t of this.repo.all('truck')) if (!t.retired && t.game?.site) set.add(t.game.site);
     return set;
   },
@@ -1986,15 +2004,18 @@ export const planMethods = {
         ...this.planReply(it, what + ' is already on ' + dayLabel(day) + ' at ' + timeWords(time) + '.'),
         changed: false,
       };
+    // a real yard's day that ended "Not confirmed" (clock.js) can move to a new day: it starts again, asks and all
+    const unconfirmed = it.stage === 'UNCONFIRMED';
+    if (unconfirmed) requireRule(day !== it.day, 'That day is over. Pick a new day for it.');
     if (it.type === 'TRUCK')
       requireRule(
-        it.status === 'MISSED' || (now < this.planAt(it.day, DAY_START) && it.status === 'PLANNED'),
+        unconfirmed || it.status === 'MISSED' || (now < this.planAt(it.day, DAY_START) && it.status === 'PLANNED'),
         'The truck day has started. Cancel it instead.',
       );
     if (day !== it.day || time !== it.time) this.planWhen(it.type, day, time, now);
     if (it.type === 'MATERIALS')
       requireRule(
-        ['WAITING', 'PACKING', 'PACKED', 'MISSED'].includes(it.stage),
+        ['WAITING', 'PACKING', 'PACKED', 'MISSED', 'UNCONFIRMED'].includes(it.stage),
         'The truck is already loading this list. Bring it back from the yard board instead.',
       );
     if (it.type === 'WORKERS')
@@ -2036,6 +2057,17 @@ export const planMethods = {
       x.day = day;
       x.time = time;
       if (x.status === 'MISSED') Object.assign(x, { status: 'PLANNED', problem: null, why: null, missedAt: null });
+      if (unconfirmed) {
+        Object.assign(x, {
+          status: 'PLANNED',
+          problem: null,
+          why: null,
+          unconfirmedAt: null,
+          notAsked: null,
+          heard: null,
+        });
+        for (const p of x.people ?? []) p.notAsked = null;
+      }
       if (x.type === 'TRUCK') {
         if (x.message) {
           this.planCallOff(x.message, 'Moved to ' + dayLabel(day), now);
@@ -2240,7 +2272,12 @@ export const planMethods = {
         );
     }
     const reason = input.yes ? null : note(input.reason);
-    this.planAnswerMsg(m, { yes: input.yes, reason, by: this.user.id, via }, now);
+    // Provenance (ADR 0003): the answer is the person's, recorded by whoever is signed in, for them. The crew phone view is the office's own
+    // screen until people sign in on their phones (later), so a real yard stores it as recorded by the office, never as the person's phone.
+    if (this.repo.provenance)
+      this.repo.provenance = { ...this.repo.provenance, kind: 'ON_BEHALF', onBehalfOf: m.person };
+    const stored = this.live() ? 'OFFICE' : via;
+    this.planAnswerMsg(m, { yes: input.yes, reason, by: this.user.id, via: stored }, now);
     this.planStep(it.id);
     return {
       ...this.planReply(
@@ -2283,4 +2320,3 @@ export const planMethods = {
     };
   },
 };
-const dayOf = (now) => localDay(new Date(now));

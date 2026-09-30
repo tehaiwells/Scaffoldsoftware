@@ -231,7 +231,7 @@ const modeChip = (ctx) => {
   return (ctx.account?.memberships?.length ?? 0) > 1
     ? '<button type="button" class="gm-switch-btn" data-gm-switch aria-haspopup="true" aria-expanded="false" title="Switch between your yards">' +
         chip +
-        '<span class="gm-switch-caret" aria-hidden="true">&#9662;</span></button>'
+        '<span class="gm-switch-word" aria-hidden="true">Switch</span><span class="gm-switch-caret" aria-hidden="true">&#9662;</span></button>'
     : chip;
 };
 const switchPop = (ctx) =>
@@ -392,7 +392,13 @@ export function officeHTML(ctx) {
   }).join('');
   return (
     '<div class="gm-office" data-gm-office-panel hidden><div class="gm-office-in" role="dialog" aria-modal="false" aria-labelledby="gm-office-h"><div class="gm-office-head"><h2 id="gm-office-h">Office</h2><p>Everything else lives here.' +
-    (s && yardOf(s) && can ? ' The yard keeps working while you look.' : '') +
+    (s && yardOf(s) && can && !isLive(ctx.account) ? ' The yard keeps working while you look.' : '') +
+    // the Practice yard's owner, with no real yard yet: one quiet pointer to where it starts
+    (ctx.account?.canStartLive &&
+    !isLive(ctx.account) &&
+    !(ctx.account.memberships ?? []).some((m) => m.mode === 'LIVE')
+      ? ' Ready for your real yard? Start it in Account.'
+      : '') +
     '</p><button type="button" class="gm-x" data-gm-office-x aria-label="Close the office">&times;</button></div><nav class="gm-tiles" aria-label="Main navigation">' +
     groups +
     '</nav></div></div>'
@@ -774,8 +780,14 @@ function actsHTML(s) {
       gaImg(GA_BUTTONS.stock(), 'gm-go-img') +
       'Load my parts list</button></div>'
     );
+  // the real yard: what comes next, and Remove site for a site with nothing recorded there (the same question and Undo as the Practice yard)
   if (G.mode === 'site' && live())
-    return '<div class="gm-acts"><p class="gm-foot gm-live-next">' + esc(LIVE_SITE_NEXT) + '</p></div>';
+    return sfActs(
+      s,
+      site,
+      ops(),
+      '<div class="gm-acts"><p class="gm-foot gm-live-next">' + esc(LIVE_SITE_NEXT) + '</p></div>',
+    );
   if (G.mode === 'site')
     return sfActs(
       s,
@@ -959,7 +971,8 @@ function hintOf(s) {
       text: 'Now open your first client site: tap an empty block on the map.',
       act: ['Open a site', 'newsite'],
     };
-  else if (live()) h = { id: 'live-next', text: LIVE_NEXT };
+  // the real yard: said once; not while a site's window is open (it says what comes next for that site)
+  else if (live()) h = G.mode === 'site' ? null : { id: 'live-next', text: LIVE_NEXT };
   else if (moving && !delivered)
     h = { id: 'watch', text: 'In the Practice yard the crew and trucks are simulated. Watch them work.' };
   else if (!delivered)
@@ -1537,6 +1550,7 @@ function onClick(e) {
     return;
   }
   if (b.dataset.gmSize) {
+    dispatchEvent(new CustomEvent('sy:toast-clear')); // the "pick the size" toast has done its job (app.js)
     run('gameStart', { size: b.dataset.gmSize }, (r) => setTimeout(() => pop(r.message, 'tick'), 900));
     return;
   }
@@ -1798,7 +1812,8 @@ function onSubmit(e) {
       G.win = null;
       G.lastSite = r.site.id;
       sfUndo(r.site, sfApi());
-      setMode('send', r.site.id);
+      // the real yard sends nothing from the board yet: the new site opens (its window says what comes next), no second "comes next" toast
+      setMode(live() ? 'site' : 'send', r.site.id);
       setTimeout(() => wmFocus('site', r.site.id), 700);
     },
   );

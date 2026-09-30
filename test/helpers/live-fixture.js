@@ -62,11 +62,38 @@ export function liveFixture(t, { zone = 'Australia/Sydney', now = zoneAt(D0, '09
     team[name] = cmd('teamAdd', { name, role }).person;
   return Object.assign(f, { yard, product: p, per, site, truck, team });
 }
+// What the business clock may write on a booking (clock.js): its asks, flags, history and stage. Everything else on it must stay as booked.
+const PLAN_FLAGS = [
+  'version',
+  'updatedAt',
+  'problem',
+  'log',
+  'stage',
+  'why',
+  'unconfirmedAt',
+  'notAsked',
+  'heard',
+  'message',
+  'packer',
+  'packMessage',
+];
 // Everything a real yard holds that is not a message, a notification or a flag on a booking: stock, stillages, trucks, people, sites, the
-// ledger, the commands. The clock and the engine must leave all of it exactly as it was (the LIVE invariant).
+// bookings themselves (day, time, who and what; open or not), the ledger, the commands. The clock and the engine must leave all of it exactly
+// as it was (the LIVE invariant): a clock that marked a booking DONE, moved someone or held stock would show here.
 export function records(db, company) {
   const rows = (sql) => JSON.stringify(db.prepare(sql).all(company));
+  const plan = db
+    .prepare("SELECT id,data FROM objects WHERE company_id=? AND kind='planItem' ORDER BY id")
+    .all(company)
+    .map((r) => {
+      const d = JSON.parse(r.data);
+      for (const k of PLAN_FLAGS) delete d[k];
+      d.status = ['PLANNED', 'ACTIVE'].includes(d.status) ? 'OPEN' : d.status; // under way is a label; DONE or CANCELLED is not
+      if (Array.isArray(d.people)) d.people = d.people.map(({ message, notAsked, ...p }) => p);
+      return [r.id, d];
+    });
   return {
+    plan: JSON.stringify(plan),
     objects: rows(
       "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind NOT IN ('message','notification','planItem','clockState') ORDER BY id",
     ),

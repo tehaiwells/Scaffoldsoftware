@@ -9,8 +9,8 @@ import { AppError } from '../service.js';
 import { requireRule } from './geometry.js';
 import { cached } from '../database.js';
 import { planRevision } from '../repository.js';
-import { localDay, addDays, dayLabel, daysBetween, calendarNow } from './schedule.js';
-import { SEND_BEFORE, DAY_END, atLocal, timeWords, localParts } from './plantime.js';
+import { addDays, dayLabel, daysBetween, calendarNow } from './schedule.js';
+import { SEND_BEFORE, timeWords } from './plantime.js';
 import { PLAN_OPEN, PLAN_FIXABLE, MSG_OPEN } from './plan.js';
 import { mobileWords, ROLE_WORDS } from './team.js';
 import { paperState } from './paperwork.js';
@@ -19,7 +19,6 @@ import { active } from './inventory.js';
 import { monthGrid, isMonth, monthAdd, monthsBetween, smsHref } from '../../public/plan-cal.js';
 const plural = (n, one, many = one + 's') => n + ' ' + (n === 1 ? one : many);
 const iso = (ms) => new Date(ms).toISOString();
-const dayOfIso = (s) => (s ? localDay(new Date(s)) : null);
 const SLOT_TIME = { AM: '07:00', ANY: '12:00', PM: '13:00' },
   SLOT_WORDS = { AM: 'Morning', ANY: 'Any time', PM: 'Afternoon' };
 const RANGE =
@@ -51,7 +50,7 @@ export const todayMethods = {
   // Lookups for a batch of views (one per request).
   planCtx() {
     const now = this.planNow(),
-      cal = calendarNow(new Date(now)),
+      cal = this.live() ? this.clockCal(now) : calendarNow(new Date(now)),
       perms = this.auth.permissions(this.user),
       ops = perms.includes('operations.manage');
     const sites = new Map(this.repo.all('site').map((s) => [s.id, s])),
@@ -89,7 +88,7 @@ export const todayMethods = {
     if (!m || m.status === 'WAITING_TO_SEND') return 'NOT_SENT';
     if (m.status === 'SENT') {
       if (!m.needsAnswer) return m.seenAt ? 'SEEN' : 'SENT';
-      return now >= atLocal(m.day, m.time) || m.closedAt ? 'NO_ANSWER' : 'WAITING';
+      return now >= this.planAt(m.day, m.time) || m.closedAt ? 'NO_ANSWER' : 'WAITING';
     }
     return m.status;
   },
@@ -145,7 +144,7 @@ export const todayMethods = {
       reason: m.answer?.reason ?? null,
       via: m.answer?.via ?? null,
       needsAnswer: !!m.needsAnswer,
-      canAnswer: open && !!m.needsAnswer && now < atLocal(m.day, m.time),
+      canAnswer: open && !!m.needsAnswer && now < this.planAt(m.day, m.time),
       canSee: m.subject === 'PACK' && open && !m.seenAt,
       seen: !!m.seenAt,
       sentAt: m.sentAt,
@@ -361,7 +360,7 @@ export const todayMethods = {
       if (missed) words = "Didn't go";
       if (it.status === 'DONE' && it.leftOver) words = 'Part delivered';
     } else if (it.type === 'WORKERS') {
-      const sendAt = iso(atLocal(addDays(it.day, -1), SEND_BEFORE));
+      const sendAt = iso(this.planAt(addDays(it.day, -1), SEND_BEFORE));
       const rows = it.people.map((p) => ({
         ...who(p.person, p.message),
         moved: !!p.moved && !p.homeAt,
@@ -420,7 +419,7 @@ export const todayMethods = {
       ctx.ops &&
       fix &&
       (it.type === 'TRUCK'
-        ? missed || (it.status === 'PLANNED' && now < atLocal(it.day, '06:00'))
+        ? missed || (it.status === 'PLANNED' && now < this.planAt(it.day, '06:00'))
         : it.type === 'MATERIALS'
           ? ['WAITING', 'PACKING', 'PACKED', 'MISSED'].includes(it.stage)
           : it.type === 'WORKERS'
@@ -506,7 +505,7 @@ export const todayMethods = {
     for (const t of ctx.trucks.values()) {
       const g = t.game;
       if (!g || g.plan || g.kind !== 'SEND' || t.retired || !TRIP_WORDS[g.stage] || !ctx.mine.has(g.site)) continue;
-      const at = g.since ? localParts(Date.parse(g.since)) : null;
+      const at = g.since ? this.planParts(Date.parse(g.since)) : null;
       if (!at || at.day !== ctx.today) continue;
       stored ??= this.containers();
       live ??= this.tasks().filter(active);
@@ -579,7 +578,7 @@ export const todayMethods = {
         .filter((d) => d.status === 'DELIVERED' && d.completedAt && ctx.mine.has(d.to))
         .map((d) => ({
           id: d.id,
-          day: dayOfIso(d.completedAt),
+          day: this.planDayOfIso(d.completedAt),
           site: d.to,
           siteName: ctx.sites.get(d.to)?.name ?? null,
           pieces: d.pieces ?? null,
@@ -707,7 +706,7 @@ export const todayMethods = {
                 : 'At the yard';
         trips = this.repo
           .all('delivery')
-          .filter((x) => x.truck === t.id && dayOfIso(x.createdAt) === today)
+          .filter((x) => x.truck === t.id && this.planDayOfIso(x.createdAt) === today)
           .map((x) => ({
             id: x.id,
             to: x.to,
@@ -860,7 +859,7 @@ export const todayMethods = {
             if (
               !p.moved &&
               answerOf(p.message) === 'YES' &&
-              now < atLocal(i.day, i.time) &&
+              now < this.planAt(i.day, i.time) &&
               ctx.people.get(p.person)?.location !== s.id
             )
               due.push({ name: label(p.person), time: i.time });
@@ -881,7 +880,7 @@ export const todayMethods = {
                   : here > 0
                     ? 'All gear on site'
                     : 'Quiet';
-      const days = here > 0 && first.has(s.id) ? daysBetween(dayOfIso(first.get(s.id)), today) + 1 : null;
+      const days = here > 0 && first.has(s.id) ? daysBetween(this.planDayOfIso(first.get(s.id)), today) + 1 : null;
       const names = borrowed.map((w) => this.teamLabel(w));
       const dueWords = due.length
         ? due.map((x) => x.name).join(', ') +
@@ -901,7 +900,7 @@ export const todayMethods = {
                 i.site === s.id &&
                 i.status === 'PLANNED' &&
                 i.day >= today &&
-                (i.day > today || atLocal(i.day, i.time) > now) &&
+                (i.day > today || this.planAt(i.day, i.time) > now) &&
                 (i.type === 'MATERIALS' || i.type === 'WORKERS'),
             )
             .map((i) => ({
@@ -978,7 +977,7 @@ export const todayMethods = {
             n = label(p.person),
             sn = ctx.sites.get(i.site)?.name ?? 'the site';
           booked.add(p.person);
-          const later = !p.moved && now < atLocal(i.day, i.time);
+          const later = !p.moved && now < this.planAt(i.day, i.time);
           if (p.moved || a === 'YES')
             roster.onSite.push({
               id: p.person,
@@ -1047,7 +1046,21 @@ export const todayMethods = {
           });
       }
     }
-    if (ctx.ops) {
+    if (ctx.ops && this.live()) {
+      // a real yard: nobody signs on in the app yet, so nobody is "at the yard" or idle; the team not booked today is listed by name
+      for (const w of workers)
+        if (!w.away && !booked.has(w.id))
+          roster.notBooked.push({
+            id: w.id,
+            kind: 'worker',
+            name: this.teamLabel(w),
+            roleWords: ROLE_WORDS[this.roleOf(w, kinds)],
+            where: null,
+          });
+      for (const d of this.teamDrivers())
+        if (!booked.has(d.id))
+          roster.notBooked.push({ id: d.id, kind: 'driver', name: d.name, roleWords: 'Driver', where: null });
+    } else if (ctx.ops) {
       for (const w of workers)
         if (kinds.get(w.location) === 'yard' && !w.away) {
           const role = this.roleOf(w, kinds);
@@ -1130,18 +1143,18 @@ export const todayMethods = {
       .filter(
         (d) =>
           d.status === 'DELIVERED' &&
-          dayOfIso(d.completedAt) === yesterday &&
+          this.planDayOfIso(d.completedAt) === yesterday &&
           ctx.sites.has(d.to) &&
           ctx.mine.has(d.to),
       );
     const yrt = this.repo
       .all('collection')
-      .filter((o) => o.status === 'RETURNED' && dayOfIso(o.returnedAt) === yesterday && ctx.mine.has(o.site));
+      .filter((o) => o.status === 'RETURNED' && this.planDayOfIso(o.returnedAt) === yesterday && ctx.mine.has(o.site));
     // a re-stack that found nothing to do isn't news
     const ydone = seen.filter(
       (i) =>
         i.status === 'DONE' &&
-        dayOfIso(i.doneAt) === yesterday &&
+        this.planDayOfIso(i.doneAt) === yesterday &&
         i.type !== 'TRUCK' &&
         !(i.type === 'RESTACK' && !i.moved?.pieces && !i.moved?.stacked),
     );

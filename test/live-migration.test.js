@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -52,9 +52,10 @@ const NEW = {
   companies: ['mode', 'time_zone'],
   ledger: ['occurred_at', 'actor_kind', 'on_behalf_of', 'origin'],
 };
-function checkMigrated(path) {
+// backups: where the copy saved before the update goes (null: none, as other tests); when given, the copy must be the database as it was.
+function checkMigrated(path, backups = null) {
   const before = dump(path),
-    db = openDatabase(path, { backupDirectory: null });
+    db = openDatabase(path, { backupDirectory: backups });
   try {
     assert.ok(db.prepare('SELECT 1 FROM schema_migrations WHERE version=7').get());
     const companies = db.prepare('SELECT mode,time_zone FROM companies').all();
@@ -76,6 +77,11 @@ function checkMigrated(path) {
     );
   } finally {
     db.close();
+  }
+  if (backups) {
+    const saved = readdirSync(backups).filter((n) => /-before-update-v6-to-v7-.*.sqlite$/.test(n));
+    assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
+    assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }
   const after = dump(path, { without: NEW });
   delete before.schema_migrations;
@@ -114,7 +120,7 @@ test('migration 007 on a database with Practice yards in use: all DEMO, old ledg
   }
   db.exec(UNDO_007);
   db.close();
-  checkMigrated(path);
+  checkMigrated(path, join(dir, 'before-update'));
 });
 
 test('migration 007 on a copy of a real database (SCAFFOLD_MIGRATION_SAMPLE)', (t) => {
@@ -133,5 +139,5 @@ test('migration 007 on a copy of a real database (SCAFFOLD_MIGRATION_SAMPLE)', (
   } finally {
     v.close();
   }
-  checkMigrated(path);
+  checkMigrated(path, join(dir, 'before-update'));
 });

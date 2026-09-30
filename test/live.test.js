@@ -70,8 +70,12 @@ test('only an owner (or the person who runs the server) starts a real yard; it s
   );
   assert.equal(admin.id, f.owner.id);
   assert.ok(s.isAdmin(admin) && !s.permissions(admin).includes('company.manage'));
-  const made = s.createLiveCompany(admin, { name: 'Admin real yard' });
-  assert.equal(made.mode, 'LIVE');
+  // one real yard per owner: from another company, or from inside the real yard, a second one is refused (the admin path: live-fixes)
+  assert.throws(
+    () => s.createLiveCompany(admin, { name: 'Admin real yard' }),
+    (e) => e.status === 409 && /You already have a real yard: Tee Scaffolding/.test(e.message),
+  );
+  assert.throws(() => s.createLiveCompany({ ...f.owner, company_id: f.company }, { name: 'Again' }), /already have/);
   // the new company: the owner is its OWNER, its systems are the ones it was made from, nothing else is in it
   const me = { ...f.owner, company_id: f.company };
   assert.deepEqual(s.snapshot(me).roles, ['OWNER']);
@@ -88,7 +92,7 @@ test('only an owner (or the person who runs the server) starts a real yard; it s
   assert.equal(snap.company.timeZone, 'Australia/Sydney');
   assert.deepEqual(
     snap.memberships.map((m) => m.name + ':' + m.mode),
-    ['tee:DEMO', 'Tee Scaffolding:LIVE', 'Second:DEMO', 'Admin real yard:LIVE'],
+    ['tee:DEMO', 'Tee Scaffolding:LIVE', 'Second:DEMO'],
     'oldest first, each with its mode',
   );
   assert.equal(snap.canStartLive, true);
@@ -114,7 +118,7 @@ test('a real yard starts with its yard only; its sites get no invented crane, cr
     'gameSend',
     'gameCollect',
     'gameStop',
-    'gameRemoveSite',
+    'gameKeepOpen',
     'seed',
     'teamStart',
     'teamNames',

@@ -47,7 +47,12 @@ export const LIVE_OPS = new Set([
   'site',
   'gameSite',
   'siteDetails',
+  'siteBoundary',
   'archive',
+  // Remove site (and its Undo, and Open again) for a site with nothing recorded there; one with scaffolding still there is refused in LIVE
+  'gameRemoveSite',
+  'gameRestoreSite',
+  'gameReopen',
   'truck',
   // Today: bookings, asks and answers the office records; the team
   'planTruck',

@@ -188,6 +188,8 @@ export const fleetMethods = {
       ['WORKER', 'FORKLIFT', 'TRUCK', 'STILLAGE'].includes(kind),
       'Choose workers, forklifts, trucks or stillages.',
     );
+    // a real yard's people are named people on Your team (teamAdd), never an anonymous "Worker 1" (ADR 0001)
+    requireRule(!(kind === 'WORKER' && this.live()), 'Add people by name on Workers, Your team.');
     if (kind === 'WORKER' || kind === 'FORKLIFT') {
       const live = this.repo.all('resource').filter((r) => r.type === kind && r.location === yard.id && r.enabled);
       if (input.delta === 1) {

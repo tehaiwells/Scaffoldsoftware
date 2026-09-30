@@ -432,7 +432,8 @@ export function sfClick(b, api) {
       show(api, site.id);
       return true;
     }
-    if (busyAt(s, site.id)) {
+    // the real yard: no 'bring it all back?' (the simulated crew does that); the server says plainly why it cannot go yet
+    if (busyAt(s, site.id) && api.ctx?.account?.company?.mode !== 'LIVE') {
       F.ask = site.id;
       F.block = null;
       show(api, site.id);

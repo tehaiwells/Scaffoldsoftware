@@ -50,7 +50,7 @@ import {
   OFFICE_TILES,
 } from './game.js'; // the game board (the main screen) and the Office drawer
 import { sfFinishedHTML, sfOfficeActs, sfClick } from './game-finish.js'; // Client sites: Remove site, Removed sites, Open again
-import { isLive, LIVE_STRIP } from './mode.js'; // the real yard (LIVE) or the Practice yard
+import { isLive, LIVE_STRIP, LIVE_HIDDEN_TILES, LIVE_TRUCK_NEXT, LIVE_SITES_NEXT, LIVE_CREW_NEXT } from './mode.js'; // the real yard (LIVE) or the Practice yard
 // The real yard: no simulation strip, Pause, demo answers, re-stack by the simulated crew or synthetic catalogue on its pages.
 const liveMode = () => isLive(account);
 const SIM_STRIP =
@@ -900,7 +900,7 @@ const detailOutside = () =>
     ? detail()
     : '';
 const rKeyActive = () =>
-  !!(isOps() && !shapeEditor && !layoutDraft && !workerMoveMode && selected && storedAt(selected));
+  !!(isOps() && !liveMode() && !shapeEditor && !layoutDraft && !workerMoveMode && selected && storedAt(selected));
 const phoneNav = typeof matchMedia === 'function' ? matchMedia('(max-width:750px)') : { matches: false };
 let navShown = null;
 const centreNav = (nav) => {
@@ -1070,6 +1070,8 @@ function render() {
   app.onpointerover = null;
   const oldWorkerPositions = workerTransforms(document);
   const ops = account.permissions.includes('operations.manage');
+  // the real yard has no Control room or Schedule (the simulation's): a link that still points there opens a record-keeping page instead
+  if (liveMode() && LIVE_HIDDEN_TILES.includes(view)) view = view === 'CONTROL' && ops ? 'YARD' : 'TODAY';
   if (!shapeEditor && ops && !state.yards.length && ['CONTROL', 'YARD'].includes(view))
     shapeEditor = makeEditor({ kind: 'new' });
   parts = ['CONTROL', 'YARD'].includes(view) && !shapeEditor && state.yards.length ? new Map() : null;
@@ -1098,7 +1100,12 @@ function render() {
                         : view === 'MATERIALS'
                           ? materialsView()
                           : view === 'SITES'
-                            ? siteView() + (shapeEditor ? '' : requestView())
+                            ? siteView() +
+                              (shapeEditor
+                                ? ''
+                                : liveMode()
+                                  ? '<p class="notice live-next">' + esc(LIVE_SITES_NEXT) + '</p>'
+                                  : requestView())
                             : view === 'HIRE'
                               ? hrView()
                               : view === 'YARD'
@@ -1150,6 +1157,12 @@ function bindPage(patch, oldWorkerPositions) {
       wmAttach(wmCtx());
       if (!patch) wmHomeTail();
     } // Home world map first: the page then binds its stillages and glides its crew
+    // the real yard: no way into the Control room or the Schedule from any page (the Office bar's own Back stays)
+    if (liveMode())
+      for (const b of document.querySelectorAll(
+        LIVE_HIDDEN_TILES.map((v) => '[data-view="' + v + '"]:not(.ob-back)').join(','),
+      ))
+        b.hidden = true;
     document.querySelectorAll('[data-view]').forEach(
       (b) =>
         (b.onclick = () => {
@@ -3235,13 +3248,15 @@ function equipmentView() {
       cranes ? cranes + (cranes === 1 ? ' crane' : ' cranes') + ' on sites' : fBusy ? fBusy + ' in use' : 'All ready',
       trkPct(forks.length - fBusy, forks.length),
     ) +
-      trkStat(
-        'spr-worker',
-        'Crew working',
-        num(wBusy) + '<small>/ ' + num(crew.length) + '</small>',
-        crew.length ? crew.length - wBusy + ' idle' : 'Nobody on the yard',
-        trkPct(wBusy, crew.length),
-      ) +
+      (liveMode()
+        ? trkStat('spr-worker', 'Your team', num(crew.length), 'On Workers, Your team', null)
+        : trkStat(
+            'spr-worker',
+            'Crew working',
+            num(wBusy) + '<small>/ ' + num(crew.length) + '</small>',
+            crew.length ? crew.length - wBusy + ' idle' : 'Nobody on the yard',
+            trkPct(wBusy, crew.length),
+          )) +
       trkStat(
         'spr-stillage',
         'Empty stillages',
@@ -3270,16 +3285,18 @@ function equipmentView() {
         fBusy,
         ops,
       ) +
-      eqCard(
-        'WORKER',
-        'worker',
-        crew.length,
-        'Workers',
-        'spr-worker',
-        split(wBusy, crew.length, 'working', 'idle'),
-        wBusy,
-        ops,
-      ) +
+      (liveMode()
+        ? ''
+        : eqCard(
+            'WORKER',
+            'worker',
+            crew.length,
+            'Workers',
+            'spr-worker',
+            split(wBusy, crew.length, 'working', 'idle'),
+            wBusy,
+            ops,
+          )) +
       eqCard(
         'STILLAGE',
         'stillage',
@@ -6687,54 +6704,73 @@ function overviewView() {
     hold = idle.filter((r) => r.workerMode === 'HOLD').length,
     free = machines.filter(idleForklift).length,
     driving = workers.filter((r) => r.mountedOn).length;
-  const crewRow =
-    '<section class="ov-fleet ov-crew">' +
-    ovHead(
-      'Crew &amp; machines',
-      ops ? 'Yard crew, site crews and forklifts' : 'Site crews and cranes',
-      'WORKERS',
-      'Open workers',
-      ovImg('spr-worker'),
-    ) +
-    '<div class="ov-cards">' +
-    ovCard(
-      ovImg('spr-worker'),
-      workers.length,
-      'Workers',
-      ops ? inYard + ' in the yard &middot; ' + (workers.length - inYard) + ' on sites' : 'on your sites',
-      'Everyone on the books in your scope: yard crew plus site crews',
-      ops ? ovPct(inYard, workers.length) : null,
-    ) +
-    ovCard(
-      ovImg('spr-worker-busy'),
-      tasked.length,
-      'Workers tasked',
-      [workers.filter((r) => r.task).length + ' on movements', driving ? driving + ' driving' : '']
-        .filter(Boolean)
-        .join(' &middot; '),
-      'On a stock movement, driving or walking to a forklift, or walking on orders',
-      ovPct(tasked.length, workers.length),
-      ' busy',
-    ) +
-    ovCard(
-      ovImg('spr-worker'),
-      idle.length,
-      'Workers idle',
-      hold ? hold + ' on hold' : 'Standing by',
-      'Standing by: no movement, not on or heading to a forklift, not walking',
-      ovPct(idle.length, workers.length),
-      ' idle',
-    ) +
-    ovCard(
-      ops ? ovImg(free < machines.length ? 'spr-forklift-driven' : 'spr-forklift') : icon('EQUIPMENT'),
-      machines.length,
-      ops ? 'Forklifts' : 'Site cranes',
-      [free + ' free', ops && cranes.length ? cranes.length + ' site cranes' : ''].filter(Boolean).join(' &middot; '),
-      'Free = nobody on it, no job, no load, not reserved by a worker walking to it',
-      ovPct(free, machines.length),
-      ' machine',
-    ) +
-    '</div></section>';
+  const lv = liveMode();
+  const crewRow = lv
+    ? '<section class="ov-fleet ov-crew">' +
+      ovHead('Your team &amp; machines', 'As recorded', 'WORKERS', 'Open your team', ovImg('spr-worker')) +
+      '<div class="ov-cards">' +
+      ovCard(
+        ovImg('spr-worker'),
+        workers.length,
+        'In your yard team',
+        'Names and jobs on Workers',
+        'The people you added on Workers, Your team (drivers are listed there too)',
+      ) +
+      ovCard(
+        ops ? ovImg('spr-forklift') : icon('EQUIPMENT'),
+        machines.length,
+        ops ? 'Forklifts' : 'Site cranes',
+        'As recorded',
+        'The machines you recorded',
+      ) +
+      '</div></section>'
+    : '<section class="ov-fleet ov-crew">' +
+      ovHead(
+        'Crew &amp; machines',
+        ops ? 'Yard crew, site crews and forklifts' : 'Site crews and cranes',
+        'WORKERS',
+        'Open workers',
+        ovImg('spr-worker'),
+      ) +
+      '<div class="ov-cards">' +
+      ovCard(
+        ovImg('spr-worker'),
+        workers.length,
+        'Workers',
+        ops ? inYard + ' in the yard &middot; ' + (workers.length - inYard) + ' on sites' : 'on your sites',
+        'Everyone on the books in your scope: yard crew plus site crews',
+        ops ? ovPct(inYard, workers.length) : null,
+      ) +
+      ovCard(
+        ovImg('spr-worker-busy'),
+        tasked.length,
+        'Workers tasked',
+        [workers.filter((r) => r.task).length + ' on movements', driving ? driving + ' driving' : '']
+          .filter(Boolean)
+          .join(' &middot; '),
+        'On a stock movement, driving or walking to a forklift, or walking on orders',
+        ovPct(tasked.length, workers.length),
+        ' busy',
+      ) +
+      ovCard(
+        ovImg('spr-worker'),
+        idle.length,
+        'Workers idle',
+        hold ? hold + ' on hold' : 'Standing by',
+        'Standing by: no movement, not on or heading to a forklift, not walking',
+        ovPct(idle.length, workers.length),
+        ' idle',
+      ) +
+      ovCard(
+        ops ? ovImg(free < machines.length ? 'spr-forklift-driven' : 'spr-forklift') : icon('EQUIPMENT'),
+        machines.length,
+        ops ? 'Forklifts' : 'Site cranes',
+        [free + ' free', ops && cranes.length ? cranes.length + ' site cranes' : ''].filter(Boolean).join(' &middot; '),
+        'Free = nobody on it, no job, no load, not reserved by a worker walking to it',
+        ovPct(free, machines.length),
+        ' machine',
+      ) +
+      '</div></section>';
   const truckRow = (label, match, viewId, cls) => {
     const heavy = cls === 'heavy',
       fleet = state.trucks.filter(match),
@@ -6747,6 +6783,24 @@ function overviewView() {
       road = sch.filter((t) => t.status === 'IN_TRANSIT').length,
       ready = ld.filter((t) => t.deckArea > 0 && t.tasksTo === 0).length,
       away = un.filter((t) => t.status === 'IN_TRANSIT').length;
+    if (lv)
+      return (
+        '<section class="ov-fleet ov-' +
+        cls +
+        '">' +
+        ovHead(
+          label,
+          fleet.length ? fleet.length + ' in the fleet' : 'none yet',
+          viewId,
+          fleet.length ? 'Open trucks' : 'Add one',
+          ovImg(heavy ? 'spr-truck12' : 'spr-truck2'),
+        ) +
+        '<p class="ov-parked">' +
+        (fleet.length
+          ? fleet.map((t) => esc(t.name) + ' &middot; parked at ' + esc(name(t.at))).join('<br>')
+          : 'No trucks recorded yet.') +
+        '</p></section>'
+      );
     return (
       '<section class="ov-fleet ov-' +
       cls +
@@ -6813,34 +6867,53 @@ function overviewView() {
     '</div><div class="ov-hero-top">' +
     heroEyebrow() +
     '<h1>Overview</h1><p class="ov-hero-sub hero-sub">' +
-    (ops && yard ? esc(yard.name) + ' and every site, live' : 'Your sites, live') +
+    (lv
+      ? ops && yard
+        ? esc(yard.name) + ' and every site, as your team recorded them'
+        : 'Your sites, as recorded'
+      : ops && yard
+        ? esc(yard.name) + ' and every site, live'
+        : 'Your sites, live') +
     '</p>' +
     heroActions() +
     '</div>' +
     '<div class="hud-stats" role="list" aria-label="Overview at a glance">' +
-    ovStat(
-      'spr-worker',
-      num(tasked.length) + '<small>/ ' + num(workers.length) + '</small>',
-      'Crew working',
-      workers.length ? idle.length + ' idle' : 'No crew yet',
-      ovPct(tasked.length, workers.length),
-    ) +
-    ovStat(
-      'spr-truck12',
-      num(out) + '<small>/ ' + num(state.trucks.length) + '</small>',
-      'Trucks out',
-      loading
-        ? dual(
-            loading + ' loading' + (runs ? ' &middot; ' + runs + ' run' + (runs === 1 ? '' : 's') + ' today' : ''),
-            loading + ' loading' + (runs ? ' &middot; ' + runs + ' run' + (runs === 1 ? '' : 's') : ''),
-          )
-        : runs
-          ? runs + ' run' + (runs === 1 ? '' : 's') + ' done today'
-          : state.trucks.length
-            ? 'All at the yard'
-            : 'No trucks yet',
-      ovPct(out, state.trucks.length),
-    ) +
+    (lv
+      ? ovStat(
+          'spr-worker',
+          num(workers.length),
+          'Your team',
+          workers.length ? 'in the yard team' : 'Add them on Workers',
+        ) +
+        ovStat(
+          'spr-truck12',
+          num(state.trucks.length),
+          'Trucks',
+          state.trucks.length ? 'Parked where last recorded' : 'No trucks yet',
+        )
+      : ovStat(
+          'spr-worker',
+          num(tasked.length) + '<small>/ ' + num(workers.length) + '</small>',
+          'Crew working',
+          workers.length ? idle.length + ' idle' : 'No crew yet',
+          ovPct(tasked.length, workers.length),
+        ) +
+        ovStat(
+          'spr-truck12',
+          num(out) + '<small>/ ' + num(state.trucks.length) + '</small>',
+          'Trucks out',
+          loading
+            ? dual(
+                loading + ' loading' + (runs ? ' &middot; ' + runs + ' run' + (runs === 1 ? '' : 's') + ' today' : ''),
+                loading + ' loading' + (runs ? ' &middot; ' + runs + ' run' + (runs === 1 ? '' : 's') : ''),
+              )
+            : runs
+              ? runs + ' run' + (runs === 1 ? '' : 's') + ' done today'
+              : state.trucks.length
+                ? 'All at the yard'
+                : 'No trucks yet',
+          ovPct(out, state.trucks.length),
+        )) +
     ovStat(
       'spr-bundle',
       num(block?.pieces ?? 0),
@@ -6852,7 +6925,7 @@ function overviewView() {
       'ov-site',
       num(active.length),
       'Active sites',
-      active.length ? served + ' with trucks' : 'No sites yet',
+      active.length ? (lv ? 'On the map' : served + ' with trucks') : 'No sites yet',
       null,
     ) +
     '</div>' +
@@ -6867,12 +6940,15 @@ function overviewView() {
     '<div class="ov-fleets">' +
     truckRow('12.5 tonne trucks', heavyTruck, 'TRUCK12', 'heavy') +
     truckRow('2 tonne trucks', (t) => !heavyTruck(t), 'TRUCK2', 'light') +
-    '</div><ul class="ov-legend" aria-label="Truck stages">' +
-    OV_STAGES.map(
-      ([, label, cls, words]) => '<li class="ov-' + cls + '"><b>' + label + '</b> = ' + words + '</li>',
-    ).join('') +
-    '</ul>' +
-    schOverviewNote() +
+    '</div>' +
+    (lv
+      ? ''
+      : '<ul class="ov-legend" aria-label="Truck stages">' +
+        OV_STAGES.map(
+          ([, label, cls, words]) => '<li class="ov-' + cls + '"><b>' + label + '</b> = ' + words + '</li>',
+        ).join('') +
+        '</ul>' +
+        schOverviewNote()) +
     '<div class="overview-grid">' +
     yardStockPanel(ops, yard) +
     sitePanel(ops) +
@@ -7697,10 +7773,12 @@ function ydHud() {
     ) +
     stat(
       sprite('spr-worker'),
-      'Yard crew',
+      liveMode() ? 'Your team' : 'Yard crew',
       num(crew.length),
-      busy + ' working &middot; ' + forks + (forks === 1 ? ' forklift' : ' forklifts'),
-      share(busy, crew.length),
+      liveMode() // the real yard: who is on the team, never who is working (nobody signs on yet)
+        ? 'On Workers &middot; ' + forks + (forks === 1 ? ' forklift' : ' forklifts')
+        : busy + ' working &middot; ' + forks + (forks === 1 ? ' forklift' : ' forklifts'),
+      liveMode() ? null : share(busy, crew.length),
     ) +
     stat(YD_ICON_OFFICE, 'Fixtures', num(fx.length), fxSub) +
     stat(YD_ICON_SIZE, 'Yard size', num(Math.round(area)) + '<small>m&sup2;</small>', size || 'Not drawn yet') +
@@ -7742,7 +7820,7 @@ function yardHero(yard) {
 }
 const yardQuick = () => {
   const yard = state.yards[0];
-  return `<div class="quick-grid">${quickRow('WORKER', 'worker', state.resources.filter((r) => r.type === 'WORKER' && r.location === yard.id).length, 'Yard workers')}${quickRow('FORKLIFT', 'forklift', state.resources.filter((r) => r.type === 'FORKLIFT' && r.location === yard.id).length, 'Forklifts')}${quickRow('TRUCK2', 'truck', state.trucks.filter((t) => t.yard === yard.id && t.payload < 10000000).length, 'Trucks · 2 tonne')}${quickRow('TRUCK12', 'truck', state.trucks.filter((t) => t.yard === yard.id && t.payload >= 10000000).length, 'Trucks · 12.5 tonne')}${quickRow('STILLAGE', 'stillage', state.containers.filter((c) => c.location === yard.id && c.type === 'STILLAGE').length, 'Stillages in yard')}</div>`;
+  return `<div class="quick-grid">${liveMode() ? '' : quickRow('WORKER', 'worker', state.resources.filter((r) => r.type === 'WORKER' && r.location === yard.id).length, 'Yard workers')}${quickRow('FORKLIFT', 'forklift', state.resources.filter((r) => r.type === 'FORKLIFT' && r.location === yard.id).length, 'Forklifts')}${quickRow('TRUCK2', 'truck', state.trucks.filter((t) => t.yard === yard.id && t.payload < 10000000).length, 'Trucks · 2 tonne')}${quickRow('TRUCK12', 'truck', state.trucks.filter((t) => t.yard === yard.id && t.payload >= 10000000).length, 'Trucks · 12.5 tonne')}${quickRow('STILLAGE', 'stillage', state.containers.filter((c) => c.location === yard.id && c.type === 'STILLAGE').length, 'Stillages in yard')}</div>`;
 };
 const yardDrops = () => {
   const yard = state.yards[0];
@@ -7758,7 +7836,7 @@ const yardLists = () => yardListsPanel((l) => ['OPEN', 'PARTIAL', 'RESERVED', 'L
 function yardView() {
   if (editing('yard')) return shapeHost();
   const yard = state.yards[0];
-  return `${yardHero(yard)}${yard && account.permissions.includes('operations.manage') ? `<section class="panel"><div class="row"><h2>Crew, equipment &amp; storage</h2><span class="muted">${esc(yard.name)}</span></div>${part('quick', '#view .quick-grid:not(.fleet-column)', yardQuick)}<p class="muted">Removing takes the most recently added idle one; select a worker, forklift, truck or stillage below to remove that specific one.</p></section>` : ''}${yard ? `<section class="panel scene"><div class="row"><h2><span class="section-kicker">LIVE YARD PLAN</span>${esc(yard.name)}</h2>${planHead(yard, ' · 1 m grid')}</div>${planTools()}${planPart()}${selectionPart()}<div class="scene-caption"><div class="map-legend"><span><i class="legend-dot stillage"></i>Stillages</span><span><i class="legend-dot cage"></i>Small-parts cages</span><span><i class="legend-dot loading"></i>Loading zone</span></div><span>${layoutDraft ? 'Drag a stillage to a new spot &middot; drop it onto another stillage to stack it &middot; press R while dragging to turn it' : 'Left-click worker to select &middot; Right-click ground to move'}</span></div></section>${crewPart()}${part('layouts', null, layoutsPanel)}${part('lists', null, yardLists)}${part('cards', '#view .container-list', () => containerCards(state.yards[0].id))}${detailPart()}${part('drops', '#view .drop-zones', yardDrops)}<div class="actions">${account.permissions.includes('operations.manage') ? '<button type="button" class="secondary" id="edit-yard">Change yard shape, size &amp; fixtures</button>' : ''}${!layoutDraft && account.permissions.includes('operations.manage') ? '<button id="planner-start">Plan a new layout</button>' : ''}</div>` : ''}${!yard && !account.permissions.includes('operations.manage') ? '<section class="panel"><h2>Yard layout</h2><p>The office manages the yard layout.</p></section>' : ''}${account.permissions.includes('operations.manage') ? part('forms', null, () => parkingForm(state.yards[0]) + resourceForm(state.yards[0]) + containerForm(state.yards[0])) : ''}`;
+  return `${yardHero(yard)}${yard && account.permissions.includes('operations.manage') ? `<section class="panel"><div class="row"><h2>${liveMode() ? 'Equipment &amp; storage' : 'Crew, equipment &amp; storage'}</h2><span class="muted">${esc(yard.name)}</span></div>${part('quick', '#view .quick-grid:not(.fleet-column)', yardQuick)}<p class="muted">${liveMode() ? 'Your people are on Workers, Your team. Removing takes the most recently added one; select a forklift, truck or stillage below to remove that specific one.' : 'Removing takes the most recently added idle one; select a worker, forklift, truck or stillage below to remove that specific one.'}</p></section>` : ''}${yard ? `<section class="panel scene"><div class="row"><h2><span class="section-kicker">${liveMode() ? 'YARD PLAN' : 'LIVE YARD PLAN'}</span>${esc(yard.name)}</h2>${planHead(yard, ' · 1 m grid')}</div>${planTools()}${planPart()}${selectionPart()}<div class="scene-caption"><div class="map-legend"><span><i class="legend-dot stillage"></i>Stillages</span><span><i class="legend-dot cage"></i>Small-parts cages</span><span><i class="legend-dot loading"></i>Loading zone</span></div><span>${layoutDraft ? 'Drag a stillage to a new spot &middot; drop it onto another stillage to stack it &middot; press R while dragging to turn it' : liveMode() ? 'Stillages where they were last recorded' : 'Left-click worker to select &middot; Right-click ground to move'}</span></div></section>${liveMode() ? '<p class="notice live-next">' + esc(LIVE_CREW_NEXT) + '</p>' : crewPart() + part('layouts', null, layoutsPanel) + part('lists', null, yardLists)}${part('cards', '#view .container-list', () => containerCards(state.yards[0].id))}${detailPart()}${liveMode() ? '' : part('drops', '#view .drop-zones', yardDrops)}<div class="actions">${account.permissions.includes('operations.manage') ? '<button type="button" class="secondary" id="edit-yard">Change yard shape, size &amp; fixtures</button>' : ''}${!layoutDraft && !liveMode() && account.permissions.includes('operations.manage') ? '<button id="planner-start">Plan a new layout</button>' : ''}</div>` : ''}${!yard && !account.permissions.includes('operations.manage') ? '<section class="panel"><h2>Yard layout</h2><p>The office manages the yard layout.</p></section>' : ''}${account.permissions.includes('operations.manage') ? part('forms', null, () => parkingForm(state.yards[0]) + (liveMode() ? '' : resourceForm(state.yards[0])) + containerForm(state.yards[0])) : ''}`;
 }
 const dims = (loc) => {
   const pts = loc?.points ?? [];
@@ -9059,6 +9137,7 @@ const trkWhere = (t) =>
       : ['yard', 'At the yard'];
 // What the truck is doing, in the truck-stage words the Overview and Home use, as a pill in the crew-card colours.
 const trkDoing = (t) => {
+  if (liveMode()) return ['idle', 'Parked']; // the real yard: a record of where it is, never a stage of a simulated run
   if (t.status === 'IN_TRANSIT') return t.deckArea > 0 ? ['drive', 'Delivering a load'] : ['walk', 'Travelling empty'];
   const s = truckStage(t, state);
   return s === 'UNLOADING'
@@ -9180,9 +9259,11 @@ function trkTrip(t) {
         ? 'Last trip delivered to ' + esc(name(trip.to))
         : trip?.status === 'RETURNED'
           ? 'Last trip came back empty'
-          : to
-            ? 'Next stop picked. Dispatch when loaded.'
-            : 'No destination yet. Pick one below.';
+          : liveMode()
+            ? 'Parked where it was last recorded.'
+            : to
+              ? 'Next stop picked. Dispatch when loaded.'
+              : 'No destination yet. Pick one below.';
   return (
     '<div class="trk-trip' +
     (road ? ' moving' : '') +
@@ -9207,9 +9288,11 @@ function trkCargo(t) {
       '<div class="trk-cargo"><h3>On the deck</h3><p class="trk-empty">' +
       trkPic('spr-stillage') +
       '<span>Nothing on the deck. ' +
-      (t.status === 'IN_TRANSIT'
-        ? 'It is travelling empty.'
-        : 'Tick stillages above to load them, or drag one onto this card.') +
+      (liveMode()
+        ? ''
+        : t.status === 'IN_TRANSIT'
+          ? 'It is travelling empty.'
+          : 'Tick stillages above to load them, or drag one onto this card.') +
       '</span></p></div>'
     );
   const ids = new Set(load.map((c) => c.id)),
@@ -9284,14 +9367,14 @@ const trkAuto = (t) =>
 function trkGarage(t) {
   const [wc, ww] = trkWhere(t),
     [dc, dw] = trkDoing(t),
-    auto = trkAuto(t),
-    pick = auto ? '' : loadPicker(t),
-    send = auto ? '' : trkDispatch(t);
+    lv = liveMode(), // the real yard: the truck as a record (where it was last parked, its payload); loading and sending come next
+    auto = lv ? '' : trkAuto(t),
+    pick = auto || lv ? '' : loadPicker(t),
+    send = auto || lv ? '' : trkDispatch(t);
   return (
     '<section class="panel trk-garage at-' +
     wc +
-    '" data-drop="' +
-    t.id +
+    (lv ? '' : '" data-drop="' + t.id) +
     '"><div class="trk-head"><span class="trk-tag">' +
     trkPic(heavyTruck(t) ? 'spr-truck12' : 'spr-truck2', 'trk-tag-art') +
     esc(t.name) +
@@ -9312,8 +9395,7 @@ function trkGarage(t) {
     trkGauges(t) +
     trkTrip(t) +
     '</div></div>' +
-    trkRuns(t) +
-    rtTruckPanel(t) +
+    (lv ? '<p class="trk-live-next">' + esc(LIVE_TRUCK_NEXT) + '</p>' : trkRuns(t) + rtTruckPanel(t)) +
     manifestPanel(
       state.deliveries.find((d) => d.id === t.delivery),
       'Delivery docket on board',
@@ -10743,10 +10825,10 @@ function siTruck(t, coming = false) {
     load = state.containers.filter((c) => c.location === t.id).length;
   return (
     '<div class="si-truck' +
-    (coming ? ' coming' : ops ? ' drop-zone' : '') +
+    (coming ? ' coming' : ops && !liveMode() ? ' drop-zone' : '') +
     (ops ? '' : ' view-only') +
     '"' +
-    (coming || !ops ? '' : ' data-drop="' + t.id + '"') +
+    (coming || !ops || liveMode() ? '' : ' data-drop="' + t.id + '"') +
     '><span class="si-truck-art">' +
     siImg(heavy ? 'spr-truck12' : 'spr-truck2') +
     '</span><span class="si-truck-text"><span class="si-truck-name"><span class="si-tag">' +
@@ -10765,7 +10847,7 @@ function siTruck(t, coming = false) {
         (t.loadedWeight ? ' &middot; ' + kg(t.loadedWeight) : '')
       : 'deck empty') +
     '</small>' +
-    (coming || !ops
+    (coming || !ops || liveMode()
       ? ''
       : '<span class="si-drop-hint">' + siGlyph('drop') + 'Drop a stillage or cage here to load it for return</span>') +
     '</span>' +
@@ -10917,7 +10999,7 @@ function siCard(s, ix) {
       : '<p class="si-none">' +
         siImg('spr-truck12') +
         '<span>' +
-        (ops ? 'No truck on site. Send one from a truck page.' : 'No truck on site right now.') +
+        (ops && !liveMode() ? 'No truck on site. Send one from a truck page.' : 'No truck on site right now.') +
         '</span></p>') +
     '</div></div></div>' +
     rtSiteBlock(s, boxes) +
@@ -12469,7 +12551,7 @@ function turnRow(c) {
   );
 }
 const turnable = (loc) => {
-  if (!isOps() || !selected || layoutDraft || workerMoveMode === 'PLACE') return null;
+  if (!isOps() || liveMode() || !selected || layoutDraft || workerMoveMode === 'PLACE') return null;
   const c = state.containers.find((o) => o.id === selected && o.location === loc.id);
   return c && !activeTurn(c) ? c : null;
 };
@@ -12986,7 +13068,7 @@ function selectionBar(loc) {
     c.id +
     '" data-focus-scope="turn">' +
     whereLine(c) +
-    (isOps() ? turnRow(c) + loadRow(c) : '') +
+    (isOps() && !liveMode() ? turnRow(c) + loadRow(c) : '') +
     '<button type="button" class="text-button" data-show-detail="' +
     c.id +
     '">All details for ' +
@@ -21494,6 +21576,7 @@ function tdhCal(p, today, sel) {
       ['load', 'Yard list'],
       ['back', 'Collection'],
     ]
+      .filter(([t]) => !liveMode() || ['truck', 'mat', 'crew'].includes(t)) // the real yard: only what it can have
       .map(([t, w]) => '<span><i class="tdh-dot tone-' + t + '"></i>' + w + '</span>')
       .join('') +
     '<span><i class="tdh-key amber"></i>Waiting for an answer or stock</span><span><i class="tdh-key red"></i>Needs sorting</span>' +
@@ -22735,7 +22818,7 @@ function tdhWho(t, p, today) {
     r = t?.roster,
     yard = state.yards[0],
     crew =
-      ops && yard
+      ops && yard && !liveMode() // the real yard: nobody signs on yet, so nobody shows as "at the yard"
         ? (state.resources ?? [])
             .filter((x) => x.type === 'WORKER' && x.location === yard.id)
             .sort((a, b) => byName(a.name, b.name))
@@ -22877,6 +22960,7 @@ function tdhWho(t, p, today) {
       '</button></p>';
   if (!t) body += tdhWait;
   else if (!body) body = '<p class="tdh-quiet">Nobody is booked today.</p>';
+  if (t && liveMode()) body += '<p class="tdh-quiet tdh-live-next">' + esc(LIVE_CREW_NEXT) + '</p>';
   const sub = !r ? '' : (r.sub ?? (r.waiting.length ? r.words : 'Everyone who is booked has said yes'));
   return tdhCard(
     'who',
@@ -23115,8 +23199,11 @@ function tdhBusiness(t) {
       b.gear.pieces ? num(b.gear.pieces) : 'None',
       b.gear.pieces ? 'pieces out on hire at ' + tdhPlural(b.gear.sites, 'site') : 'No gear out on hire',
     ) +
-    stat('spr-truck12', b.trucks.busy + ' of ' + b.trucks.all, 'trucks busy now') +
-    stat('spr-worker', b.crew.busy + ' of ' + b.crew.all, 'yard crew busy now') +
+    (liveMode()
+      ? stat('spr-truck12', num(b.trucks.all), b.trucks.all === 1 ? 'truck' : 'trucks') +
+        stat('spr-worker', num(b.crew.all), 'in your yard team')
+      : stat('spr-truck12', b.trucks.busy + ' of ' + b.trucks.all, 'trucks busy now') +
+        stat('spr-worker', b.crew.busy + ' of ' + b.crew.all, 'yard crew busy now')) +
     '</ul>';
   const m = hrOK() ? b.money : null; // dollars only with finance.view (the server already leaves them out)
   if (m?.noRates)

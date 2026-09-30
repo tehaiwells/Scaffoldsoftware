@@ -44,7 +44,8 @@ test('the LIVE board v0: "Live · your real yard" chip, no Send or Bring back, A
   __gm.setMode('site', b.f.site.id);
   const acts = __gm.acts(s);
   assert.match(acts, /Recording a delivery to this site comes next/);
-  assert.ok(!/data-gm-go="send"|Remove site|data-sf/.test(acts), 'no Send here, Bring back or Remove site');
+  assert.ok(!/data-gm-go="(send|back)"/.test(acts), 'no Send here, no Bring back');
+  assert.match(acts, /data-sf-remove=/, 'Remove site stays: a site made by mistake can go (nothing recorded there)');
   // what the board draws: the yard and the site from records, trucks parked where they are, nobody walking about
   assert.deepEqual(
     s.trucks.map((x) => [x.name, x.status, x.at === b.f.yard.id]),

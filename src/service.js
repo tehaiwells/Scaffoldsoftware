@@ -132,6 +132,12 @@ export class Service {
     const name = text(input.name, 'Company name'),
       zone = zoneOf(input.timeZone);
     return atomic(this.db, () => {
+      // one real yard per owner: a second tap, a retry or a call from inside the real yard never makes another
+      const owned = cached(
+        this.db,
+        "SELECT c.name FROM companies c JOIN user_roles ur ON ur.company_id=c.id AND ur.role='OWNER' JOIN memberships m ON m.company_id=c.id AND m.user_id=ur.user_id AND m.removed_at IS NULL WHERE c.mode='LIVE' AND ur.user_id=?",
+      ).get(user.id);
+      if (owned) fail(409, 'You already have a real yard: ' + owned.name + '. Switch to it from Your yards.');
       const companyId = randomUUID(),
         now = new Date().toISOString();
       cached(this.db, 'INSERT INTO companies(id,name,created_at,mode,time_zone) VALUES(?,?,?,?,?)').run(

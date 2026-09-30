@@ -2469,7 +2469,13 @@ body.in-game #app {
   color: #fff;
 }
 .gm-switch-caret {
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1;
+}
+.gm-switch-word {
+  display: none;
+  font-size: 12px;
+  font-weight: 700;
 }
 .gm-switch-pop {
   position: fixed;
@@ -2507,9 +2513,10 @@ body.in-game #app {
   row-gap: 3px;
   min-height: 84px;
   padding: 14px 16px;
-  border: 2px solid #dfe6d6;
+  border: 2px solid #b9c9a6;
   border-radius: 16px;
-  background: #f7f9f2;
+  background: #fff;
+  box-shadow: 0 2px 0 #1d2f2412;
   color: #1d2f24;
   text-align: left;
   font: inherit;
@@ -2531,13 +2538,20 @@ body.in-game #app {
   border-color: #6e9a4a;
   background: #f0f6e6;
 }
+/* the yard you are in: a filled tint and a tick, clearly "here"; the other one is the button */
 .sy-choice.current,
 .sy-choice[disabled] {
   cursor: default;
-  border-style: dashed;
-  background: #fff;
+  border-color: #8fbf5f;
+  background: #eef6e4;
+  box-shadow: none;
   color: #1d2f24;
   opacity: 1;
+}
+.sy-choice.current small:before {
+  content: '\2713  ';
+  font-weight: 800;
+  color: #3f7a1f;
 }
 .sy-dot {
   width: 11px;
@@ -2580,7 +2594,10 @@ body.in-game #app {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 12px 16px;
-  align-items: start;
+  align-items: end;
+}
+.acct-live form > label {
+  margin: 0;
 }
 .acct-live form .acct-note,
 .acct-live form .actions {
@@ -2590,10 +2607,35 @@ body.in-game #app {
 @media (max-width: 760px) {
   .acct-live form {
     grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .gm-switch-word {
+    display: inline;
   }
   .gm-switch-pop {
     top: 54px;
     left: 8px;
     width: calc(100vw - 16px);
   }
+}
+/* the real yard's "comes next" notes on the Office pages (public/mode.js): one calm line where the simulation's controls are */
+.trk-live-next,
+.notice.live-next,
+.tdh-live-next {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f1f6ea;
+  color: #3f5a33;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.notice.live-next {
+  margin: 16px 0;
+  border: 0;
+}
+.ov-parked {
+  margin: 8px 0 0;
+  color: #3f5a33;
+  line-height: 1.6;
 }
