@@ -20,6 +20,8 @@
     "src/domain/plan.js",
     "src/domain/zonetime.js",
     "src/domain/mode.js",
-    "src/domain/clock.js"
+    "src/domain/clock.js",
+    "src/domain/trips.js",
+    "src/crew-auth.js"
   ]
 }

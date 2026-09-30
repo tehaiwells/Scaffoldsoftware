@@ -12,7 +12,8 @@ import { applyLive } from './domain/live.js';
 /** A row of the append-only ledger. occurred_at: when it happened (created_at: when it was recorded); actor_kind, on_behalf_of and origin
  * say who and what wrote it (ADR 0003). @typedef {{sequence:number,id:string,company_id:string,actor:string,event:string,product_id:string|null,container_id:string|null,quantity:number,source:string|null,destination:string|null,task_id:string|null,request_id:string|null,reason:string,command_key:string,created_at:string,occurred_at:string|null,actor_kind:string,on_behalf_of:string|null,origin:string|null}} LedgerRow */
 /** Who writes the next ledger rows (Simulation.execute sets it for a command; null = the Practice yard's engine).
- * @typedef {{kind:'PERSON'|'ON_BEHALF'|'IMPORT',onBehalfOf:string|null,origin:string}} Provenance */
+ * occurredAt: when a confirmed step really happened (a trip confirmation may be backdated, ADR 0009); unset = now.
+ * @typedef {{kind:'PERSON'|'ON_BEHALF'|'IMPORT',onBehalfOf:string|null,origin:string,occurredAt?:string|null}} Provenance */
 // Kinds effectiveProducts() reads: every add/save/remove of one bumps the company's catalogue revision in the same transaction.
 /** @type {Set<string>} */
 export const CATALOGUE_KINDS = new Set(['product', 'packaging', 'productSettings']);
@@ -201,7 +202,7 @@ export class Repository {
       details.reason ?? event,
       details.key ?? randomUUID(),
       at,
-      at,
+      p?.occurredAt ?? at,
       p?.kind ?? 'ENGINE',
       p?.onBehalfOf ?? null,
       p?.origin ?? 'engine',

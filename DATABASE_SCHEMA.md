@@ -1,6 +1,6 @@
 # Implemented schema and migrations
 
-SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migrations. Version 1 is the preserved baseline in database.js. Ordered migrations 002-007 migrate existing data (006_invitations.sql is additive: memberships.removed_at, invitations, server_settings, server_admins; 007_live_mode.sql is additive: companies.mode and time_zone, the ledger's provenance columns, two guard triggers); schema_migrations records completion.
+SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migrations. Version 1 is the preserved baseline in database.js. Ordered migrations 002-008 migrate existing data (006_invitations.sql is additive: memberships.removed_at, invitations, server_settings, server_admins; 007_live_mode.sql is additive: companies.mode and time_zone, the ledger's provenance columns, two guard triggers; 008_record_reality.sql is additive: the CREW role and trips.confirm permission, the append-only trip_confirmation table (LIVE companies only), crew_links and crew_devices for drivers' phones, and partial expression indexes on objects for containers by place, trips by state/booking/truck, orders by status and holds by order); schema_migrations records completion. Objects of kinds order and trip (ADR 0009) hold a real yard's orders (exact requested lines) and trips (a Today truck booking's run to one site, with its confirmed steps).
 
 | Table | Purpose |
 |---|---|

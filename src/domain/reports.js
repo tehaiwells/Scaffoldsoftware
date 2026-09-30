@@ -1,6 +1,7 @@
 import { cached } from '../database.js';
 import { AppError } from '../service.js';
 import { calendarNow, addDays, mondayOf, localDay } from './schedule.js';
+import { companyMode } from './mode.js';
 // History reports (GET /api/reports?days=30|90): read-only aggregates rebuilt from the append-only ledger, plus deliveries and current contents.
 // The ledger is replayed once per company and then only its new rows (a per-company store keyed by the ledger's max sequence), so a report costs
 // one indexed MAX() when nothing changed and a replay of the new rows otherwise. Built results are cached per period and scope until the next row.
@@ -16,7 +17,9 @@ import { calendarNow, addDays, mondayOf, localDay } from './schedule.js';
 const ADD = new Set(['OPENING_BALANCE', 'PURCHASE']),
   REMOVE = new Set(['STOCK_REMOVED', 'DEMO_PURGED']),
   ADJUST = 'STOCKTAKE_ADJUSTMENT',
-  MOVE = new Set(['PICKUP', 'PLACEMENT', 'REPACK_PICKUP']);
+  MOVE = new Set(['PICKUP', 'PLACEMENT', 'REPACK_PICKUP', 'LOADED', 'DELIVERED', 'COLLECTED', 'RETURNED']);
+// A real yard's confirmed steps (ADR 0009) read as the lifts they stand for: loaded onto a truck, or set down off it.
+const AS_LIFT = { LOADED: 'PLACEMENT', COLLECTED: 'PLACEMENT', DELIVERED: 'PICKUP', RETURNED: 'PICKUP' };
 export const HC_EVENTS = [...ADD, ...REMOVE, ADJUST, ...MOVE]; // CONSOLIDATED and SORTED are left out: they never change where pieces are
 const KEEP_DAYS = 100,
   BATCH = 5000,
@@ -93,7 +96,7 @@ function bump(st, place, n, day) {
 }
 function apply(st, db, company, r) {
   const q = r.quantity,
-    day = dayOf(st, r.created_at),
+    day = dayOf(st, r.occurred_at ?? r.created_at),
     at = (id) => placeOf(st, db, company, id);
   if (ADD.has(r.event)) {
     bump(st, at(r.destination ?? r.container_id), q, day);
@@ -120,10 +123,11 @@ function apply(st, db, company, r) {
     tk = kindOf(st, to);
   // Loaded onto a truck: pieces the truck carried; loaded at a site = pieces sent back from that site. Taken off a truck at a site = delivered there.
   // moved keeps two totals per day, site and product (out = delivered to the site, back = sent back from it), so a same-day delivery and return never cancel out.
-  if (r.event === 'PLACEMENT' && tk === 'truck') {
+  const event = AS_LIFT[r.event] ?? r.event;
+  if (event === 'PLACEMENT' && tk === 'truck') {
     add(inner(st.loads, day), r.destination, q);
     if (fk === 'site') tally(inner(inner(st.moved, day), from), r.product_id).back += q;
-  } else if (r.event === 'PICKUP' && fk === 'truck' && tk === 'site')
+  } else if (event === 'PICKUP' && fk === 'truck' && tk === 'site')
     tally(inner(inner(st.moved, day), to), r.product_id).out += q;
 }
 function sync(db, company, today) {
@@ -134,9 +138,10 @@ function sync(db, company, today) {
   const max = cached(db, 'SELECT MAX(sequence) m FROM ledger WHERE company_id=?').get(company).m ?? 0;
   if (max === st.seq && st.today === today) return st;
   st.loaded = false;
-  const sql = `SELECT sequence,event,product_id,container_id,quantity,source,destination,created_at FROM ledger WHERE company_id=? AND sequence>? AND sequence<=? AND product_id IS NOT NULL AND event IN (${HC_EVENTS.map(() => '?').join(',')}) ORDER BY sequence LIMIT ${BATCH}`;
+  const live = companyMode(db, company) === 'LIVE' ? 1 : 0; // a real yard: only what people recorded
+  const sql = `SELECT sequence,event,product_id,container_id,quantity,source,destination,created_at,occurred_at FROM ledger WHERE company_id=? AND sequence>? AND sequence<=? AND product_id IS NOT NULL AND (?=0 OR actor_kind<>'ENGINE') AND event IN (${HC_EVENTS.map(() => '?').join(',')}) ORDER BY sequence LIMIT ${BATCH}`;
   for (let cursor = st.seq; ;) {
-    const rows = cached(db, sql).all(company, cursor, max, ...HC_EVENTS);
+    const rows = cached(db, sql).all(company, cursor, max, live, ...HC_EVENTS);
     for (const r of rows) apply(st, db, company, r);
     if (rows.length < BATCH) break;
     cursor = rows[rows.length - 1].sequence;

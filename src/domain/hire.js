@@ -3,6 +3,7 @@ import { cached } from '../database.js';
 import { AppError } from '../service.js';
 import { requireRule, integer } from './geometry.js';
 import { localDay, addDays, daysBetween, calendarNow, dayLabel } from './schedule.js';
+import { companyMode } from './mode.js';
 // Hire tracking (GET /api/hire, GET /api/hire.csv, commands hireRate / hireSiteRate). Read-only over the append-only ledger: nothing here moves stock.
 //
 // On hire: a piece is on hire at a client site from the day it arrives there up to, not including, the day it leaves (a same-day delivery and return
@@ -46,7 +47,8 @@ const MAX_DAYS = 400,
 const ADD = new Set(['OPENING_BALANCE', 'PURCHASE']),
   REMOVE = new Set(['STOCK_REMOVED', 'DEMO_PURGED']),
   ADJUST = 'STOCKTAKE_ADJUSTMENT',
-  MOVE = new Set(['PICKUP', 'PLACEMENT', 'REPACK_PICKUP']);
+  // a real yard's confirmed trip steps (ADR 0009) move pieces between places exactly as the simulation's lifts do
+  MOVE = new Set(['PICKUP', 'PLACEMENT', 'REPACK_PICKUP', 'LOADED', 'DELIVERED', 'COLLECTED', 'RETURNED']);
 const EVENTS = [...ADD, ...REMOVE, ADJUST, ...MOVE];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 // Closures that charge a minimum hire: collected (no reason recorded) or still on the truck that loaded them. 'counted', 'removed' and 'transfer' do not.
@@ -398,7 +400,7 @@ function dayOf(st, iso) {
 function apply(st, db, company, r) {
   const q = r.quantity,
     pid = r.product_id,
-    day = dayOf(st, r.created_at),
+    day = dayOf(st, r.occurred_at ?? r.created_at), // when it happened: a confirmed Delivered or Collected may be backdated (ADR 0009)
     at = (id) => placeOf(st, db, company, id),
     site = (p) => (p?.startsWith('site:') ? p.slice(5) : null),
     book = st.book,
@@ -490,9 +492,11 @@ function sync(db, company) {
   const max = cached(db, 'SELECT MAX(sequence) m FROM ledger WHERE company_id=?').get(company).m ?? 0;
   if (max === st.seq) return st;
   st.loaded = false;
-  const sql = `SELECT sequence,event,product_id,container_id,quantity,source,destination,created_at FROM ledger WHERE company_id=? AND sequence>? AND sequence<=? AND product_id IS NOT NULL AND event IN (${EVENTS.map(() => '?').join(',')}) ORDER BY sequence LIMIT ${BATCH}`;
+  // a real yard counts only what people recorded (never ENGINE rows, which its ledger refuses anyway)
+  const live = companyMode(db, company) === 'LIVE' ? 1 : 0;
+  const sql = `SELECT sequence,event,product_id,container_id,quantity,source,destination,created_at,occurred_at FROM ledger WHERE company_id=? AND sequence>? AND sequence<=? AND product_id IS NOT NULL AND (?=0 OR actor_kind<>'ENGINE') AND event IN (${EVENTS.map(() => '?').join(',')}) ORDER BY sequence LIMIT ${BATCH}`;
   for (let cursor = st.seq; ;) {
-    const rows = cached(db, sql).all(company, cursor, max, ...EVENTS);
+    const rows = cached(db, sql).all(company, cursor, max, live, ...EVENTS);
     for (const r of rows) apply(st, db, company, r);
     if (rows.length < BATCH) break;
     cursor = rows[rows.length - 1].sequence;

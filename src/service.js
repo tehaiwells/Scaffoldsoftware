@@ -36,6 +36,11 @@ function passwordHash(password) {
 }
 function matches(password, hash) {
   if (typeof password !== 'string' || password.length > 128) return false;
+  // a sign-in with no password (a driver's phone, crew-auth.js) never matches: the same work is done against a throwaway hash
+  if (typeof hash !== 'string' || !/^[0-9a-f]+:[0-9a-f]+$/.test(hash)) {
+    if (dummyHash) matches(password, dummyHash);
+    return false;
+  }
   const [salt, key] = hash.split(':');
   return timingSafeEqual(scryptSync(password, salt, 64), Buffer.from(key, 'hex'));
 }

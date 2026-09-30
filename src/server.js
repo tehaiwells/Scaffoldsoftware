@@ -12,6 +12,8 @@ import { prepareDatabase } from './relocate.js';
 import { createBackups } from './backups.js';
 import { backupDirectory, backupName, resolveDatabasePath } from './paths.js';
 import { bdRoute, BD_LOGO_BODY } from './domain/brand.js';
+import { crewLink, crewClaim, crewAuthenticate, crewSignOut, crewDevices, crewRevoke, crewReach } from './crew-auth.js';
+import { TRIP_CONFIRM_OPS } from './domain/trips.js';
 
 // Which Host names this server answers (audit D1, F2). A page on any other name (DNS rebinding) gets 421 before anything runs.
 // Always: the loopback names. While Wi-Fi sharing is on (the server listens beyond this PC): this PC's own addresses and name too.
@@ -134,6 +136,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
   }); // the game board
   Object.assign(assets, { '/plan-cal.js': ['plan-cal.js', 'text/javascript'] });
   Object.assign(assets, { '/mode.js': ['mode.js', 'text/javascript'] }); // LIVE or Practice yard: the chip, the switcher, what each shows // the Today calendar's grid and chips (shared with src/domain/today.js)
+  Object.assign(assets, { '/crew-queue.js': ['crew-queue.js', 'text/javascript'] }); // a driver's phone: taps queued with one key each (ADR 0009)
   return async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -211,6 +214,32 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
           'Set-Cookie',
           `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 28800 : 0}${process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''}`,
         );
+      // A driver's phone (ADR 0009, crew-auth.js): its own cookie, good for 180 days, opens /api/crew/* and nothing else.
+      const crewCookie = (token) =>
+        res.setHeader(
+          'Set-Cookie',
+          `crew=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 180 * 86400 : 0}${process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''}`,
+        );
+      if (path.startsWith('/api/crew/') && path !== '/api/crew/claim') {
+        const crewToken = req.headers.cookie
+          ?.split(';')
+          .map((v) => v.trim())
+          .find((v) => v.startsWith('crew='))
+          ?.slice(5);
+        const crewUser = crewAuthenticate(db, crewToken),
+          phone = new Simulation(db, crewUser);
+        if (req.method === 'GET' && path === '/api/crew/me') send(200, phone.crewTrips());
+        else if (req.method === 'POST' && path.startsWith('/api/crew/commands/')) {
+          const action = path.slice('/api/crew/commands/'.length);
+          if (!TRIP_CONFIRM_OPS.includes(action)) throw new AppError(404, 'Unknown command.');
+          send(200, phone.execute(action, body, req.headers['idempotency-key']));
+        } else if (req.method === 'POST' && path === '/api/crew/signout') {
+          crewSignOut(db, crewUser);
+          crewCookie('');
+          send(200, { ok: true });
+        } else throw new AppError(404, 'Not found.');
+        return;
+      }
       if (req.method === 'GET' && path === '/api/systems') {
         send(200, cached(db, 'SELECT * FROM scaffold_systems ORDER BY name').all());
         return;
@@ -222,7 +251,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
       }
       if (
         req.method === 'POST' &&
-        ['/api/register', '/api/login', '/api/invitation', '/api/accept-invite'].includes(path)
+        ['/api/register', '/api/login', '/api/invitation', '/api/accept-invite', '/api/crew/claim'].includes(path)
       ) {
         // Failed attempts only, 10 a minute per address: a correct sign-in is never slowed down.
         const now = Date.now(),
@@ -240,6 +269,12 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
             );
           if (path === '/api/invitation') {
             send(200, service.invitationDetails(body.token));
+            return;
+          }
+          if (path === '/api/crew/claim') {
+            const made = crewClaim(service, body);
+            crewCookie(made.token);
+            send(200, { ok: true, driver: made.driver, company: made.company });
             return;
           }
           cookie(
@@ -291,6 +326,33 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         send(200, simulation.crewDay(new URL(req.url, 'http://localhost').searchParams.get('worker')));
       else if (req.method === 'GET' && path === '/api/hire')
         send(200, simulation.hire(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams)));
+      else if (req.method === 'GET' && path === '/api/trips')
+        send(200, simulation.tripsView({ day: new URL(req.url, 'http://localhost').searchParams.get('day') })); // a real yard's trips and orders (trips.js)
+      else if (req.method === 'GET' && path === '/api/live-items')
+        send(200, simulation.orderItems(new URL(req.url, 'http://localhost').searchParams.get('loc'))); // the LIVE picker: free pieces with the pack size as a hint
+      // A driver's phone link (the office; a real yard): Copy link, Text it (sms:), and whether phones can reach this server at all.
+      else if (req.method === 'POST' && path === '/api/crew-links') {
+        const made = crewLink(service, user, body),
+          link = `${inviteOrigin(req, lan)}/crew#t=${made.token}`,
+          company = cached(db, 'SELECT name FROM companies WHERE id=?').get(user.company_id)?.name ?? 'the office',
+          hosted = extraHosts().includes(
+            String(req.headers.host ?? '')
+              .replace(/:\d+$/, '')
+              .toLowerCase(),
+          ),
+          reach = crewReach({ link, driverName: made.driver.name, company, lan, hosted });
+        send(201, {
+          id: made.id,
+          link,
+          expiresAt: made.expiresAt,
+          driver: made.driver,
+          reachable: reach.reachable,
+          reach: reach.words,
+          text: reach.text,
+          sms: made.driver.mobile ? `sms:${made.driver.mobile}?&body=${encodeURIComponent(reach.text)}` : null,
+        });
+      } else if (req.method === 'GET' && path === '/api/crew-devices') send(200, crewDevices(service, user));
+      else if (req.method === 'POST' && path === '/api/crew-devices/revoke') send(200, crewRevoke(service, user, body));
       else if (req.method === 'GET' && path === '/api/game-items')
         send(200, simulation.gameItemsFor(new URL(req.url, 'http://localhost').searchParams.get('loc'))); // the game board's Send / Bring back slider (src/domain/game.js)
       else if (req.method === 'GET' && path === '/api/hire.csv') {
@@ -408,6 +470,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
       if (!(error instanceof AppError)) console.error(error);
       send(error.status ?? 500, {
         error: error instanceof AppError ? error.message : 'Something went wrong. Please try again.',
+        ...(error instanceof AppError && error.code ? { code: error.code } : {}),
       });
     }
   };

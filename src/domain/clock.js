@@ -112,6 +112,7 @@ export const clockMethods = {
       }
       this.clockRemind(now);
       this.clockPaperwork(now, today);
+      this.clockTrips(now); // trips that should have been confirmed by now are flagged "Not confirmed" (trips.js), never moved on
     });
     return true;
   },
@@ -199,7 +200,7 @@ export const clockMethods = {
             ? name + " couldn't drive"
             : it.driver && m?.status !== 'YES'
               ? name + ' never said yes'
-              : 'nobody recorded that it went';
+              : this.clockTripWhy(it);
       this.clockUnconfirmed(it, now, why);
       return;
     }
@@ -298,7 +299,7 @@ export const clockMethods = {
       return;
     }
     if (this.clockOver(it, now)) {
-      this.clockUnconfirmed(it, now, 'nobody recorded that it was packed and delivered');
+      this.clockUnconfirmed(it, now, this.clockOrderWhy(it));
       return;
     }
     if (it.stage === 'WAITING' && now >= this.clockAt(it.packDay ?? it.day, DAY_START)) {
@@ -313,6 +314,31 @@ export const clockMethods = {
     if (it.status === 'PLANNED' && it.stage !== 'WAITING') it.status = 'ACTIVE';
     it.problem =
       it.stage === 'PACKING' && !it.packer ? 'Nobody was asked to pack it: add a yardsman to the team.' : null;
+  },
+  // What the records say at the end of a truck day that is not done: a trip on the road, or nothing recorded (trips.js confirms).
+  /** @param {any} it */
+  clockTripWhy(it) {
+    const trips = this.tripRows(
+      'trip',
+      "json_extract(data,'$.truckPlan')=? AND json_extract(data,'$.state')<>'CANCELLED'",
+      it.id,
+    );
+    if (trips.some((/** @type {any} */ t) => t.state === 'LOADED')) return 'loaded, not delivered yet';
+    if (trips.some((/** @type {any} */ t) => t.state === 'COLLECTED')) return 'collected, not back yet';
+    if (trips.some((/** @type {any} */ t) => t.state === 'DELIVERED_SHORT'))
+      return 'delivered short, the rest is still on the truck';
+    return 'nobody recorded that it went';
+  },
+  /** @param {any} it */
+  clockOrderWhy(it) {
+    let o = null;
+    try {
+      o = it.order ? this.repo.get(it.order, 'order') : null;
+    } catch {}
+    if (!o) return 'nobody recorded that it was packed and delivered';
+    if (o.status === 'LOADED') return 'loaded, not delivered yet';
+    if (o.status === 'OPEN') return 'no truck was booked for it';
+    return 'nobody recorded that it was loaded and delivered';
   },
   // One reminder for an ask that has had no answer for two hours, while its time is still ahead. In the app only (a text message later).
   /** @param {number} now */

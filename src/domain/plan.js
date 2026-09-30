@@ -1576,6 +1576,8 @@ export const planMethods = {
     for (const l of list) {
       const p = this.effective(l.product);
       requireRule(!p.retired, p.name + ' has been removed from the catalogue.');
+      // a real yard sends exact pieces people load by hand or by forklift as they choose: no weight needed, nothing is snapped (ADR 0009)
+      if (this.live()) continue;
       requireRule(
         gpPerStillage(p, lift) > 0,
         p.name +
@@ -1671,7 +1673,22 @@ export const planMethods = {
       this.planEdit(it.id, (x) => {
         x.packer = who.id;
       });
+    // a real yard: the list is an order that holds exact pieces now, on the chosen truck's trip (trips.js); its day is done when delivered
+    let held = '';
+    if (this.live()) {
+      const made = this.orderMake(
+        'OUT',
+        { site: site.id, lines, neededOn: day, time, note: input.note },
+        { source: 'today', planItem: it.id },
+      );
+      this.planEdit(it.id, (x) => {
+        x.order = made.order.id;
+      });
+      if (tp) this.tripBook({ orders: [made.order.id], truckPlan: tp.id });
+      held = ' ' + made.order.label + ': ' + made.heldWords;
+    }
     this.planStep(it.id);
+    if (this.live()) return this.planReply(it, 'List for ' + site.name + ' on ' + dayLabel(day) + ' planned.' + held);
     return this.planReply(
       it,
       'List for ' +
@@ -2005,6 +2022,7 @@ export const planMethods = {
         changed: false,
       };
     // a real yard's day that ended "Not confirmed" (clock.js) can move to a new day: it starts again, asks and all
+    if (this.live()) this.planLiveMoveCheck(it); // a real yard: refused once its order or a trip has left (in its own words)
     const unconfirmed = it.stage === 'UNCONFIRMED';
     if (unconfirmed) requireRule(day !== it.day, 'That day is over. Pick a new day for it.');
     if (it.type === 'TRUCK')
@@ -2107,9 +2125,13 @@ export const planMethods = {
     if (it.type === 'TRUCK' && moved)
       this.planUnlinkTruck(
         it.id,
-        this.planWhat(it) + ' moved to ' + dayLabel(day) + ', so this list goes on the next free truck.',
+        this.planWhat(it) +
+          ' moved to ' +
+          dayLabel(day) +
+          (this.live() ? ', so this list needs a truck again.' : ', so this list goes on the next free truck.'),
         now,
       );
+    if (this.live()) this.planLiveMoved(this.repo.get(it.id, 'planItem'), { moved, lines, tp });
     this.planStep(it.id);
     return {
       ...this.planReply(
@@ -2141,12 +2163,14 @@ export const planMethods = {
       PLAN_FIXABLE.includes(it.status),
       'This is already ' + (it.status === 'DONE' ? 'done' : 'cancelled') + '.',
     );
+    if (this.live()) this.planLiveMoveCheck(it); // a real yard: refused once its order or a trip has left (in its own words)
     requireRule(
       !(it.type === 'MATERIALS' && ['LOADING', 'ON_THE_WAY'].includes(it.stage)),
       'The truck is already loading this list. Bring it back from the yard board instead.',
     );
     const reason = note(input.reason),
       what = this.planWhat(it);
+    if (this.live()) this.planLiveCancel(it, reason);
     this.planEdit(it.id, (x) => {
       this.planRelease(x, now);
       this.planCallOffAll(x, 'Cancelled by the office', now);
@@ -2161,11 +2185,90 @@ export const planMethods = {
       this.planLog(x, 'Cancelled by ' + this.user.name + '.', now);
     });
     if (it.type === 'TRUCK')
-      this.planUnlinkTruck(it.id, what + ' was cancelled, so this list goes on the next free truck.', now);
+      this.planUnlinkTruck(
+        it.id,
+        what +
+          (this.live()
+            ? ' was cancelled, so this list needs a truck again.'
+            : ' was cancelled, so this list goes on the next free truck.'),
+        now,
+      );
     return this.planReply(
       it,
       'Cancelled: ' + what.charAt(0).toLowerCase() + what.slice(1) + ' on ' + dayLabel(it.day) + '.',
     );
+  },
+  // ----- a real yard's lists and truck bookings carry orders and trips (trips.js): they change with them, never once something has left -----
+  planLiveTrips(it) {
+    return this.tripRows(
+      'trip',
+      "json_extract(data,'$.truckPlan')=? AND json_extract(data,'$.state')<>'CANCELLED'",
+      it.id,
+    );
+  },
+  planLiveOrder(it) {
+    if (it.type !== 'MATERIALS' || !it.order) return null;
+    try {
+      return this.repo.get(it.order, 'order');
+    } catch {
+      return null;
+    }
+  },
+  planLiveMoveCheck(it) {
+    const o = this.planLiveOrder(it);
+    if (o)
+      requireRule(['OPEN', 'BOOKED'].includes(o.status), 'It has already left the yard. Confirm the trip instead.');
+    if (it.type === 'TRUCK')
+      requireRule(
+        this.planLiveTrips(it).every((t) => ['BOOKED', 'PACKED'].includes(t.state)),
+        'A trip on this truck has already left. Confirm it instead.',
+      );
+  },
+  planLiveCancel(it, reason) {
+    this.planLiveMoveCheck(it);
+    const o = this.planLiveOrder(it);
+    if (o && o.status !== 'CANCELLED') this.orderCancel({ id: o.id, reason, fromPlan: true });
+    if (it.type === 'TRUCK')
+      for (const t of this.planLiveTrips(it))
+        this.tripCancel({ id: t.id, reason: reason ?? 'The truck booking was cancelled' });
+  },
+  // After a move: a list's order takes the new day (and lines, and truck); a truck booking that changed day lets its trips go (their orders
+  // wait for a truck again, still held).
+  planLiveMoved(it, { moved, lines, tp }) {
+    const now = this.planNow();
+    if (it.type === 'TRUCK' && moved)
+      for (const t of this.planLiveTrips(it))
+        this.tripCancel({ id: t.id, reason: 'The truck booking moved to ' + dayLabel(it.day) });
+    const o = this.planLiveOrder(it);
+    if (!o) return;
+    const leave = o.trip && (moved || tp !== undefined);
+    if (leave) {
+      this.tripDropOrder(o.trip, o.id, 'The list moved.');
+      o.trip = null;
+      o.status = 'OPEN';
+    }
+    o.neededOn = it.day;
+    o.time = it.time;
+    if (lines) {
+      this.orderRelease(o.id);
+      o.lines = lines.map((l) => {
+        const p = this.effective(l.product);
+        return {
+          product: p.id,
+          requested: l.quantity,
+          loaded: 0,
+          delivered: 0,
+          collected: 0,
+          returned: 0,
+          pack: p.packQuantity ?? null,
+        };
+      });
+    }
+    this.repo.save(o);
+    if (lines) this.orderHold(this.repo.get(o.id, 'order'));
+    const truck = tp === undefined ? null : tp;
+    if (truck && (leave || !o.trip)) this.tripBook({ orders: [o.id], truckPlan: truck.id });
+    this.planEdit(it.id, (x) => this.planLog(x, 'Its order ' + this.orderLabel(o) + ' follows.', now));
   },
   planAsk(input) {
     const it = this.planItemFor(input?.item),

@@ -14,3 +14,4 @@ writing a new record that supersedes it, never by editing an accepted one.
 | [0006](0006-demo-and-live-test-suites.md) | The ticking tests stay as the DEMO suite; LIVE gets a suite that never ticks | Accepted |
 | [0007](0007-split-operations-by-page.md) | Split operations.js by page as pages are touched; no PostgreSQL, microservices or SSE now | Accepted |
 | [0008](0008-live-foundation.md) | The LIVE foundation as built: the allow-list wall, the business clock on company time, ledger provenance, "Start your real yard" | Accepted |
+| [0009](0009-record-reality.md) | Record what really happened: orders with exact pieces, trips confirmed by people (the driver's phone or the office for them), stock moving only on a confirmation | Accepted |

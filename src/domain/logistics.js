@@ -76,9 +76,17 @@ export const logisticsMethods = {
     const changed = supervisor !== (site.supervisor ?? null),
       renamed = label(input.name ?? site.name) !== site.name;
     if (renamed) site.shapeRev = (site.shapeRev ?? 0) + 1;
+    // a real yard's usual trip minutes to this site (the LIVE board's "usually ~N min"; empty: learnt from confirmed trips, ADR 0009)
+    if (input.plannedMinutes !== undefined)
+      site.plannedMinutes =
+        input.plannedMinutes === null || input.plannedMinutes === ''
+          ? null
+          : integer(input.plannedMinutes, 'Usual trip time (minutes)', 1, 600);
     Object.assign(site, {
       name: label(input.name ?? site.name),
-      address: label(input.address ?? site.address, 'Address'),
+      // a real yard's site may have no address yet (never the demo placeholder): it stays empty until someone types one
+      address:
+        this.live() && (input.address ?? site.address) == null ? null : label(input.address ?? site.address, 'Address'),
       ...this.siteDetailFields({ ...site, ...input }),
       supervisor,
     });
@@ -606,7 +614,8 @@ export const logisticsMethods = {
     requireRule(truck.status === 'AT_YARD', 'Truck must be at the yard.');
     this.assertTruckTrip(truck, request.site);
     const product = this.effective(request.product);
-    requireRule(product.packQuantity !== null, 'Full-pack quantity has not been configured.');
+    // the Practice yard's whole-pack allocation; a real yard's orders pick exact pieces with no pack size needed (trips.js, ADR 0009)
+    requireRule(this.live() || product.packQuantity !== null, 'Full-pack quantity has not been configured.');
     const planHeld = new Set(
       this.repo
         .all('reservation')

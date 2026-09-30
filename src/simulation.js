@@ -31,6 +31,7 @@ import { paperworkMethods } from './domain/paperwork.js';
 import { todayMethods } from './domain/today.js';
 import { clockMethods } from './domain/clock.js';
 import { companyMode, LIVE_OPS, IMPORT_OPS, COMING_NEXT } from './domain/mode.js';
+import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS } from './domain/trips.js';
 const operational = [
   'rotate',
   'loadTruck',
@@ -130,7 +131,13 @@ export class Simulation {
       this.auth.require(this.user, 'requests.create'); // the site (or operations.manage for company-wide) is checked in paperwork.js
     else if (['hireRate', 'hireSiteRate'].includes(action)) {
       if (!this.auth.permissions(this.user).includes('finance.view')) this.auth.require(this.user, 'company.manage');
-    } else throw new AppError(404, 'Unknown command.');
+    }
+    // Record what really happened (ADR 0009, src/domain/trips.js): orders by anyone who may request (a supervisor for their own sites),
+    // booking and packing by the office, the four confirmations by the trip's own driver or the office for them (checked in trips.js).
+    else if (ORDER_OPS.includes(action)) this.auth.require(this.user, 'requests.create');
+    else if (TRIP_OFFICE_OPS.includes(action)) this.auth.require(this.user, 'operations.manage');
+    else if (TRIP_CONFIRM_OPS.includes(action)) this.auth.require(this.user, 'trips.confirm');
+    else throw new AppError(404, 'Unknown command.');
     // The hard wall (ADR 0001): a real yard takes only the commands that record what people did (mode.js LIVE_OPS).
     if (this.live() && !LIVE_OPS.has(action)) throw new AppError(409, COMING_NEXT);
     const fingerprint = createHash('sha256')
@@ -416,6 +423,8 @@ export class Simulation {
     });
     this.scheduleSnapshot(result, cal, allTrucks, products);
     this.planSnapshot(result); // result.plan: the Today planner's revision and today's counts
+    // a real yard's board: trucks by their last confirmed step, the replay queue, pieces per site (ADR 0009, trips.js liveBoard)
+    if (this.live()) result.liveBoard = this.liveBoard({ visibleSite: (id) => operations || siteIds.has(id) });
     result.alerts = this.alertsView(result, { allContainers, allBalances, operations, cal });
     this.rtAlerts(result);
     // What is stacked on each stillage of this page (the whole pile above it, nearest first) with any live movement, so the page can offer
@@ -669,6 +678,7 @@ Object.assign(
   paperworkMethods,
   todayMethods,
   clockMethods,
+  tripMethods,
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 installGame(Simulation.prototype); // the game board: one-tap commands, the truck autopilot after every tick, result.game

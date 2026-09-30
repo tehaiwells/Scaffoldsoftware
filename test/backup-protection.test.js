@@ -59,16 +59,16 @@ const companies = (path) => {
     db.close();
   }
 };
-// A database one migration behind: made now, then the newest migration (7, LIVE mode and provenance) undone by dropping what it added, so it
-// runs again cleanly.
+// A database one migration behind: made now, then the newest migration (8, trips and a driver's phone) undone by dropping what it added, so it
+// runs again cleanly (the roles and permissions it adds are kept: it adds them only if missing).
 function olderDatabase(dir) {
   const path = join(dir, 'live', 'scaffold.sqlite');
   const db = openDatabase(path, { backupDirectory: null });
   new Service(db).register(owner);
   db.exec(
-    'DROP TRIGGER companies_mode_fixed;DROP TRIGGER ledger_live_people_only;ALTER TABLE companies DROP COLUMN mode;ALTER TABLE companies DROP COLUMN time_zone;' +
-      'ALTER TABLE ledger DROP COLUMN occurred_at;ALTER TABLE ledger DROP COLUMN actor_kind;ALTER TABLE ledger DROP COLUMN on_behalf_of;ALTER TABLE ledger DROP COLUMN origin;' +
-      'DELETE FROM schema_migrations WHERE version=7',
+    'DROP TRIGGER trip_confirmation_no_update;DROP TRIGGER trip_confirmation_no_delete;DROP TRIGGER trip_confirmation_live_only;DROP TABLE crew_devices;DROP TABLE crew_links;DROP TABLE trip_confirmation;' +
+      'DROP INDEX objects_container_place;DROP INDEX objects_container_support;DROP INDEX objects_trip_state;DROP INDEX objects_trip_plan;DROP INDEX objects_trip_truck;DROP INDEX objects_order_status;DROP INDEX objects_hold_order;' +
+      'DELETE FROM schema_migrations WHERE version=8',
   );
   db.close();
   return path;
@@ -78,14 +78,14 @@ test('before a start-up migration changes an existing database, a checked copy o
   const dir = temp(),
     path = olderDatabase(dir),
     backups = join(dir, 'backups');
-  assert.equal(version(path), 6);
+  assert.equal(version(path), 7);
   const db = openDatabase(path, { backupDirectory: backups, backupName: 'scaffold' });
   db.close();
-  assert.equal(version(path), 7, 'the migration ran');
+  assert.equal(version(path), 8, 'the migration ran');
   const saved = readdirSync(backups);
   assert.equal(saved.length, 1, 'one copy');
-  assert.match(saved[0], /^scaffold-before-update-v6-to-v7-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/);
-  assert.equal(version(join(backups, saved[0])), 6, 'the copy is the database before the update');
+  assert.match(saved[0], /^scaffold-before-update-v7-to-v8-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/);
+  assert.equal(version(join(backups, saved[0])), 7, 'the copy is the database before the update');
   assert.equal(companies(join(backups, saved[0])), 1, 'with the data in it');
 });
 
@@ -111,7 +111,7 @@ test('if the copy cannot be saved, the migration does not run and the database i
     () => openDatabase(path, { backupDirectory: blocked }),
     /Could not save a copy of the database before updating it/,
   );
-  assert.equal(version(path), 6, 'not migrated');
+  assert.equal(version(path), 7, 'not migrated');
 });
 
 test('encrypted copy: AES-256-GCM with a key only the passphrase unlocks; the passphrase is never stored; tampering and a wrong passphrase are refused', () => {

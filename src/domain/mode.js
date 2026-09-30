@@ -11,7 +11,7 @@ import { cached } from '../database.js';
 export function companyMode(db, company) {
   return cached(db, 'SELECT mode FROM companies WHERE id=?').get(company)?.mode === 'LIVE' ? 'LIVE' : 'DEMO';
 }
-// What a real yard can do today: keep its records (catalogue, stock received, removed, opening stock and counts, stillages, sites, trucks and
+// What a real yard can do: keep its records (catalogue, stock received, removed, opening stock and counts, stillages, sites, trucks and
 // people as records, paperwork, hire rates, company details) and plan its days on Today, where the clock sends the asks. Everything that
 // moves stock, drives a truck, runs the crew or answers for people is the simulation's, and stays in the Practice yard.
 export const LIVE_OPS = new Set([
@@ -76,6 +76,17 @@ export const LIVE_OPS = new Set([
   'bdSaveDetails',
   'bdSaveLogo',
   'bdRemoveLogo',
+  // Part 2 (ADR 0009): what really happened. Orders hold exact pieces; stock changes place only when a person confirms a step of a trip.
+  'orderCreate',
+  'bringBackCreate',
+  'orderCancel',
+  'tripBook',
+  'tripCancel',
+  'packConfirmed',
+  'tripLoaded',
+  'tripDelivered',
+  'tripCollected',
+  'tripReturned',
 ]);
 // Commands whose stock rows are brought in from before the app (opening balances): provenance IMPORT, still with the person who entered them.
 export const IMPORT_OPS = new Set(['opening']);
