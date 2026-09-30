@@ -145,7 +145,25 @@ test("booking a truck: a time is asked (7:00 am first, an hour after the truck's
   const trips = f.sim.tripsView({ day }).trips;
   assert.equal(glSuggestTime(trips, f.truck.id, day, D0), '09:30');
   assert.equal(loSuggestTime(trips, f.truck.id, day, D0), '09:30');
-  assert.equal(glSuggestTime([], f.truck.id, D0, D0, f.at(D0, '09:10')), '09:30', 'today: never a time already gone');
+  // today: never a time already gone. The clock is the company's ('HH:MM' from the server), never the browser's, which may sit in another zone
+  assert.equal(glSuggestTime([], f.truck.id, D0, D0, '09:10'), '09:30', 'today: never a time already gone');
+  assert.equal(loSuggestTime([], f.truck.id, D0, D0, '16:50'), '17:00');
+  assert.equal(
+    glSuggestTime([], f.truck.id, D0, D0, '18:20'),
+    '17:00',
+    'after the last time: the last time (the day is over: tomorrow is offered)',
+  );
+  // the server sends the company's clock with the trips and the board, so a UTC browser (a GitHub runner, a hosted server) books the right day
+  f.clock(D0, '18:20');
+  const tv = f.sim.tripsView({ day: D0 });
+  assert.equal(tv.now, '18:20');
+  assert.equal(tv.dayOver, true, 'after 5 pm company time the day is over');
+  const lb = f.sim.snapshot(0, { lean: true }).liveBoard;
+  assert.equal(lb.hm, '18:20');
+  assert.equal(lb.dayOver, true);
+  f.clock(D0, '09:10');
+  assert.equal(f.sim.tripsView({ day: D0 }).dayOver, false);
+  assert.equal(f.sim.snapshot(0, { lean: true }).liveBoard.dayOver, false);
   const s = f.sim.snapshot(0, { lean: true });
   const team = f.sim.teamView ? f.sim.teamView() : { people: [{ id: f.team.Dave.id, name: 'Dave', kind: 'driver' }] };
   const o = f.cmd('bringBackCreate', { site: f.site.id, lines: [{ product: f.product.id, quantity: 1 }] }).order;
@@ -156,6 +174,20 @@ test("booking a truck: a time is asked (7:00 am first, an hour after the truck's
   assert.match(html, /B-1 from Bondi/);
   const send = f.cmd('orderCreate', { site: f.site.id, lines: [{ product: f.product.id, quantity: 1 }] }).order;
   assert.match(glBookHTML({ order: send }, s, team, D0), /Loaded &amp; left and Delivered/);
+  // the day the form starts on follows the company's clock the server sends (liveBoard.dayOver), whatever zone the browser is in
+  const over = { ...s, liveBoard: { ...(s.liveBoard ?? {}), today: D0, hm: '18:20', dayOver: true } },
+    early = { ...s, liveBoard: { ...(s.liveBoard ?? {}), today: D0, hm: '09:10', dayOver: false } };
+  assert.match(
+    glBookHTML({ order: send }, over, team, D0),
+    new RegExp('value="' + addDays(D0, 1) + '"[^>]*checked'),
+    'day over: tomorrow',
+  );
+  assert.match(
+    glBookHTML({ order: send }, early, team, D0),
+    new RegExp('value="' + D0 + '"[^>]*checked'),
+    'day not over: today',
+  );
+  assert.match(glBookHTML({ order: send }, early, team, D0), /Today: too late|Today/);
   __lo.reset();
   Object.assign(__lo.state, {
     host: { state: () => s },

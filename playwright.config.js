@@ -38,6 +38,10 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL: base,
+    // PW_LOCALE=en-US runs the browser as a US-English machine (GitHub runners are): the times the app shows must not change.
+    ...(process.env.PW_LOCALE ? { locale: process.env.PW_LOCALE } : {}),
+    // PW_TIMEZONE=UTC runs the browser on a UTC clock (GitHub runners are); TZ=UTC does the same for the test server.
+    ...(process.env.PW_TIMEZONE ? { timezoneId: process.env.PW_TIMEZONE } : {}),
     headless: true,
     viewport: { width: 1280, height: 900 },
     screenshot: 'only-on-failure',

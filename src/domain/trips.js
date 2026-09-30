@@ -940,6 +940,8 @@ export const tripMethods = {
     return {
       day: d,
       today: cal.today,
+      now: this.tripHm(this.planNow()), // the company's clock, for the Office booking form
+      dayOver: this.planNow() >= this.planAt(cal.today, DAY_END),
       openFrom: iso(this.tripOpenFrom(this.planNow())),
       trips,
       upcoming,
@@ -2112,7 +2114,16 @@ export const tripMethods = {
       sites[r.loc].pieces += r.q;
       sites[r.loc].lines.push({ product: r.product, name: this.planName(r.product, 'Material'), quantity: r.q });
     }
-    return { now: iso(now), today, trucks, replays, sites }; // today: the company's day (the board's Book form)
+    // today, hm and dayOver: the company's own day and clock (the board's Book form never reads the browser's clock, which may be in another zone)
+    return {
+      now: iso(now),
+      today,
+      hm: this.tripHm(now),
+      dayOver: now >= this.planAt(today, DAY_END),
+      trucks,
+      replays,
+      sites,
+    };
   },
   // ---------- a driver's phone ----------
   // My trips: today's and tomorrow's (the run sheet), and earlier ones still waiting for a confirmation. Only the signed-in driver's own.

@@ -30,6 +30,7 @@ export const glTimeWords = (t) => {
  * @param {any[]|null} trips that day's trips (GET /api/trips?day=) @param {string} truck @param {string} day @param {string} today @param {number} [now]
  */
 export function glSuggestTime(trips, truck, day, today, now = Date.now()) {
+  // now: the company's clock as 'HH:MM' (liveBoard.hm); a number is the browser's clock and only right in the company's own zone
   const last = (trips ?? [])
     .filter((t) => t.truck === truck && t.day === day && t.state !== 'CANCELLED')
     .map((t) => t.time)
@@ -41,8 +42,7 @@ export function glSuggestTime(trips, truck, day, today, now = Date.now()) {
     want = String(Math.min(23, h + 1)).padStart(2, '0') + ':' + String(m).padStart(2, '0');
   }
   if (day === today) {
-    const d = new Date(now),
-      hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const hm = typeof now === 'string' ? now : glHm(now);
     if (want <= hm) want = hm;
   }
   return GL_TIMES.find((t) => t >= want) ?? GL_TIMES.at(-1);
@@ -150,6 +150,11 @@ export function glTruckWord(s, t) {
 }
 // ---------------------------------------------------------------- after Send / Bring back: a truck and a driver
 /** The day after a 'YYYY-MM-DD' day. @param {string} day */
+/** The browser's clock as 'HH:MM' (only right when the browser sits in the company's zone). @param {number} ms */
+const glHm = (ms) => {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+};
 export const glTomorrow = (day) => {
   const d = new Date((day ?? '2000-01-01') + 'T12:00:00Z');
   d.setUTCDate(d.getUTCDate() + 1);
@@ -163,12 +168,14 @@ export function glBookHTML(w, s, team, today) {
   const tomorrow = glTomorrow(today);
   const opt = (v, words, sel) =>
     '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(words) + '</option>';
-  // Today's truck bookings close at 5 pm (Today's rule): after that the booking starts on tomorrow
-  const late = typeof Date === 'function' && new Date().getHours() >= 17,
+  // Today's truck bookings close at 5 pm (Today's rule): after that the booking starts on tomorrow. The server says whether the company's
+  // day is over (liveBoard.dayOver) and what its clock reads (liveBoard.hm); the browser's own clock may be in another zone.
+  const late = s?.liveBoard?.dayOver ?? (typeof Date === 'function' && new Date().getHours() >= 17),
+    nowHm = s?.liveBoard?.hm ?? Date.now(),
     day = w.day ?? (late ? tomorrow : today),
     truck = w.truck ?? trucks[0]?.id ?? null,
     // the time: as picked, else the truck's next free hour that day (07:00 for its first trip)
-    time = w.time ?? glSuggestTime(w.trips?.[day] ?? null, truck, day, today);
+    time = w.time ?? glSuggestTime(w.trips?.[day] ?? null, truck, day, today, nowHm);
   let body;
   if (!trucks.length)
     body =

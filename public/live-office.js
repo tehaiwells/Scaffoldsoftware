@@ -69,6 +69,7 @@ export const loTimeWords = (t) => {
  * @param {any[]} trips the day's trips (GET /api/trips) @param {string|null} truck @param {string} day @param {string} today @param {number} [now]
  */
 export function loSuggestTime(trips, truck, day, today, now = Date.now()) {
+  // now: the company's clock as 'HH:MM' (GET /api/trips .now); a number is the browser's clock, only right in the company's own zone
   const mine = (trips ?? [])
     .filter((t) => t.truck === truck && t.day === day && t.state !== 'CANCELLED')
     .map((t) => t.time);
@@ -79,12 +80,21 @@ export function loSuggestTime(trips, truck, day, today, now = Date.now()) {
     want = String(Math.min(23, h + 1)).padStart(2, '0') + ':' + String(m).padStart(2, '0');
   }
   if (day === today) {
-    const d = new Date(now),
+    let hm = now;
+    if (typeof now !== 'string') {
+      const d = new Date(now);
       hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
     if (want <= hm) want = hm;
   }
   return LO_TIMES.find((t) => t >= want) ?? LO_TIMES.at(-1);
 }
+/** The day after a 'YYYY-MM-DD' day. @param {string} day */
+const loTomorrow = (day) => {
+  const [y, m, d] = day.split('-').map(Number),
+    n = new Date(Date.UTC(y, m - 1, d + 1));
+  return n.toISOString().slice(0, 10);
+};
 const localInput = (ms) => {
   const d = new Date(ms),
     p = (n) => String(n).padStart(2, '0');
@@ -649,9 +659,18 @@ function onClick(e) {
     LO.book.truck = (s.trucks ?? []).find((t) => !t.retired && !t.hired)?.id ?? null;
     LO.book.driver = (loTeam()?.people ?? []).find((p) => p.kind === 'driver')?.id ?? null;
     const o = orderById(d.loBook);
-    const today = [...LO.days.values()].find((v) => v.data)?.data?.today;
-    LO.book.day = o?.neededOn && today && o.neededOn > today ? o.neededOn : (today ?? null);
-    LO.book.time = loSuggestTime(loDay(LO.book.day)?.trips, LO.book.truck, LO.book.day, today);
+    // the company's day and clock come from the server; after 5 pm company time the booking starts on tomorrow
+    const known = [...LO.days.values()].find((v) => v.data)?.data,
+      today = known?.today,
+      first = known?.dayOver && today ? loTomorrow(today) : today;
+    LO.book.day = o?.neededOn && today && o.neededOn > today ? o.neededOn : (first ?? null);
+    LO.book.time = loSuggestTime(
+      loDay(LO.book.day)?.trips,
+      LO.book.truck,
+      LO.book.day,
+      today,
+      known?.now ?? Date.now(),
+    );
     LO.host.redraw();
     return;
   }
@@ -726,8 +745,14 @@ function onInput(e) {
     LO.book[t.dataset.loB] = t.value;
     // a new truck or day: the time moves to that truck's next free hour (a time picked by hand stays)
     if ((t.dataset.loB === 'truck' || t.dataset.loB === 'day') && e.type === 'change' && !LO.book.timeSet) {
-      const today = [...LO.days.values()].find((v) => v.data)?.data?.today;
-      LO.book.time = loSuggestTime(loDay(LO.book.day)?.trips, LO.book.truck, LO.book.day, today);
+      const known = [...LO.days.values()].find((v) => v.data)?.data;
+      LO.book.time = loSuggestTime(
+        loDay(LO.book.day)?.trips,
+        LO.book.truck,
+        LO.book.day,
+        known?.today,
+        known?.now ?? Date.now(),
+      );
       LO.host.redraw();
     }
     if (t.dataset.loB === 'time') LO.book.timeSet = true;
