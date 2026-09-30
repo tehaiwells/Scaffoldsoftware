@@ -27738,6 +27738,29 @@ button.cw-panel-btn .cw-glyph {
 .wm-truck.followed .wm-tsvg {
   filter: drop-shadow(0 0 5px #e9ff8a);
 }
+/* a real yard: a truck on the road is an estimate from its confirmed "Loaded & left" (ADR 0009), drawn apart from a confirmed place:
+   a dashed tag in italics and a slightly see-through truck; amber once it is late (usual minutes + 30) or not confirmed */
+.wm-truck.is-estimate .wm-ttag {
+  border-style: dashed;
+  background: #2b3a33e6;
+  color: #fff;
+  font-style: italic;
+}
+/* followed while on the road: still the estimate's dark tag, so its light words stay readable (not the lime of a followed parked truck) */
+.wm-truck.is-estimate.followed .wm-ttag {
+  background: #1f3a2c;
+  color: #e9ff8a;
+  border-color: #e9ff8a;
+}
+.wm-truck.is-estimate .wm-tsvg {
+  opacity: 0.78;
+}
+.wm-truck.is-late .wm-ttag,
+.wm-truck.is-estimate.is-late .wm-ttag {
+  background: #ffb13b;
+  color: #2e1a00;
+  border-color: #b86a00 !important;
+}
 .wm-tlayer.wm-far .wm-truck.parked:not(.followed) .wm-ttag {
   display: none;
 }
@@ -30837,5 +30860,454 @@ body.tdh-sheet-open {
 @media (max-width: 750px) {
   .page-today .tdh-missed li {
     flex-wrap: wrap;
+  }
+}
+/* ---- A real yard's trips in the Office (public/live-office.js): the trip card with its docket and steps, confirming for a driver,
+   booking a truck for an order, and a driver's phone link ---- */
+.lo-trips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lo-trip {
+  --lo-c: #6f8a9c;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fbfaf5;
+  border: 1px solid #e6e0cf;
+  color: #16382c;
+}
+.lo-trip.tone-road {
+  --lo-c: #d59a12;
+}
+.lo-trip.tone-done {
+  --lo-c: #2f7d4a;
+}
+.lo-trip.tone-short,
+.lo-trip.tone-late {
+  --lo-c: #e07b12;
+  background: #fff8ec;
+  border-color: #efd29a;
+}
+.lo-trip.tone-off {
+  opacity: 0.6;
+}
+.lo-trip.is-open {
+  border-color: #9cc25a;
+  box-shadow: 0 0 0 2px #d2ea8388;
+}
+.lo-trip-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lo-trip-top b {
+  font-size: 14.5px;
+}
+.lo-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--lo-c, #6f8a9c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lo-c, #6f8a9c) 22%, transparent);
+}
+.lo-dot.ok {
+  --lo-c: #2f7d4a;
+}
+.lo-pill {
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lo-c) 16%, #fff);
+  color: #1f3a2d;
+  font-size: 12.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.lo-who {
+  margin: 0;
+  font-size: 13px;
+  color: #5b7466;
+}
+.lo-docket {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.lo-docket th,
+.lo-docket td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #ece7da;
+  text-align: right;
+}
+.lo-docket th[scope='row'],
+.lo-docket thead th:first-child {
+  text-align: left;
+  font-weight: 650;
+}
+.lo-docket thead th {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7f72;
+  font-weight: 800;
+}
+.lo-docket th small {
+  display: block;
+  color: #9a5b00;
+  font-weight: 700;
+}
+.lo-docket td.off {
+  color: #9a5b00;
+  font-weight: 800;
+  background: #fff2d6;
+}
+.lo-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13.5px;
+}
+.lo-steps li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.lo-steps small {
+  color: #6b7f72;
+}
+.lo-tick {
+  color: #2f7d4a;
+  font-weight: 900;
+}
+.lo-acts,
+.lo-form-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.lo-btn {
+  min-height: 42px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: #16382c;
+  color: #fff;
+  border: 1px solid #16382c;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lo-btn:hover {
+  background: #1f4d3c;
+}
+.lo-btn.soft {
+  background: #f1f4ec;
+  color: #2f4f3d;
+  border-color: #d5dfcc;
+}
+.lo-btn:disabled {
+  opacity: 0.5;
+}
+.lo-go {
+  min-height: 46px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(#cdf77a, #a9e03c);
+  color: #16382c;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 2px 0 #5d8a14;
+}
+.lo-go:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+}
+.lo-link {
+  min-height: 40px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: #4d6557;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  box-shadow: none;
+}
+.lo-link:hover {
+  background: none;
+  color: #16382c;
+}
+.lo-quiet {
+  margin: 0;
+  color: #5b7466;
+  font-size: 13.5px;
+}
+.lo-warn,
+.lo-err {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #fff2d6;
+  color: #7a4800;
+  font-size: 13px;
+  font-weight: 700;
+}
+.lo-err {
+  background: #fdece8;
+  color: #8c2a17;
+}
+.lo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 11px;
+  background: #f4f2ea;
+  border: 1px solid #e3ddcc;
+}
+.lo-form-title {
+  margin: 0;
+  font-weight: 850;
+  font-size: 14.5px;
+}
+.lo-form-title small {
+  font-weight: 650;
+  color: #5b7466;
+}
+.lo-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lo-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  font-size: 13.5px;
+}
+.lo-line.changed span {
+  color: #7a4800;
+  font-weight: 800;
+}
+.lo-line input {
+  width: 96px;
+  min-height: 40px;
+  margin: 0;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 800;
+}
+.lo-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.lo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 750;
+  color: #3d5446;
+}
+.lo-field input,
+.lo-field select {
+  min-height: 42px;
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14.5px;
+}
+.lo-when {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: 13.5px;
+}
+.lo-when legend {
+  float: left;
+  margin-right: 6px;
+  font-weight: 800;
+}
+.lo-when > label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+/* the two "When" choices are plain radio buttons, never stretched like the text boxes */
+.lo-when > label input[type='radio'] {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  flex: none;
+}
+.lo-earlier {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+.lo-earlier[hidden] {
+  display: none;
+}
+.lo-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: #5b7466;
+}
+.lo-order-line {
+  margin: 0;
+  font-size: 13.5px;
+  color: #2f4f3d;
+}
+.lo-waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff8ec;
+  border: 1px dashed #e3b865;
+}
+.lo-waiting-h {
+  margin: 0;
+  font-weight: 850;
+  font-size: 13.5px;
+  color: #7a4800;
+}
+.lo-wait-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.lo-wait-t {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+}
+.lo-wait-t small {
+  color: #5b7466;
+  font-size: 12.5px;
+}
+.lo-wait-acts {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.lo-wait-row .lo-form {
+  flex-basis: 100%;
+}
+.tm-team .tm-phone-row {
+  list-style: none;
+  margin: -4px 0 4px 48px;
+}
+.lo-phone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lo-phone-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.lo-phone-state {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: #5b7466;
+}
+.lo-reach {
+  margin: 0;
+  font-size: 12.5px;
+  color: #5b7466;
+}
+.lo-reach.warn {
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #fff2d6;
+  color: #7a4800;
+  font-weight: 700;
+}
+.lo-link-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 11px;
+  background: #f4f2ea;
+  border: 1px solid #e3ddcc;
+}
+.lo-link-h {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.lo-link-url {
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  box-sizing: border-box;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+}
+.lo-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.lo-devices li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+.lo-devices small {
+  color: #6b7f72;
+}
+@media (max-width: 560px) {
+  .lo-pill {
+    margin-left: 0;
+  }
+  .tm-team .tm-phone-row {
+    margin-left: 0;
   }
 }

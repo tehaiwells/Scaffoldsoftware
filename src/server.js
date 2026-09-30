@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { hostname as osHostname, networkInterfaces } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { openDatabase, cached } from './database.js';
+import { openDatabase, cached, atomic } from './database.js';
 import { Service, AppError } from './service.js';
 import { Simulation, startScheduler } from './simulation.js';
 import { startClock } from './domain/clock.js';
@@ -132,11 +132,20 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/game-art.js': ['game-art.js', 'text/javascript'],
     '/game-pick.js': ['game-pick.js', 'text/javascript'],
     '/game-finish.js': ['game-finish.js', 'text/javascript'],
+    '/game-live.js': ['game-live.js', 'text/javascript'],
     '/game.css': ['game.css', 'text/css'],
   }); // the game board
   Object.assign(assets, { '/plan-cal.js': ['plan-cal.js', 'text/javascript'] });
   Object.assign(assets, { '/mode.js': ['mode.js', 'text/javascript'] }); // LIVE or Practice yard: the chip, the switcher, what each shows // the Today calendar's grid and chips (shared with src/domain/today.js)
-  Object.assign(assets, { '/crew-queue.js': ['crew-queue.js', 'text/javascript'] }); // a driver's phone: taps queued with one key each (ADR 0009)
+  Object.assign(assets, {
+    '/crew-queue.js': ['crew-queue.js', 'text/javascript'],
+    '/crew': ['crew.html', 'text/html'],
+    '/crew.js': ['crew.js', 'text/javascript'],
+    '/crew.css': ['crew.css', 'text/css'],
+    '/crew-sw.js': ['crew-sw.js', 'text/javascript'], // opens the page with no signal (a secure address only)
+    '/crew.webmanifest': ['crew.webmanifest', 'application/manifest+json'], // "Add to home screen" opens My trips
+  }); // a driver's phone, "My trips": taps queued with one key each (ADR 0009)
+  Object.assign(assets, { '/live-office.js': ['live-office.js', 'text/javascript'] }); // a real yard's trips on Today, the truck page and Your team
   return async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -228,11 +237,24 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
           ?.slice(5);
         const crewUser = crewAuthenticate(db, crewToken),
           phone = new Simulation(db, crewUser);
+        // a phone in use keeps its sign-in: its 180 days start again (the browser's cookie too, not only the server's record)
+        if (crewUser.crew?.renewed && path !== '/api/crew/signout') crewCookie(/** @type {string} */ (crewToken));
         if (req.method === 'GET' && path === '/api/crew/me') send(200, phone.crewTrips());
         else if (req.method === 'POST' && path.startsWith('/api/crew/commands/')) {
           const action = path.slice('/api/crew/commands/'.length);
           if (!TRIP_CONFIRM_OPS.includes(action)) throw new AppError(404, 'Unknown command.');
-          send(200, phone.execute(action, body, req.headers['idempotency-key']));
+          try {
+            send(200, phone.execute(action, body, req.headers['idempotency-key']));
+          } catch (error) {
+            // the office had already recorded this step, differently: the office is told (once per tap), the phone shows the difference
+            if (error?.code === 'ALREADY_CONFIRMED' && error.detail && !error.detail.same)
+              try {
+                atomic(db, () =>
+                  phone.crewConflict(action, body, String(req.headers['idempotency-key']), error.detail),
+                );
+              } catch {}
+            throw error;
+          }
         } else if (req.method === 'POST' && path === '/api/crew/signout') {
           crewSignOut(db, crewUser);
           crewCookie('');
@@ -471,6 +493,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
       send(error.status ?? 500, {
         error: error instanceof AppError ? error.message : 'Something went wrong. Please try again.',
         ...(error instanceof AppError && error.code ? { code: error.code } : {}),
+        ...(error instanceof AppError && error.detail ? { detail: error.detail } : {}),
       });
     }
   };

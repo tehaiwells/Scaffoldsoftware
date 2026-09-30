@@ -78,6 +78,35 @@ page never draws past it) and `late` (usual + 30 min passed); `replays` (confirm
 `objects` (containers by place and support, trips by state, booking and truck, orders by status, holds by order) and the site on each
 confirmation. 1,000 orders confirmed end to end take about 17 s in the property test, flat per command.
 
+## Review (30 September 2026)
+
+An adversarial pass and an owner-and-driver walk-through of part 2 changed these rules (tests: `test/live-review.test.js`,
+`test/live-hire-zone.test.js`, `test/live-ui-trips.test.js`, the new cases in `test/crew-auth.test.js`, `e2e/live-trips-ui.spec.js`):
+
+- **A phone's tap time is a phone's only.** `atSource:'tap'` counts only from a crew device sign-in; the office's time is a typed time (a
+  reason past 15 minutes). A tap sent more than 15 minutes after it was made is kept with its own reason ("Tapped on the phone at 09:05,
+  sent 15:00") and audited as `trip.backdated`. A typed time when the same truck was, on record, out on another trip needs a reason too.
+- **A collection is dated by what the site held**, not by the last delivery there: from the site's pieces now, less deliveries and plus
+  collections confirmed after the typed time, the site must have held what is collected all the way to now ("Bondi had only 0 × ... on
+  record at ..."). An unrelated later delivery no longer blocks a paper docket.
+- **Back at yard from Loaded & left** ("Came back, not delivered"): the pieces go truck to yard, the trip is `RETURNED` with `undelivered`,
+  its orders `NOT_DELIVERED`; the office has Send again (a new order of the same pieces) and a Today list with that order can be cancelled.
+- **Holds follow the stock.** A stillage an order holds cannot be removed ("Held for O-1 for Bondi. Cancel or change that first."); after a
+  count, a removal or a retire in a real yard, holds beyond what is really there are cut back and topped up from free stock
+  (`orderHoldsFit`); a Loaded & left takes a hold only for pieces really in that stillage.
+- **Phones:** taking a sign-in off the company, or a driver leaving the team, signs out every phone and cancels open links; a later link never
+  revives an old phone. The `crew` cookie gets its 180 days again when used. A tap refused with 401 stays on the phone for after a new link.
+  A tap the office had already recorded differently comes back as `409 ALREADY_CONFIRMED` with `detail` (what was recorded, and whether it
+  says the same); the phone shows the difference and the office gets one "Driver says different" notification per tap. "Received by" is
+  never filled in (last time's name is a chip). A service worker (`public/crew-sw.js`, network first, secure addresses only) and a manifest
+  open the page with no signal.
+- **Days and times:** Hire and Reports count a real yard's days in the company's zone. Bookings keep a chosen time; a truck's next trip that
+  day defaults to an hour after its last. Orders are numbered per direction (O-1..., B-1...).
+- **The board:** usual minutes learn only from drives both tapped on the driver's phone, at least 5 minutes long and not both sent within 2
+  minutes of each other, once there are 3; a delivery from an earlier day gives way to today's booking; `liveBoard.today` is the company day.
+- **Guards:** a truck with an open trip cannot be removed; a site with an open order or trip cannot be removed or archived; nothing loads for
+  a removed site. A trip that left answers the booking's driver ask yes.
+
 ## Consequences
 
 - The Practice yard is untouched: every command here is LIVE-only; the simulation's request/allocate/dispatch path is unchanged (its
@@ -85,7 +114,7 @@ confirmation. 1,000 orders confirmed end to end take about 17 s in the property 
 - A trip has one site and one direction; a delivery-then-collection run is two trips on one booking. Hire trucks cannot carry a trip yet.
   A truck booking for today cannot be made after 5 pm (Today's rule).
 - Returns are counted per product only; what does not come back stays on the truck record, flagged, until part 3 resolves it.
-- Photos, SMS sending and a service worker come later; the crew page keeps its taps in the page's storage.
+- Photos and SMS sending come later; the crew page keeps its taps in the page's storage (and its page in a service worker on a secure address).
 - Tests: `test/live-trips.test.js` (the LIVE suite: exact holds, each confirmation, custody, backdating, hire from confirmed times,
   ON_BEHALF, driver scope, idempotency, Today, the clock's flags, the invariant with trips in every state, the board),
   `test/live-orders-property.test.js` (1,000 random orders: requested = held = loaded = delivered, nothing negative, nothing lost),

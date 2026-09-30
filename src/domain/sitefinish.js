@@ -207,6 +207,9 @@ export const siteFinishMethods = {
     }
     const block = this.sfBlockFor(site);
     if (block) throw new AppError(409, block.why);
+    // a real yard: an order still waiting for it, or a trip to or from it not finished (ADR 0009)
+    const busy = this.tripSiteBusy?.(site.id);
+    if (busy) throw new AppError(409, busy);
     // plans for it on the Today calendar are called off and people borrowed there go home first (so its crew below is only its own)
     this.planSiteGone?.(site.id, 'removed');
     // Sends still waiting for a truck no longer go there (inside the command: a refusal below puts them back)

@@ -28,23 +28,25 @@ function boards(t) {
   };
 }
 
-test('the LIVE board v0: "Live · your real yard" chip, no Send or Bring back, Add stock stays; a site says what comes next', (t) => {
+test('the LIVE board: "Live · your real yard" chip; Send and Bring back make exact orders; a site keeps Remove site and its usual drive', (t) => {
   const b = boards(t);
   __gm.reset();
   const html = __gm.shell(b.live());
   assert.ok(html.includes(LIVE) && html.includes('Live<span class="gm-practice-yard"> &middot; your real yard</span>'));
   assert.ok(!html.includes(PRACTICE), 'never the Practice chip in the real yard');
-  assert.ok(!html.includes('data-gm-go="send"') && !html.includes('data-gm-go="back"'), 'no Send, no Bring back');
+  assert.ok(html.includes('data-gm-go="send"') && html.includes('data-gm-go="back"'), 'Send and Bring back (part 2)');
   assert.ok(html.includes('data-gm-go="add"'), 'Add stock is record keeping');
   const s = b.live().state;
   assert.deepEqual(__gm.hint(s), {
-    id: 'live-next',
-    text: 'Sending to a site and bringing back come next in your real yard. For now, add the stock you have and count it.',
+    id: 'live-send',
+    text: 'Tap Send to order exact pieces for Bondi. Trucks move here only when a driver confirms.',
+    act: ['Send', 'send'],
+    point: 'send',
   });
   __gm.setMode('site', b.f.site.id);
   const acts = __gm.acts(s);
-  assert.match(acts, /Recording a delivery to this site comes next/);
-  assert.ok(!/data-gm-go="(send|back)"/.test(acts), 'no Send here, no Bring back');
+  assert.match(acts, /data-gm-go="send"/);
+  assert.match(acts, /data-gm-mins=/, "the site's usual drive from the yard, typed or learnt");
   assert.match(acts, /data-sf-remove=/, 'Remove site stays: a site made by mistake can go (nothing recorded there)');
   // what the board draws: the yard and the site from records, trucks parked where they are, nobody walking about
   assert.deepEqual(

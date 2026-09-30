@@ -2130,14 +2130,27 @@ function glide(g, old) {
 // Each truck is its own small element over the map (an HTML box holding its art and its name tag). A driving truck is moved by a Web Animation the
 // browser plays on the compositor: its positions for the next few seconds are worked out from the shared countdown whenever a poll arrives or the
 // camera changes, so the drive stays smooth even while the page is busy, and the map under it is never repainted for it.
+// A real yard (state.liveBoard, ADR 0009): a truck is where its last confirmed step put it. On the road it is an estimate, drawn in its own
+// style and moved over the site's usual trip minutes from the confirmed "Loaded & left", never past 90% of the way until Delivered is confirmed.
 function syncTrips(l, ctx) {
   const st = ctx.state,
     now = performance.now(),
+    wall = Date.now(),
     seen = new Set(),
     rest = live.rest ?? new Map(),
-    paused = !!st.config?.paused;
+    paused = !!st.config?.paused,
+    board = st.liveBoard ? new Map((st.liveBoard.trucks ?? []).map((x) => [x.truck, x])) : null;
   for (const t of (st.trucks ?? []).filter((t) => !t.retired)) {
     let tr = trips.get(t.id);
+    const row = board?.get(t.id) ?? null,
+      est = row?.estimate ?? null;
+    // a delivery replay is playing: the truck keeps its short drive until it has arrived
+    if (tr?.replayUntil > now) {
+      tr.truck = t;
+      tr.live = row;
+      seen.add(t.id);
+      continue;
+    }
     // a stored road is drawn while it still matches the map; after the map changed (a site moved, a new site resized the blocks) the same trip is
     // drawn on today's roads, at the same fraction of the way, the same in every browser
     if (t.status === 'IN_TRANSIT') {
@@ -2148,11 +2161,11 @@ function syncTrips(l, ctx) {
         route = r ? { ...r, durationMs: t.route?.durationMs ?? Math.max(3000, t.remainingMs ?? 3000) } : null;
       }
       if (!route) continue;
-      const D = route.durationMs ?? t.route?.durationMs ?? 3000,
+      const D = est ? Math.max(60000, est.minutes * 60000) : (route.durationMs ?? t.route?.durationMs ?? 3000),
         key =
           t.id +
           ':' +
-          (t.route?.delivery ?? t.delivery) +
+          (board ? (row?.trip ?? '') + (est ? est.startedAt + est.minutes : '') : (t.route?.delivery ?? t.delivery)) +
           ':' +
           (stored ? 's' : 'r' + l.bw + ',' + l.bh + ',' + route.points.length + ',' + route.points.at(-1).join(','));
       if (!tr || tr.key !== key) {
@@ -2162,13 +2175,16 @@ function syncTrips(l, ctx) {
       if (tr.u != null) advance(tr, now);
       tr.driving = true;
       tr.D = D;
-      tr.anchorR = Math.max(0, t.remainingMs ?? D);
+      // the estimate: how long ago it left (the confirmed time), against the usual minutes; never further than cap (90%) of the way
+      tr.anchorR = est ? D - Math.max(0, wall - Date.parse(est.startedAt)) : Math.max(0, t.remainingMs ?? D);
       tr.anchorT = now;
       tr.paused = paused;
       tr.to = t.destination;
       tr.from = t.at;
+      tr.cap = est ? (est.cap ?? 0.9) : null;
+      tr.live = row;
       if (tr.u == null) {
-        tr.u = clamp(1 - tr.anchorR / D, 0, 1);
+        tr.u = clamp(1 - tr.anchorR / D, 0, tr.cap ?? 1);
         tr.uT = now;
       }
     } else {
@@ -2186,6 +2202,8 @@ function syncTrips(l, ctx) {
       }
       if (tr.driving) tr.arrivedT = now;
       tr.driving = false;
+      tr.cap = null;
+      tr.live = row;
       tr.pose = pose;
       tr.u = null;
       tr.geom = null;
@@ -2222,12 +2240,13 @@ function advance(tr, to, m = tr) {
     return;
   }
   let t = m.uT ?? to;
+  const cap = Math.min(U_MAX, tr.cap ?? U_MAX);
   while (t + STEP <= to) {
     t += STEP;
-    const target = clamp(1 - (tr.anchorR - (t - tr.anchorT)) / tr.D, 0, U_MAX),
+    const target = clamp(1 - (tr.anchorR - (t - tr.anchorT)) / tr.D, 0, cap),
       err = (target - m.u) * tr.D,
       speed = clamp(1 + err / 1200, 0.25, 2.2);
-    m.u = clamp(m.u + (STEP / tr.D) * speed, 0, U_MAX);
+    m.u = clamp(m.u + (STEP / tr.D) * speed, 0, cap);
   }
   m.uT = t;
 }
@@ -2290,7 +2309,12 @@ const truckWord = (t) => ((t?.payload ?? 0) >= 10000000 ? 'Big truck' : 'Truck')
 function truckLabel(tr) {
   const t = tr.truck,
     who = plain() ? truckWord(t) : t.name,
-    txt = who + (tr.driving ? ' → ' + (plain() ? short(placeName(tr.to)) : placeName(tr.to)) : '');
+    lv = tr.live,
+    est = tr.driving && !!lv?.estimate && !tr.replayUntil,
+    txt =
+      who +
+      (tr.driving ? ' → ' + (plain() ? short(placeName(tr.to)) : placeName(tr.to)) : '') +
+      (est ? ' · usually ~' + lv.estimate.minutes + ' min' : '');
   if (tr.tagText !== txt) {
     tr.tagText = txt;
     tr.tag.textContent = txt;
@@ -2305,6 +2329,11 @@ function truckLabel(tr) {
   }
   tr.g.classList.toggle('followed', followId === t.id);
   tr.g.classList.toggle('parked', !tr.driving);
+  // a real yard: on the road is an estimate (its own look), amber once it is late or not confirmed
+  tr.g.classList.toggle('is-estimate', est);
+  tr.g.classList.toggle('is-late', !!(lv && (lv.late || lv.flag)));
+  if (est) tr.g.title = lv.words + (lv.late ? ' · late, not confirmed yet' : ' · an estimate, not a live position');
+  else tr.g.removeAttribute('title');
   tr.tag.style.borderColor = truckDims(t).trim;
 }
 // Place the truck for the committed camera: parked ones once, driving ones as a Web Animation of the next few seconds of their drive.
@@ -4098,6 +4127,7 @@ function renderStrip(ctx) {
 }
 // The arrival words, from the truck's own clock: paused with the simulation, else the seconds to go.
 const etaWords = (tr) => {
+  if (tr.live?.estimate) return tr.live.late ? 'late, not confirmed yet' : 'an estimate';
   if (tr.paused) return 'paused on the road';
   const left = Math.max(0, Math.ceil(((1 - (tr.u ?? 0)) * tr.D) / 1000));
   return left ? 'arrives in ' + left + ' s' : 'arriving now';
@@ -5099,6 +5129,42 @@ function tick(now = performance.now()) {
 }
 // The game board (public/game.js) points the camera: at a site ('site', id), riding along with a truck ('truck', id), everything ('fit') or back to
 // the director ('director'). Its own clicks on the map arrive through ctx.onPick (return true to keep the map's own card closed).
+// A confirmed delivery in a real yard, played once (game.js keeps which were played): the truck covers the last part of the road to the site
+// in about 2.5 s and parks where the confirmation put it. Nothing else is invented (no crane lift without a crane record).
+export function wmReplay(truckId, siteId) {
+  const l = built.layout,
+    tr = trips.get(truckId);
+  if (!l || !tr?.truck || !W?.mat) return false;
+  if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  const yard = l.places.find((p) => p.kind === 'yard');
+  const r = yard ? worldRoute(l, tr.truck, yard.id, siteId) : null;
+  if (!r) return false;
+  const now = performance.now(),
+    D = 10000,
+    span = 2500;
+  Object.assign(tr, {
+    driving: true,
+    geom: routeGeom(r),
+    D,
+    u: 1 - span / D,
+    uT: now,
+    anchorR: span,
+    anchorT: now,
+    cap: 1,
+    paused: false,
+    to: siteId,
+    from: yard.id,
+    replayUntil: now + span + 300,
+  });
+  planTruck(tr, now, liftedNow());
+  setTimeout(() => {
+    if (!trips.has(truckId)) return;
+    tr.replayUntil = 0;
+    stateSeen = null; // the next attach puts it back where the records say it is
+    if (ctxNow) wmAttach(ctxNow);
+  }, span + 350);
+  return true;
+}
 export function wmFocus(kind, id) {
   if (!W || !cam || !built.layout) return;
   if (cardFor) closeCard();

@@ -15,7 +15,7 @@ import { lineList } from './game.js';
 import { requireLive } from './mode.js';
 import { zoneParts } from './zonetime.js';
 import { dayLabel, addDays } from './schedule.js';
-import { DAY_END, PLAN_TIMES, parseTime } from './plantime.js';
+import { DAY_END, PLAN_TIMES, parseTime, timeWords } from './plantime.js';
 /** @typedef {import('../repository.js').StoredObject} StoredObject */
 /** @typedef {'PACKED'|'LOADED'|'DELIVERED'|'COLLECTED'|'RETURNED'} TripStep */
 /** @typedef {{container:string,product:string,quantity:number}} Pick */
@@ -50,6 +50,8 @@ export const TRIP_STATE_WORDS = {
   RETURNED: 'Back at yard',
   CANCELLED: 'Cancelled',
 };
+// A send that came back without being delivered (the site refused it, or was shut): Back at yard straight from Loaded & left.
+export const UNDELIVERED_WORDS = 'Came back, not delivered';
 export const ORDER_STATE_WORDS = {
   OPEN: 'Waiting for a truck',
   BOOKED: 'On a truck booking',
@@ -58,6 +60,7 @@ export const ORDER_STATE_WORDS = {
   SHORT: 'Delivered short',
   COLLECTED: 'Collected, not back yet',
   RETURNED: 'Back at yard',
+  NOT_DELIVERED: UNDELIVERED_WORDS,
   CANCELLED: 'Cancelled',
 };
 // Trips still waiting for a confirmation (DELIVERED waits for nothing: Back at yard is optional then).
@@ -69,11 +72,18 @@ export const BACKDATE_DAYS = 7,
   DEFAULT_MINUTES = 30,
   LATE_MS = 30 * 60000,
   REPLAY_MS = 15 * 60000,
-  MEDIAN_OF = 5;
+  MEDIAN_OF = 5,
+  LEARN_FROM = 3,
+  MIN_DRIVE_MS = 5 * 60000;
 const DAY = /^\d{4}-\d{2}-\d{2}$/,
   ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 /** @type {(ms:number)=>string} */
 const iso = (ms) => new Date(ms).toISOString();
+/** '07:30' -> '08:30' @type {(hm:string)=>string} */
+const addHour = (hm) => {
+  const [h, m] = hm.split(':').map(Number);
+  return String(Math.min(23, h + 1)).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+};
 /** @type {(n:number,one:string,many?:string)=>string} */
 const plural = (n, one, many = one + 's') => n + ' ' + (n === 1 ? one : many);
 /** @type {(v:unknown,name:string,max?:number)=>string|null} */
@@ -276,8 +286,13 @@ export const tripMethods = {
           this.planDay(input.neededOn, cal));
     const time = input.time === undefined || input.time === null || input.time === '' ? null : parseTime(input.time);
     const source = extra.source ?? (['board', 'today', 'office'].includes(input.source) ? input.source : 'office');
+    // sends are O-1, O-2, ...; bring-backs B-1, B-2, ... (each counted on its own)
     const now = this.planNow(),
-      number = this.tripCount('order') + 1;
+      number =
+        cached(
+          this.db,
+          "SELECT COUNT(*) n FROM objects WHERE company_id=? AND kind='order' AND json_extract(data,'$.direction')=?",
+        ).get(this.repo.company, direction).n + 1;
     const order = this.repo.add('order', {
       number,
       direction,
@@ -377,6 +392,82 @@ export const tripMethods = {
     const m = new Map();
     for (const r of this.orderHolds(orderId)) add(m, r.product, r.quantity);
     return m;
+  },
+  // After stock went down in a real yard (a count found fewer, pieces removed, a stillage removed): no order holds more than is really there.
+  // A hold beyond it is cut back (oldest orders keep theirs first) and the order holds the gap from other free stock, when there is some.
+  orderHoldsFit() {
+    const holds = this.tripRows(
+      'reservation',
+      "json_extract(data,'$.active')=1 AND json_extract(data,'$.order') IS NOT NULL",
+    );
+    /** @type {Map<string,any[]>} */
+    const by = new Map();
+    for (const r of holds) {
+      const k = r.container + '|' + r.product;
+      by.set(k, [...(by.get(k) ?? []), r]);
+    }
+    const redo = new Set();
+    for (const [k, list] of by) {
+      const [cid, pid] = k.split('|');
+      let room = 0;
+      try {
+        const c = this.repo.get(cid, 'container');
+        if (!c.retired) room = this.repo.quantity(cid, pid);
+      } catch {}
+      for (const r of list) {
+        if (r.quantity <= room) {
+          room -= r.quantity;
+          continue;
+        }
+        if (room > 0) this.repo.save({ ...r, quantity: room });
+        else this.repo.remove(r.id, 'reservation');
+        room = 0;
+        redo.add(r.order);
+      }
+    }
+    for (const id of redo) {
+      let o = null;
+      try {
+        o = this.repo.get(id, 'order');
+      } catch {}
+      if (o && ORDER_OPEN.includes(o.status)) this.orderHold(o);
+    }
+  },
+  // A trip still open (booked, packed or out) on a truck, from its Today booking: the truck cannot be removed from under it.
+  /** @param {string} truckId */
+  tripOpenOnTruck(truckId) {
+    if (!this.live()) return null;
+    return this.tripOpenRows().find((/** @type {any} */ t) => (this.tripPlan(t)?.truck ?? t.truck) === truckId) ?? null;
+  },
+  // What still ties a site to a real yard's trips: an order waiting or on the way, or a trip not finished. Words, or null.
+  /** @param {string} siteId */
+  tripSiteBusy(siteId) {
+    if (!this.live()) return null;
+    const o = this.tripRowsBy(
+      'objects_order_status',
+      'order',
+      "json_extract(data,'$.status') IN ('OPEN','BOOKED','LOADED','COLLECTED') AND json_extract(data,'$.site')=?",
+      siteId,
+    )[0];
+    if (o)
+      return (
+        this.orderLabel(o) +
+        ' for ' +
+        this.planSiteName(siteId) +
+        ' is ' +
+        ORDER_STATE_WORDS[o.status].toLowerCase() +
+        '. ' +
+        (ORDER_OPEN.includes(o.status) ? 'Cancel it first.' : 'Confirm its trip first.')
+      );
+    const t = this.tripOpenRows().find((/** @type {any} */ x) => x.site === siteId);
+    return t
+      ? this.tripLabel(t) +
+          ' to ' +
+          this.planSiteName(siteId) +
+          ' is ' +
+          this.tripStateWords(t).toLowerCase() +
+          '. Confirm it first.'
+      : null;
   },
   /** @param {string} orderId */
   orderHolds(orderId) {
@@ -535,8 +626,23 @@ export const tripMethods = {
       }
     }
     requireRule(!tp.hire && tp.truck, 'Book one of your own trucks for a trip. Hire trucks come later.');
+    // the trip's time: as chosen; else the order's; else the booking's for its first trip, and an hour after the last one for the next
+    const others = this.tripRowsBy(
+      'objects_trip_plan',
+      'trip',
+      "json_extract(data,'$.truckPlan')=? AND json_extract(data,'$.state')<>'CANCELLED'",
+      tp.id,
+    );
+    const latest = others
+        .map((/** @type {any} */ t) => t.time ?? tp.time)
+        .sort()
+        .at(-1),
+      after = latest ? (PLAN_TIMES.find((t) => t >= addHour(latest)) ?? PLAN_TIMES.at(-1)) : null;
     const number = this.tripCount('trip') + 1,
-      time = orders.find((o) => o.time)?.time ?? tp.time;
+      time =
+        input.time !== undefined && input.time !== null && input.time !== ''
+          ? parseTime(input.time)
+          : (orders.find((o) => o.time)?.time ?? after ?? tp.time);
     const trip = this.repo.add('trip', {
       number,
       direction,
@@ -582,10 +688,12 @@ export const tripMethods = {
         view.truckName +
         ' with ' +
         view.driverName +
-        ' to ' +
+        (direction === 'BACK' ? ' from ' : ' to ') +
         site.name +
         ' on ' +
         dayLabel(view.day) +
+        ' at ' +
+        timeWords(view.time) +
         '.',
     };
   },
@@ -719,7 +827,7 @@ export const tripMethods = {
         {
           BOOKED: ['packConfirmed', 'tripLoaded'],
           PACKED: ['tripLoaded'],
-          LOADED: ['tripDelivered'],
+          LOADED: ['tripDelivered', 'tripReturned'], // Back at yard from here: it came back, not delivered
           DELIVERED: trip.steps.RETURNED ? [] : ['tripReturned'],
           DELIVERED_SHORT: ['tripReturned'],
         }[trip.state] ?? []
@@ -773,6 +881,7 @@ export const tripMethods = {
       lines: this.tripLines(trip),
       steps: trip.steps,
       notBack: trip.notBack ?? [],
+      undelivered: !!trip.undelivered,
       next,
     };
   },
@@ -781,6 +890,8 @@ export const tripMethods = {
   tripStateWords(trip) {
     if (trip.flag?.code === 'UNCONFIRMED_TRIP') return 'Not confirmed';
     const notBack = (trip.notBack ?? []).reduce((/** @type {number} */ n, /** @type {any} */ l) => n + l.quantity, 0);
+    if (trip.state === 'RETURNED' && trip.undelivered)
+      return UNDELIVERED_WORDS + (notBack ? ', ' + plural(notBack, 'piece') + ' not counted back' : '');
     if (trip.state === 'RETURNED' && notBack) return 'Back at yard, ' + plural(notBack, 'piece') + ' not counted back';
     return TRIP_STATE_WORDS[trip.state];
   },
@@ -797,14 +908,17 @@ export const tripMethods = {
           .filter((/** @type {any} */ s) => ops || s.supervisor === this.user.id)
           .map((/** @type {any} */ s) => s.id),
       );
+    // the day's trips, earlier ones still open, and one booked for a later day that already went on this day (booked for tomorrow, done today)
+    const stepOn = (/** @type {any} */ t) =>
+      Object.values(t.steps ?? {}).some((/** @type {any} */ x) => this.clockDay(Date.parse(x.at)) === d);
     const trips = cached(
       this.db,
-      "SELECT t.id,t.kind,t.data,t.version FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND (json_extract(p.data,'$.day')=? OR (json_extract(t.data,'$.state') IN ('BOOKED','PACKED','LOADED','DELIVERED_SHORT','COLLECTED') AND json_extract(p.data,'$.day')<=?)) ORDER BY t.rowid",
+      "SELECT t.id,t.kind,t.data,t.version,json_extract(p.data,'$.day') day FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND (json_extract(p.data,'$.day')=? OR (json_extract(t.data,'$.state') IN ('BOOKED','PACKED','LOADED','DELIVERED_SHORT','COLLECTED') AND json_extract(p.data,'$.day')<=?) OR (json_extract(p.data,'$.day')>? AND json_extract(p.data,'$.day')<=? AND json_extract(t.data,'$.state') NOT IN ('BOOKED','PACKED','CANCELLED'))) ORDER BY t.rowid",
     )
-      .all(this.repo.company, d, d)
-      .map((/** @type {any} */ r) => this.repo.decode(r))
-      .filter((/** @type {any} */ t) => sites.has(t.site))
-      .map((/** @type {any} */ t) => this.tripView(t));
+      .all(this.repo.company, d, d, d, addDays(d, 14))
+      .map((/** @type {any} */ r) => [r.day, this.repo.decode(r)])
+      .filter(([pd, t]) => sites.has(t.site) && (pd <= d || stepOn(t)))
+      .map(([, t]) => this.tripView(t));
     trips.sort((a, b) => String(a.time).localeCompare(String(b.time)) || a.number - b.number);
     const orders = this.tripRowsBy(
       'objects_order_status',
@@ -813,7 +927,24 @@ export const tripMethods = {
     )
       .filter((/** @type {any} */ o) => sites.has(o.site))
       .map((/** @type {any} */ o) => this.orderView(o));
-    return { day: d, today: cal.today, trips, orders };
+    // the earliest time a step can be dated now (the Office's "Earlier" starts no further back)
+    // booked for a later day and not gone yet: a truck's page shows its next trips too
+    const upcoming = cached(
+      this.db,
+      "SELECT t.id,t.kind,t.data,t.version FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND json_extract(t.data,'$.state') IN ('BOOKED','PACKED') AND json_extract(p.data,'$.day')>? ORDER BY json_extract(p.data,'$.day'),json_extract(t.data,'$.time') LIMIT 20",
+    )
+      .all(this.repo.company, d)
+      .map((/** @type {any} */ r) => this.repo.decode(r))
+      .filter((/** @type {any} */ t) => sites.has(t.site))
+      .map((/** @type {any} */ t) => this.tripView(t));
+    return {
+      day: d,
+      today: cal.today,
+      openFrom: iso(this.tripOpenFrom(this.planNow())),
+      trips,
+      upcoming,
+      orders,
+    };
   },
 
   // ---------- confirmations ----------
@@ -870,22 +1001,19 @@ export const tripMethods = {
     return zoneParts(ms, this.clockZone()).hm;
   },
   // When a step happened. Now, unless a time is sent:
-  //  - a phone's tap (atSource 'tap', queued while offline): the phone's own clock at the tap, kept inside what is possible (never in the
-  //    future, never before the trip was booked or its last step), so a phone whose clock is a little off never loses a tap;
-  //  - a time a person typed: never in the future, within the open period, never before the last step; more than 15 minutes back needs a reason.
-  /** @param {any} trip @param {TripStep} step @param {any} input @param {number} now */
-  tripWhen(trip, step, input, now) {
+  //  - a tap on the driver's own phone (atSource 'tap', queued while offline; only from a phone's device sign-in, never the office): the
+  //    phone's clock at the tap, kept inside what is possible (never in the future, never before the trip was booked or its last step), so a
+  //    phone whose clock is a little off never loses a tap. A tap sent more than 15 minutes later is kept with its own reason ("Tapped on the
+  //    phone at 09:05, sent 15:00") and audited like any earlier time;
+  //  - a time a person typed: never in the future, within the open period, never before the last step; more than 15 minutes back needs a
+  //    reason, and so does a time when the same truck was, on record, out on another trip.
+  // A collection is never dated to a moment when the site did not, on record, hold what was collected.
+  /** @param {any} trip @param {TripStep} step @param {any} input @param {number} now @param {any} [tp] */
+  tripWhen(trip, step, input, now, tp = null) {
     const prev = Object.entries(trip.steps ?? {})
       .map(([s, x]) => [s, Date.parse(/** @type {any} */ (x).at)])
       .sort((a, b) => Number(b[1]) - Number(a[1]))[0];
-    let deliveredThere = null;
-    if (step === 'COLLECTED') {
-      const last = cached(
-        this.db,
-        "SELECT MAX(occurred_at) at FROM trip_confirmation WHERE company_id=? AND site_id=? AND step='DELIVERED'",
-      ).get(this.repo.company, trip.site)?.at;
-      if (last) deliveredThere = Date.parse(last);
-    }
+    const openFrom = this.tripOpenFrom(now);
     let ms = now,
       reason = null;
     if (input.at !== undefined && input.at !== null && input.at !== '') {
@@ -894,27 +1022,37 @@ export const tripMethods = {
         'Choose a valid time.',
       );
       ms = Date.parse(input.at);
-      if (input.atSource === 'tap') {
-        const floor = Math.max(
-          this.tripOpenFrom(now),
-          Date.parse(trip.createdAt),
-          prev ? Number(prev[1]) : 0,
-          deliveredThere ?? 0,
-        );
-        return { ms: Math.min(Math.max(ms, floor), now), at: iso(Math.min(Math.max(ms, floor), now)), reason: null };
+      if (input.atSource === 'tap' && this.user.crew) {
+        const floor = Math.max(openFrom, Date.parse(trip.createdAt), prev ? Number(prev[1]) : 0);
+        let at = Math.min(Math.max(ms, floor), now);
+        if (step === 'COLLECTED' && this.tripSiteShort(trip, input, at, now)) at = now;
+        const late = now - at > BACKDATE_FREE_MS;
+        return {
+          ms: at,
+          at: iso(at),
+          reason: late ? 'Tapped on the phone at ' + this.tripWhenWords(at, now) + ', sent ' + this.tripHm(now) : null,
+        };
       }
       requireRule(ms <= now + SKEW_MS, 'That time is in the future.');
       requireRule(
-        ms >= this.tripOpenFrom(now),
+        ms >= openFrom,
         'That is too far back. A time can go back ' +
           BACKDATE_DAYS +
-          ' days at most, and not before your real yard started.',
+          ' days at most, and not before ' +
+          this.tripWhenWords(openFrom, now) +
+          (openFrom > now - BACKDATE_DAYS * 86400000 ? ', when your real yard started.' : '.'),
       );
-      if (now - ms > BACKDATE_FREE_MS) {
-        reason = optText(input.reason, 'The reason', 200);
-        requireRule(reason, 'Say why the time is earlier (for example: paper docket, keyed in later).');
-      }
       ms = Math.min(ms, now);
+      const busy = tp?.truck ? this.tripTruckBusyAt(tp.truck, trip.id, ms) : null;
+      if (now - ms > BACKDATE_FREE_MS || busy) {
+        reason = optText(input.reason, 'The reason', 200);
+        requireRule(
+          reason,
+          busy
+            ? busy + ' Check the time, or say why.'
+            : 'Say why the time is earlier (for example: paper docket, keyed in later).',
+        );
+      }
     }
     if (prev)
       requireRule(
@@ -925,12 +1063,96 @@ export const tripMethods = {
           this.tripHm(Number(prev[1])) +
           ').',
       );
-    if (deliveredThere !== null)
-      requireRule(
-        ms >= deliveredThere,
-        'That is before the last delivery there (' + this.tripHm(deliveredThere) + ').',
-      );
+    if (step === 'COLLECTED' && ms < now) {
+      const short = this.tripSiteShort(trip, input, ms, now);
+      if (short) throw new AppError(409, short + ' Check the time.');
+    }
     return { ms, at: iso(ms), reason };
+  },
+  // "09:05", or "Tue 13 Oct 09:05" when it is not today (company time).
+  /** @param {number} ms @param {number} now */
+  tripWhenWords(ms, now) {
+    const a = zoneParts(ms, this.clockZone()),
+      b = zoneParts(now, this.clockZone());
+    return a.day === b.day ? a.hm : dayLabel(a.day) + ' ' + a.hm;
+  },
+  // Was the truck, on record, out on another trip at that moment (between its Loaded & left or Collected and its Delivered or Back at yard)?
+  // Returns the words, or null.
+  /** @param {string} truckId @param {string} tripId @param {number} ms */
+  tripTruckBusyAt(truckId, tripId, ms) {
+    const from = iso(ms - 2 * 86400000);
+    for (const r of cached(
+      this.db,
+      "SELECT trip_id,step,occurred_at FROM trip_confirmation WHERE company_id=? AND occurred_at>=? AND step IN ('LOADED','DELIVERED','COLLECTED','RETURNED') ORDER BY occurred_at",
+    )
+      .all(this.repo.company, from)
+      .reduce((/** @type {Map<string,any>} */ m, /** @type {any} */ r) => {
+        if (r.trip_id === tripId) return m;
+        const x = m.get(r.trip_id) ?? {};
+        x[r.step] = Date.parse(r.occurred_at);
+        return m.set(r.trip_id, x);
+      }, new Map())) {
+      const [id, x] = r,
+        start = x.LOADED ?? x.COLLECTED,
+        end = x.COLLECTED && x.LOADED === undefined ? x.RETURNED : (x.DELIVERED ?? x.RETURNED);
+      if (start === undefined || !(ms > start) || (end !== undefined && !(ms < end))) continue;
+      let t = null;
+      try {
+        t = this.repo.get(id, 'trip');
+      } catch {}
+      const tp2 = t ? this.tripPlan(t) : null;
+      if (!t || (tp2?.truck ?? t.truck) !== truckId) continue;
+      return (
+        this.planName(truckId, 'The truck') +
+        ' was on ' +
+        this.tripLabel(t) +
+        ' then (left ' +
+        this.tripHm(start) +
+        (end !== undefined ? ', ' + (x.DELIVERED ? 'delivered ' : 'back ') + this.tripHm(end) : ', not back yet') +
+        ').'
+      );
+    }
+    return null;
+  },
+  // A collection dated at `ms`: did the site, on record, hold what is collected from then until now? The site's pieces now, less what was
+  // delivered there after `ms`, plus what was collected from there after `ms` (confirmations by when they happened), may never drop below it.
+  // Returns the words when it did not, else null. Unrelated later deliveries never stop an earlier collection from being keyed in.
+  /** @param {any} trip @param {any} input @param {number} ms @param {number} now */
+  tripSiteShort(trip, input, ms, now) {
+    if (!(ms < now)) return null;
+    const lines = this.tripLines(trip),
+      want = this.tripInputLines(input, new Map(lines.map((/** @type {any} */ l) => [l.product, l.asked])));
+    if (!want.size) return null;
+    const have = new Map();
+    for (const c of this.tripContainersAt(trip.site))
+      for (const l of this.repo.lines(c.id)) if (want.has(l.product_id)) add(have, l.product_id, l.quantity);
+    const rows = cached(
+      this.db,
+      "SELECT step,lines,occurred_at FROM trip_confirmation WHERE company_id=? AND site_id=? AND step IN ('DELIVERED','COLLECTED') AND occurred_at>?",
+    )
+      .all(this.repo.company, trip.site, iso(ms))
+      .sort((/** @type {any} */ a, /** @type {any} */ b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
+    for (const [p, q] of want) {
+      let bal = have.get(p) ?? 0,
+        low = bal;
+      for (const r of rows) {
+        const n = (JSON.parse(r.lines).find((/** @type {any} */ x) => x.product === p)?.quantity ?? 0) * 1;
+        bal += r.step === 'DELIVERED' ? -n : n;
+        low = Math.min(low, bal);
+      }
+      if (low < q)
+        return (
+          this.planSiteName(trip.site) +
+          ' had only ' +
+          Math.max(0, low) +
+          ' × ' +
+          this.planName(p, 'that part') +
+          ' on record at ' +
+          this.tripWhenWords(ms, now) +
+          '.'
+        );
+    }
+    return null;
   },
   // The confirmed lines: per product, 0 to a million, each product once; left out = what is expected (a one-tap confirm).
   /** @param {any} input @param {Map<string,number>} expected */
@@ -968,7 +1190,7 @@ export const tripMethods = {
             s.byName +
             '.',
         ),
-        { code: 'ALREADY_CONFIRMED' },
+        { code: 'ALREADY_CONFIRMED', detail: this.tripAlready(trip, step, input) },
       );
     }
     requireRule(trip.state !== 'CANCELLED', 'This trip was cancelled.');
@@ -977,11 +1199,22 @@ export const tripMethods = {
       throw new AppError(
         409,
         next.length
-          ? 'First confirm ' + STEP_WORDS[STEP_OF[next.at(-1)]].toLowerCase() + '.'
+          ? 'First confirm ' +
+              STEP_WORDS[
+                STEP_OF[next.find((a) => a !== 'packConfirmed' && a !== 'tripReturned') ?? next[0]]
+              ].toLowerCase() +
+              '.'
           : 'This trip is finished.',
       );
     requireRule(tp?.truck, 'This trip has no truck. Book one on Today.');
-    const when = this.tripWhen(trip, step, input, now),
+    if (step === 'LOADED' || step === 'COLLECTED') {
+      let site = null;
+      try {
+        site = this.repo.get(trip.site, 'site');
+      } catch {}
+      requireRule(site?.status === 'ACTIVE', (site?.name ?? 'That site') + ' was removed. Cancel this trip.');
+    }
+    const when = this.tripWhen(trip, step, input, now, tp),
       receivedBy = step === 'DELIVERED' ? optText(input.receivedBy, 'Received by', 80) : null;
     if (step === 'DELIVERED') requireRule(receivedBy, 'Who received it? Type their name.');
     const byName = this.user.name ?? 'Someone';
@@ -1044,6 +1277,7 @@ export const tripMethods = {
     fresh.flag = null;
     this.tripAfter(fresh, tp, step, done, when, now);
     this.repo.save(fresh);
+    if (step === 'LOADED' || step === 'COLLECTED') this.tripDriverYes(tp, now);
     this.tripPlanSync(fresh.truckPlan, now, fresh);
     const words = this.tripStepWords(fresh, step);
     return {
@@ -1052,15 +1286,125 @@ export const tripMethods = {
       message: words,
     };
   },
+  // A trip that left means its driver drove it: the booking's "Can you make it?" is answered yes (Today stops waiting for an answer).
+  /** @param {any} tp @param {number} now */
+  tripDriverYes(tp, now) {
+    const m = tp?.message ? this.planMsg(tp.message) : null;
+    if (!m || !['SENT', 'WAITING_TO_SEND'].includes(m.status) || m.closedAt) return;
+    this.planAnswerMsg(m, { yes: true, by: this.user.id, via: 'TRIP' }, now);
+    this.planEdit(tp.id, (/** @type {any} */ x) => {
+      if (x.stage === 'ASKING') x.stage = 'READY';
+      x.heard = m.id + ':YES';
+      this.planLog(x, (m.personName || 'The driver') + ' is driving it (the trip left).', now);
+    });
+  },
+  // A step confirmed twice (the office for the driver, then the driver's phone once it had signal): what was recorded, and whether this
+  // second confirmation says the same (the same pieces and, for a delivery, the same name). The phone shows the difference to the driver.
+  /** @param {any} trip @param {TripStep} step @param {any} input */
+  tripAlready(trip, step, input) {
+    const s = trip.steps[step],
+      row = cached(this.db, 'SELECT lines,received_by FROM trip_confirmation WHERE company_id=? AND id=?').get(
+        this.repo.company,
+        s.id,
+      );
+    const lines = row ? JSON.parse(row.lines) : [],
+      got = new Map(lines.map((/** @type {any} */ l) => [l.product, l.quantity]));
+    // what this confirmation would have recorded: its own lines, or the one-tap amounts of that step
+    const tl = this.tripLines(trip),
+      oneTap = new Map(
+        tl.map((/** @type {any} */ l) => [
+          l.product,
+          step === 'LOADED' || step === 'COLLECTED' || step === 'PACKED'
+            ? l.asked
+            : step === 'DELIVERED'
+              ? l.loaded
+              : trip.direction === 'BACK'
+                ? l.collected
+                : l.loaded - l.delivered,
+        ]),
+      );
+    let said = oneTap;
+    try {
+      said = this.tripInputLines(input ?? {}, oneTap);
+    } catch {}
+    said = new Map([...said].filter(([, q]) => q > 0));
+    const sameLines = said.size === got.size && [...said].every(([p, q]) => got.get(p) === q),
+      norm = (/** @type {any} */ v) =>
+        String(v ?? '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLowerCase(),
+      sameName = step !== 'DELIVERED' || !input?.receivedBy || norm(input.receivedBy) === norm(row?.received_by);
+    const named = (/** @type {Map<string,number>} */ m) =>
+      [...m].map(([product, quantity]) => ({ product, name: this.planName(product, 'Material'), quantity }));
+    return {
+      same: sameLines && sameName,
+      step,
+      recorded: {
+        at: s.at,
+        byName: s.byName,
+        kind: s.kind,
+        receivedBy: row?.received_by ?? null,
+        lines: named(got),
+      },
+      said: { lines: named(said), receivedBy: input?.receivedBy ?? null },
+    };
+  },
+  // A phone's tap that arrived after the office had already recorded that step differently: the office is told once (per tap).
+  /** @param {string} action @param {any} input @param {string} key @param {any} detail */
+  crewConflict(action, input, key, detail) {
+    if (!detail || detail.same) return;
+    const k = 'crew-conflict:' + key;
+    if (
+      cached(
+        this.db,
+        "SELECT 1 FROM objects WHERE company_id=? AND kind='notification' AND json_extract(data,'$.key')=?",
+      ).get(this.repo.company, k)
+    )
+      return;
+    let trip = null;
+    try {
+      trip = this.repo.get(input?.trip, 'trip');
+    } catch {
+      return;
+    }
+    const w = (/** @type {any} */ x) =>
+      x.lines.map((/** @type {any} */ l) => l.quantity + ' × ' + l.name).join(', ') +
+      (x.receivedBy ? ', received by ' + x.receivedBy : '');
+    const n = this.notify(
+      'Driver says different',
+      this.tripLabel(trip) +
+        ' ' +
+        STEP_WORDS[/** @type {TripStep} */ (detail.step)].toLowerCase() +
+        ': ' +
+        (this.user.name ?? 'The driver') +
+        "'s phone said " +
+        w(detail.said) +
+        '. The office recorded ' +
+        w(detail.recorded) +
+        '. Check with them.',
+      trip.site,
+    );
+    n.key = k;
+    this.repo.save(n);
+  },
   // "Loaded & left 7:42 (Dave)", "Delivered 8:21 · received by J. Smith": the words a step leaves on the trip, Today and the board.
-  /** @param {any} trip @param {TripStep} step */
-  tripStepWords(trip, step) {
+  // now: say the day too when it was not today ("Delivered Tue 13 Oct 09:00 · received by ...").
+  /** @param {any} trip @param {TripStep} step @param {number} [now] */
+  tripStepWords(trip, step, now) {
     const s = trip.steps[step];
     if (!s) return '';
-    const t = this.tripHm(Date.parse(s.at));
+    const t = now ? this.tripWhenWords(Date.parse(s.at), now) : this.tripHm(Date.parse(s.at));
     if (step === 'DELIVERED')
       return (
         (trip.state === 'DELIVERED_SHORT' ? 'Delivered short ' : 'Delivered ') + t + ' · received by ' + s.receivedBy
+      );
+    if (step === 'RETURNED' && trip.undelivered)
+      return (
+        'Back at yard ' +
+        t +
+        ', not delivered' +
+        (s.kind === 'ON_BEHALF' ? ' (recorded by ' + s.byName + ')' : ' (' + s.byName + ')')
       );
     return (
       STEP_WORDS[step] + ' ' + t + (s.kind === 'ON_BEHALF' ? ' (recorded by ' + s.byName + ')' : ' (' + s.byName + ')')
@@ -1148,8 +1492,15 @@ export const tripMethods = {
     const taken = new Map();
     const res = trip.orders.flatMap((/** @type {string} */ id) => this.orderHolds(id));
     for (const r of res) {
+      // a hold is used only for pieces really there now (a count or a removal since may have left fewer; the rest is picked from free stock)
+      let there = 0;
+      try {
+        const c = this.repo.get(r.container, 'container');
+        if (!c.retired && c.location === from)
+          there = this.repo.quantity(c.id, r.product) - (taken.get(r.container + '|' + r.product) ?? 0);
+      } catch {}
       const left = want.get(r.product) ?? 0,
-        used = Math.min(left, r.quantity, Math.max(0, left - (taken.get('#' + r.product) ?? 0)));
+        used = Math.min(left, r.quantity, Math.max(0, there), Math.max(0, left - (taken.get('#' + r.product) ?? 0)));
       if (used > 0) {
         picks.push({ container: r.container, product: r.product, quantity: used });
         add(taken, r.container + '|' + r.product, used);
@@ -1410,6 +1761,7 @@ export const tripMethods = {
         });
     }
     if (step === 'RETURNED') {
+      if (trip.direction === 'OUT' && !trip.steps.DELIVERED) trip.undelivered = true;
       trip.state = 'RETURNED';
       trip.notBack = [...onTruck].map(([product, quantity]) => ({ product, quantity }));
       if (truck)
@@ -1424,6 +1776,7 @@ export const tripMethods = {
         o.status = o.lines.every((/** @type {any} */ l) => l.delivered >= l.requested) ? 'DELIVERED' : 'SHORT';
       if (step === 'COLLECTED') o.status = 'COLLECTED';
       if (step === 'RETURNED' && o.direction === 'BACK') o.status = 'RETURNED';
+      if (step === 'RETURNED' && trip.undelivered) o.status = 'NOT_DELIVERED'; // "Send again" makes a new order of the same
       this.repo.save(o);
       if (o.planItem) this.tripListSync(o, trip, step, now);
     }
@@ -1477,7 +1830,10 @@ export const tripMethods = {
         x.stage = 'ON_THE_WAY';
         x.status = 'ACTIVE';
       }
-      if (step === 'DELIVERED' || (step === 'RETURNED' && o.direction === 'BACK')) {
+      if (step === 'RETURNED' && trip.undelivered) {
+        x.stage = 'WAITING';
+        x.problem = UNDELIVERED_WORDS + '. Tap Send again on its trip, or cancel this list.';
+      } else if (step === 'DELIVERED' || (step === 'RETURNED' && o.direction === 'BACK')) {
         Object.assign(x, {
           status: 'DONE',
           stage: 'DONE',
@@ -1581,7 +1937,9 @@ export const tripMethods = {
   },
 
   // ---------- the LIVE board (#22): state from confirmations, never invented motion ----------
-  // A site's usual trip minutes: typed on the site, else the median of its last 5 confirmed trips (left to delivered), else 30.
+  // A site's usual trip minutes: typed on the site, else the median of its last 5 real drives there (left to delivered), once there are 3,
+  // else 30. A real drive: at least 5 minutes, both taps made on the driver's own phone, and not both sent within 2 minutes of each other
+  // (a driver who taps both on arrival, or an office keying a docket in, teaches nothing about the road).
   /** @param {string} siteId */
   tripMinutes(siteId) {
     let site = null;
@@ -1591,20 +1949,28 @@ export const tripMethods = {
     if (site?.plannedMinutes > 0) return site.plannedMinutes;
     const rows = cached(
       this.db,
-      "SELECT trip_id,step,occurred_at FROM trip_confirmation WHERE company_id=? AND site_id=? AND step IN ('LOADED','DELIVERED') ORDER BY sequence DESC LIMIT 60",
+      "SELECT trip_id,step,occurred_at,recorded_at,actor_kind FROM trip_confirmation WHERE company_id=? AND site_id=? AND step IN ('LOADED','DELIVERED') ORDER BY sequence DESC LIMIT 80",
     ).all(this.repo.company, siteId);
     /** @type {Map<string,any>} */
     const by = new Map();
     for (const r of rows) {
       let x = by.get(r.trip_id);
       if (!x) by.set(r.trip_id, (x = {}));
-      x[r.step] = Date.parse(r.occurred_at);
+      x[r.step] = { at: Date.parse(r.occurred_at), rec: Date.parse(r.recorded_at), person: r.actor_kind === 'PERSON' };
     }
     const mins = [...by.values()]
-      .filter((x) => x.LOADED && x.DELIVERED && x.DELIVERED >= x.LOADED)
+      .filter(
+        (x) =>
+          x.LOADED &&
+          x.DELIVERED &&
+          x.LOADED.person &&
+          x.DELIVERED.person &&
+          x.DELIVERED.at - x.LOADED.at >= MIN_DRIVE_MS &&
+          Math.abs(x.DELIVERED.rec - x.LOADED.rec) >= 2 * 60000,
+      )
       .slice(0, MEDIAN_OF)
-      .map((x) => Math.max(1, Math.round((x.DELIVERED - x.LOADED) / 60000)));
-    return median(mins) ?? DEFAULT_MINUTES;
+      .map((x) => Math.round((x.DELIVERED.at - x.LOADED.at) / 60000));
+    return mins.length >= LEARN_FROM ? (median(mins) ?? DEFAULT_MINUTES) : DEFAULT_MINUTES;
   },
   // Per truck, its last confirmed step (truck.liveTrip: the trip it last moved on) or today's first booked trip; the confirmations of the
   // last 15 minutes (the replay queue); pieces per site from the records. Every truck row is a truck record and every movement a confirmation
@@ -1666,14 +2032,20 @@ export const tripMethods = {
           estimate: { startedAt: t.steps[t.state].at, minutes: mins, cap: 0.9 },
           late: now > since + mins * 60000 + LATE_MS,
         };
-      } else if (t && t.steps?.DELIVERED && !t.steps.RETURNED) {
+      } else if (
+        t &&
+        t.steps?.DELIVERED &&
+        !t.steps.RETURNED &&
+        // a delivery of an earlier day gives way to today's booking (Back at yard is optional after a full delivery)
+        !(bookedFor.has(truck.id) && this.clockDay(Date.parse(t.steps.DELIVERED.at)) !== today)
+      ) {
         row = {
           ...row,
           state: 'AT_SITE',
           place: t.site,
           since: t.steps.DELIVERED.at,
           trip: t.id,
-          words: this.tripStepWords(t, 'DELIVERED'),
+          words: this.tripStepWords(t, 'DELIVERED', now),
         };
       } else if (bookedFor.has(truck.id)) {
         const b = bookedFor.get(truck.id);
@@ -1740,7 +2112,7 @@ export const tripMethods = {
       sites[r.loc].pieces += r.q;
       sites[r.loc].lines.push({ product: r.product, name: this.planName(r.product, 'Material'), quantity: r.q });
     }
-    return { now: iso(now), trucks, replays, sites };
+    return { now: iso(now), today, trucks, replays, sites }; // today: the company's day (the board's Book form)
   },
   // ---------- a driver's phone ----------
   // My trips: today's and tomorrow's (the run sheet), and earlier ones still waiting for a confirmation. Only the signed-in driver's own.

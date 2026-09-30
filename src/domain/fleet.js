@@ -51,6 +51,18 @@ export const fleetMethods = {
   },
   retireTruck(t) {
     requireRule(!t.retired, 'This truck is already removed.');
+    // a real yard: a truck with a trip still open (booked, or out) stays until that trip is finished or cancelled (ADR 0009)
+    const open = this.tripOpenOnTruck?.(t.id);
+    if (open)
+      requireRule(
+        false,
+        t.name +
+          ' has ' +
+          this.tripLabel(open) +
+          ' (' +
+          this.tripStateWords(open).toLowerCase() +
+          '). Finish or cancel it first.',
+      );
     requireRule(t.status !== 'IN_TRANSIT', 'The truck is travelling. Wait for it to arrive first.');
     requireRule(this.idleTruck(t), 'Unload the truck and finish or cancel its trip first.');
     t.retired = true;
@@ -72,15 +84,21 @@ export const fleetMethods = {
     return saved;
   },
   // A stillage set aside for a list on the Today calendar (plan.js hold) is never removed from under it.
+  // So is one holding pieces for an order in a real yard (ADR 0009): its exact hold never points at a stillage that is gone.
   assertNotHeld(c) {
-    const r = this.repo.all('reservation').find((x) => x.active && x.plan && x.container === c.id);
+    const r = this.repo.all('reservation').find((x) => x.active && (x.plan || x.order) && x.container === c.id);
     if (!r) return;
     let what = 'a list';
     try {
-      const it = this.repo.get(r.plan, 'planItem');
-      what = 'the list for ' + this.repo.get(it.site, 'site').name;
+      if (r.order) {
+        const o = this.repo.get(r.order, 'order');
+        what = this.orderLabel(o) + ' for ' + this.repo.get(o.site, 'site').name;
+      } else {
+        const it = this.repo.get(r.plan, 'planItem');
+        what = 'the list for ' + this.repo.get(it.site, 'site').name;
+      }
     } catch {}
-    requireRule(false, 'Held for ' + what + '. Cancel that first.');
+    requireRule(false, 'Held for ' + what + (r.order ? '. Cancel or change that first.' : '. Cancel that first.'));
   },
   retireContainer(c) {
     requireRule(!c.retired, 'This stillage is already removed.');

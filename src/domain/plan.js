@@ -2163,7 +2163,8 @@ export const planMethods = {
       PLAN_FIXABLE.includes(it.status),
       'This is already ' + (it.status === 'DONE' ? 'done' : 'cancelled') + '.',
     );
-    if (this.live()) this.planLiveMoveCheck(it); // a real yard: refused once its order or a trip has left (in its own words)
+    // a real yard: refused once its order or a trip has left (in its own words), unless its load came back not delivered
+    if (this.live() && this.planLiveOrder(it)?.status !== 'NOT_DELIVERED') this.planLiveMoveCheck(it);
     requireRule(
       !(it.type === 'MATERIALS' && ['LOADING', 'ON_THE_WAY'].includes(it.stage)),
       'The truck is already loading this list. Bring it back from the yard board instead.',
@@ -2225,9 +2226,10 @@ export const planMethods = {
       );
   },
   planLiveCancel(it, reason) {
-    this.planLiveMoveCheck(it);
     const o = this.planLiveOrder(it);
-    if (o && o.status !== 'CANCELLED') this.orderCancel({ id: o.id, reason, fromPlan: true });
+    // a list whose load came back not delivered can be called off (its order is finished; Send again makes a new one)
+    if (o?.status !== 'NOT_DELIVERED') this.planLiveMoveCheck(it);
+    if (o && ['OPEN', 'BOOKED'].includes(o.status)) this.orderCancel({ id: o.id, reason, fromPlan: true });
     if (it.type === 'TRUCK')
       for (const t of this.planLiveTrips(it))
         this.tripCancel({ id: t.id, reason: reason ?? 'The truck booking was cancelled' });

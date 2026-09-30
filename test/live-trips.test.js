@@ -203,7 +203,7 @@ test('a whole stillage moves as it is and goes back to its own spot at the yard;
     site: f.site.id,
     lines: [{ product: f.product.id, quantity: f.per * 2 }],
   }).order;
-  assert.equal(back.label, 'B-3');
+  assert.equal(back.label, 'B-1', 'bring-backs are numbered on their own');
   assert.equal(back.lines[0].held, f.per * 2);
   const run = f.cmd('tripBook', { orders: [back.id], truck: f.truck.id }).trip;
   assert.deepEqual(run.next, ['tripCollected']);
@@ -335,7 +335,7 @@ test('hire starts at the confirmed Delivered time and ends at the confirmed Coll
   const run = f.cmd('tripBook', { orders: [back.id], truck: f.truck.id }).trip;
   assert.throws(
     () => f.cmd('tripCollected', { trip: run.id, at: at(D0, '12:00'), reason: 'x' }),
-    /too far back|before the last delivery/,
+    /too far back|had only 0 × .* on record/,
   );
   f.cmd('tripCollected', { trip: run.id, at: at(addDays(D0, 4), '14:00'), reason: 'Paper run sheet' });
   f.cmd('tripReturned', { trip: run.id, at: at(addDays(D0, 4), '15:00'), reason: 'Paper run sheet' });
@@ -564,8 +564,8 @@ test('the LIVE board: each truck by its last confirmed step, an estimate that ne
   );
   assert.equal(b.replays[0].words, 'Delivered 10:20 · received by J. Smith');
   assert.equal(b.sites[f.site.id].pieces, 6);
-  // the usual minutes learn from confirmed trips (70 min here), unless the site has its own
-  assert.equal(f.sim.tripMinutes(f.site.id), 70);
+  // the usual minutes learn only from drives the driver's own phone recorded (live-review.test.js); an office-recorded pair teaches nothing
+  assert.equal(f.sim.tripMinutes(f.site.id), 30);
   f.cmd('siteDetails', { id: f.site.id, plannedMinutes: 40 });
   assert.equal(f.sim.tripMinutes(f.site.id), 40);
 });

@@ -4,6 +4,7 @@ import { AppError } from '../service.js';
 import { requireRule, integer } from './geometry.js';
 import { localDay, addDays, daysBetween, calendarNow, dayLabel } from './schedule.js';
 import { companyMode } from './mode.js';
+import { zoneDay, DEFAULT_ZONE } from './zonetime.js';
 // Hire tracking (GET /api/hire, GET /api/hire.csv, commands hireRate / hireSiteRate). Read-only over the append-only ledger: nothing here moves stock.
 //
 // On hire: a piece is on hire at a client site from the day it arrives there up to, not including, the day it leaves (a same-day delivery and return
@@ -357,6 +358,7 @@ const fresh = () => ({
   first: null,
   dayOf: new Map(),
   memo: new Map(),
+  zone: /** @type {string|null|undefined} */ (undefined), // a real yard's time zone (companyZone), null for the Practice yard
 });
 const loadInfo = (db, company) => {
   const m = new Map();
@@ -387,12 +389,18 @@ function placeOf(st, db, company, id, depth = 0) {
   if (o.kind === 'resource') return placeOf(st, db, company, o.loc, depth + 1);
   return placeOf(st, db, company, st.locOf.get(id) ?? o.loc, depth + 1);
 }
+// A real yard's time zone (its days are counted in it), or null for the Practice yard (the computer's own days, as always).
+function companyZone(db, company) {
+  if (companyMode(db, company) !== 'LIVE') return null;
+  return cached(db, 'SELECT time_zone FROM companies WHERE id=?').get(company)?.time_zone ?? DEFAULT_ZONE;
+}
 function dayOf(st, iso) {
   const k = String(iso).slice(0, 16);
   let d = st.dayOf.get(k);
   if (!d) {
     if (st.dayOf.size > 50000) st.dayOf.clear();
-    d = localDay(new Date(iso));
+    // a real yard's days are the company's (ADR 0002), whatever zone the server runs in; the Practice yard keeps the computer's
+    d = st.zone ? zoneDay(Date.parse(iso), st.zone) : localDay(new Date(iso));
     st.dayOf.set(k, d);
   }
   return d;
@@ -490,10 +498,11 @@ function sync(db, company) {
   let st = byCompany.get(company);
   if (!st) byCompany.set(company, (st = fresh()));
   const max = cached(db, 'SELECT MAX(sequence) m FROM ledger WHERE company_id=?').get(company).m ?? 0;
+  if (st.zone === undefined) st.zone = companyZone(db, company);
   if (max === st.seq) return st;
   st.loaded = false;
   // a real yard counts only what people recorded (never ENGINE rows, which its ledger refuses anyway)
-  const live = companyMode(db, company) === 'LIVE' ? 1 : 0;
+  const live = st.zone ? 1 : 0;
   const sql = `SELECT sequence,event,product_id,container_id,quantity,source,destination,created_at,occurred_at FROM ledger WHERE company_id=? AND sequence>? AND sequence<=? AND product_id IS NOT NULL AND (?=0 OR actor_kind<>'ENGINE') AND event IN (${EVENTS.map(() => '?').join(',')}) ORDER BY sequence LIMIT ${BATCH}`;
   for (let cursor = st.seq; ;) {
     const rows = cached(db, sql).all(company, cursor, max, live, ...EVENTS);
@@ -581,7 +590,7 @@ export const hireMethods = {
     const week = cents(input.week, 'Week rate'),
       day = cents(input.day, 'Day rate'),
       minDays = minDaysOf(input.minDays),
-      today = calendarNow().today,
+      today = (this.live() ? this.planNowCal() : calendarNow()).today,
       from = fromArg(input.from, today);
     const old = this.repo.all('hireRate').find((r) => r.product === p.id),
       saved = saveVersion(this, 'hireRate', old, { product: p.id }, { week, day, minDays }, from, today),
@@ -614,7 +623,7 @@ export const hireMethods = {
       day = cents(input.day, 'Day rate'),
       minDays = minDaysOf(input.minDays),
       note = noteOf(input.note),
-      today = calendarNow().today,
+      today = (this.live() ? this.planNowCal() : calendarNow()).today,
       from = fromArg(input.from, today);
     const old = this.repo.all('hireSiteRate').find((r) => r.site === site.id && r.product === p.id),
       saved = saveVersion(
@@ -648,7 +657,7 @@ export const hireMethods = {
   // a rate or the day changes; names, collections and the live count are read fresh each time.
   hire(query = {}) {
     this.hireRequire();
-    const cal = calendarNow(),
+    const cal = this.live() ? this.planNowCal() : calendarNow(), // a real yard: today on company time
       st = sync(this.db, this.user.company_id);
     return this.hireView(st, cal, { site: query.site || null, from: query.from || null, to: query.to || null });
   },

@@ -261,3 +261,53 @@ test('50 offline/online switches: every tap is queued with its own key and recor
     'each delivery moved its pieces once',
   );
 });
+
+test('a phone in use keeps its sign-in; a signed-out phone keeps its taps; a tap the office already recorded differently is shown, not lost', async (t) => {
+  const f = liveFixture(t);
+  const { req } = await serve(t, f.db);
+  const desk = office(f);
+  const made = await req('POST', '/api/crew-links', { body: { driver: f.team.Dave.id }, cookie: desk });
+  const claim = await req('POST', '/api/crew/claim', { body: { token: new URL(made.json.link).hash.slice(3) } });
+  const phone = cookieOf(claim, 'crew');
+  // used again two hours later: the browser's cookie gets its 180 days again, not only the server's record
+  assert.equal((await req('GET', '/api/crew/me', { cookie: phone })).headers['set-cookie'], undefined);
+  f.setTime(Date.now() + 2 * 3600000);
+  const me = await req('GET', '/api/crew/me', { cookie: phone });
+  assert.match(
+    me.headers['set-cookie'][0],
+    new RegExp('^' + phone + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=15552000'),
+  );
+  // the office delivers for Dave while his phone has no signal; his phone had tapped Delivered with 1 fewer and another name
+  const x = trip(f, f.team.Dave, f.truck, 5);
+  f.cmd('tripLoaded', { trip: x.id });
+  const store = new Map();
+  let online = false;
+  const queue = createCrewQueue({ get: (k) => store.get(k) ?? null, set: (k, v) => store.set(k, v) }, async (tap) => {
+    if (!online) throw new Error('offline');
+    const r = await req('POST', '/api/crew/commands/' + tap.action, { body: tap.input, cookie: phone, key: tap.key });
+    return { status: r.status, body: r.json };
+  });
+  queue.tap('tripDelivered', { trip: x.id, receivedBy: 'Mo Ali', lines: [{ product: f.product.id, quantity: 4 }] });
+  await queue.flush();
+  f.cmd('tripDelivered', { trip: x.id, receivedBy: 'Site foreman' });
+  online = true;
+  await queue.flush();
+  assert.equal(queue.pending().length, 0);
+  const [p] = queue.problems();
+  assert.equal(p.conflict.same, false, 'not dropped without a word');
+  assert.equal(p.conflict.recorded.receivedBy, 'Site foreman');
+  assert.equal(p.conflict.recorded.lines[0].quantity, 5);
+  assert.equal(
+    f.sim.repo.all('notification').filter((n) => n.title === 'Driver says different').length,
+    1,
+    'the office is told',
+  );
+  // signed out from the office while a tap waits: the tap stays on the phone (401), and goes once a new link signs it in
+  const y = trip(f, f.team.Dave, f.truck, 2);
+  const devs = await req('GET', '/api/crew-devices', { cookie: desk });
+  await req('POST', '/api/crew-devices/revoke', { body: { device: devs.json.devices[0].id }, cookie: desk });
+  queue.tap('tripLoaded', { trip: y.id });
+  await queue.flush();
+  assert.equal(queue.pending().length, 1, 'kept');
+  assert.equal(queue.signedOut(), true);
+});

@@ -2,6 +2,7 @@ import { cached } from '../database.js';
 import { AppError } from '../service.js';
 import { calendarNow, addDays, mondayOf, localDay } from './schedule.js';
 import { companyMode } from './mode.js';
+import { zoneDay, DEFAULT_ZONE } from './zonetime.js';
 // History reports (GET /api/reports?days=30|90): read-only aggregates rebuilt from the append-only ledger, plus deliveries and current contents.
 // The ledger is replayed once per company and then only its new rows (a per-company store keyed by the ledger's max sequence), so a report costs
 // one indexed MAX() when nothing changed and a replay of the new rows otherwise. Built results are cached per period and scope until the next row.
@@ -36,6 +37,7 @@ const fresh = () => ({
   moved: new Map(),
   dayOf: new Map(),
   results: new Map(),
+  zone: /** @type {string|null|undefined} */ (undefined), // a real yard's time zone (companyZone), null for the Practice yard
 });
 const loadInfo = (db, company) => {
   const m = new Map();
@@ -78,12 +80,18 @@ function placeOf(st, db, company, id, depth = 0) {
 }
 const kindOf = (st, place) =>
   place.startsWith('truck:') ? 'truck' : place === 'other' ? 'other' : (st.info.get(place)?.kind ?? 'other');
+// A real yard's time zone (its days are counted in it), or null for the Practice yard (the computer's own days, as always).
+function companyZone(db, company) {
+  if (companyMode(db, company) !== 'LIVE') return null;
+  return cached(db, 'SELECT time_zone FROM companies WHERE id=?').get(company)?.time_zone ?? DEFAULT_ZONE;
+}
 function dayOf(st, iso) {
   const k = String(iso).slice(0, 16);
   let d = st.dayOf.get(k);
   if (!d) {
     if (st.dayOf.size > 50000) st.dayOf.clear();
-    d = localDay(new Date(iso));
+    // a real yard's days are the company's (ADR 0002), whatever zone the server runs in; the Practice yard keeps the computer's
+    d = st.zone ? zoneDay(Date.parse(iso), st.zone) : localDay(new Date(iso));
     st.dayOf.set(k, d);
   }
   return d;
@@ -136,9 +144,10 @@ function sync(db, company, today) {
   let st = byCompany.get(company);
   if (!st) byCompany.set(company, (st = fresh()));
   const max = cached(db, 'SELECT MAX(sequence) m FROM ledger WHERE company_id=?').get(company).m ?? 0;
+  if (st.zone === undefined) st.zone = companyZone(db, company);
   if (max === st.seq && st.today === today) return st;
   st.loaded = false;
-  const live = companyMode(db, company) === 'LIVE' ? 1 : 0; // a real yard: only what people recorded
+  const live = st.zone ? 1 : 0; // a real yard: only what people recorded
   const sql = `SELECT sequence,event,product_id,container_id,quantity,source,destination,created_at,occurred_at FROM ledger WHERE company_id=? AND sequence>? AND sequence<=? AND product_id IS NOT NULL AND (?=0 OR actor_kind<>'ENGINE') AND event IN (${HC_EVENTS.map(() => '?').join(',')}) ORDER BY sequence LIMIT ${BATCH}`;
   for (let cursor = st.seq; ;) {
     const rows = cached(db, sql).all(company, cursor, max, live, ...HC_EVENTS);
@@ -182,7 +191,7 @@ export const reportsMethods = {
       company = this.user.company_id,
       ops = perms.includes('operations.manage');
     if (!ops && !perms.includes('sites.assigned')) throw new AppError(403, 'Your role does not allow this action.');
-    const cal = calendarNow(),
+    const cal = this.live() ? this.planNowCal() : calendarNow(), // a real yard: today on company time
       today = cal.today,
       st = sync(this.db, company, today),
       key = days + '|' + (ops ? 'company' : 'u:' + this.user.id);

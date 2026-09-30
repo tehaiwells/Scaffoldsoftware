@@ -5,6 +5,7 @@ import { requireRule } from './geometry.js';
 import { AppError } from '../service.js';
 import { bumpRevision } from '../repository.js';
 import { idleWorker } from './fleet.js';
+import { crewEndAll } from '../crew-auth.js';
 export const WORKER_ROLES = ['YARDSMAN', 'SCAFFOLDER', 'LEADING_HAND'],
   TEAM_ROLES = [...WORKER_ROLES, 'DRIVER'];
 export const ROLE_WORDS = {
@@ -225,6 +226,7 @@ export const teamMethods = {
       p.removedAt = new Date().toISOString();
       this.repo.save(p);
       this.planPersonGone('driver', p.id);
+      crewEndAll(this.db, this.repo.company, { driver: p.id }, this.user.id); // their phones are signed out at once
       return { ok: true, message: p.name + ' has left the team.' };
     }
     requireRule(p.kind === 'resource' && p.type === 'WORKER', 'Choose someone in your team.');

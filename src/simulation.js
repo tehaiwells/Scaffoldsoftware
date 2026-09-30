@@ -32,6 +32,8 @@ import { todayMethods } from './domain/today.js';
 import { clockMethods } from './domain/clock.js';
 import { companyMode, LIVE_OPS, IMPORT_OPS, COMING_NEXT } from './domain/mode.js';
 import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS } from './domain/trips.js';
+// Commands that can leave a stillage with fewer pieces than an order holds there (a real yard's exact holds are fitted after them)
+const HOLDS_FIT = new Set(['approveCount', 'stockRemoval', 'removeStock', 'quickAdjust', 'retire', 'scrapContainer']);
 const operational = [
   'rotate',
   'loadTruck',
@@ -163,6 +165,8 @@ export class Simulation {
       let result;
       try {
         result = this[action](input);
+        // a real yard: stock went down (a count, a removal): no order keeps holding pieces that are not there (trips.js orderHoldsFit)
+        if (HOLDS_FIT.has(action) && this.live()) this.orderHoldsFit();
         this.repo.event(this.user.id, 'COMMAND', { reason: action, key });
         this.rtSync();
         this.alCheck();

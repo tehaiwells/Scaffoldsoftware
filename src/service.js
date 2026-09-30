@@ -490,6 +490,16 @@ export class Service {
         userId,
       );
       cached(this.db, 'DELETE FROM sessions WHERE user_id=? AND company_id=?').run(userId, user.company_id);
+      // a driver's phones (a crew sign-in, ADR 0009) are signed out too, and their open links cancelled
+      const at = new Date().toISOString();
+      cached(
+        this.db,
+        'UPDATE crew_devices SET revoked_at=?,revoked_by=? WHERE company_id=? AND user_id=? AND revoked_at IS NULL',
+      ).run(at, user.id, user.company_id, userId);
+      cached(
+        this.db,
+        'UPDATE crew_links SET cancelled_at=? WHERE company_id=? AND user_id=? AND used_at IS NULL AND cancelled_at IS NULL',
+      ).run(at, user.company_id, userId);
       // Their open invitations here go too: the ones they made, and any to their own email, so a removed person cannot let themselves back in.
       cached(
         this.db,

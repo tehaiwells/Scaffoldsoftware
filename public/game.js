@@ -23,7 +23,19 @@ import {
   gaSystemPic,
 } from './game-art.js';
 import { gpStops, gpSnap, gpFill, gpCount, gpChoose, gpPerStillage } from './game-pick.js';
-import { wmShell, wmFocus } from './world.js';
+import { wmShell, wmFocus, wmReplay } from './world.js';
+import {
+  glFree,
+  glFirst,
+  glWords,
+  glAmountHTML,
+  glTripsHTML,
+  glTruckWord,
+  glRow,
+  glBookHTML,
+  glReplaysDue,
+  glTomorrow,
+} from './game-live.js'; // the board in a real yard: exact orders, a truck and driver, trucks by their last confirmed step
 import {
   sfSub,
   sfActs,
@@ -35,7 +47,7 @@ import {
   sfBelowTiles,
   sfNewSiteList,
 } from './game-finish.js'; // Remove site, and Undo (Site undo and finish)
-import { isLive, LIVE_CHIP, LIVE_NEXT, LIVE_SITE_NEXT, LIVE_HIDDEN_TILES, switchChoices } from './mode.js'; // the real yard or the Practice yard
+import { isLive, LIVE_CHIP, LIVE_HIDDEN_TILES, switchChoices } from './mode.js'; // the real yard or the Practice yard
 const byName = new Intl.Collator(undefined, { numeric: true }).compare;
 const SYS_CLASS = { quickstage: 'qs', 'at-pac': 'at', 'tube-clip': 'tc' },
   SYS_NAME = { quickstage: 'Quickstage', 'at-pac': 'AT-PAC', 'tube-clip': 'Tube & Clip' };
@@ -112,6 +124,7 @@ function resetFor(ctx) {
   G.win = null;
   G.systems = new Set();
   G.lastSite = null;
+  G.team = null;
   G.hintOff = new Set(
     String(store.get(hintKey()) ?? '')
       .split(',')
@@ -120,7 +133,8 @@ function resetFor(ctx) {
 }
 const phone = () => typeof matchMedia === 'function' && matchMedia('(max-width:760px)').matches;
 const ops = () => !!G.ctx?.account?.permissions?.includes('operations.manage');
-// The real yard (LIVE): the board shows what people recorded, where it was last confirmed; nothing is sent or driven from it yet.
+// The real yard (LIVE): the board shows what people recorded, where it was last confirmed. Send and Bring back make exact orders; people
+// confirm each step of the trip (game-live.js, ADR 0009).
 const live = () => isLive(G.ctx?.account);
 // ---------------------------------------------------------------- reading the state
 const yardOf = (s) => s?.yards?.[0] ?? null;
@@ -138,6 +152,21 @@ const perStillage = (p) => gpPerStillage(p) || null;
 // Where the slider's stillages come from: the yard for Send, the site for Bring back.
 const pickLoc = (s) => (G.mode === 'send' ? (yardOf(s)?.id ?? null) : G.mode === 'back' ? G.site : null);
 const itemsFor = (loc) => (G.items.loc === loc && G.items.list ? G.items.list : null);
+// A real yard: one product's free pieces at the place Send or Bring back picks from ({product, free, pack}), or null while loading.
+const liveItem = (s, id) => glFree(itemsFor(pickLoc(s))).get(id) ?? null;
+// A real yard's site: its usual drive from the yard (the board's "usually ~N min"), typed here or learnt from confirmed trips.
+function minutesHTML(s, site) {
+  const typed = site.plannedMinutes > 0 ? site.plannedMinutes : null;
+  return (
+    '<form class="gm-mins" data-gm-mins="' +
+    esc(site.id) +
+    '"><label><span>Usual drive from the yard</span><input type="number" name="minutes" min="1" max="600" step="1" inputmode="numeric" value="' +
+    (typed ?? '') +
+    '" placeholder="' +
+    (typed ? '' : 'learnt from trips') +
+    '"> min</label><button type="submit" class="gm-chip">Save</button></form>'
+  );
+}
 // What the grid shows in each mode: [{p, count, dim}] (count = the corner number; quiet = no number).
 function gridItems(s) {
   const all = products(s),
@@ -148,6 +177,22 @@ function gridItems(s) {
       sys = addSystems(ok);
     if (sys.length > 1 && !sys.includes(G.sys)) G.sys = sys[0];
     return ok.filter((p) => sys.length < 2 || p.system === G.sys).map((p) => ({ p, count: 0, quiet: true }));
+  }
+  // a real yard: what is free to order (not held for another order), from the server's exact count
+  if ((mode === 'send' || mode === 'back') && live()) {
+    const got = itemsFor(pickLoc(s)),
+      free = glFree(got),
+      at = rowsAt(s, mode === 'send' ? yard?.id : G.site);
+    return all
+      .map((p) => ({
+        p,
+        count: got
+          ? (free.get(p.id)?.free ?? 0)
+          : mode === 'send'
+            ? (at.get(p.id)?.free ?? 0)
+            : (at.get(p.id)?.quantity ?? 0),
+      }))
+      .filter((x) => x.count > 0 || G.picks.has(x.p.id));
   }
   if (mode === 'send') {
     const at = rowsAt(s, yard?.id);
@@ -269,10 +314,8 @@ export function gmShell(ctx) {
     '</button></div>' +
     '<div class="gm-win2" data-gm-win2 hidden></div>' +
     '<nav class="gm-bar" aria-label="What do you want to do?">' +
-    (isLive(ctx.account)
-      ? ''
-      : bigBtn('send', 'Send', 'Send scaffolding to a site') +
-        bigBtn('back', 'Bring back', 'Bring scaffolding back from a site')) +
+    bigBtn('send', 'Send', 'Send scaffolding to a site') +
+    bigBtn('back', 'Bring back', 'Bring scaffolding back from a site') +
     bigBtn('add', 'Add stock', 'Add stock arriving at the yard') +
     bigBtn('stock', 'Stock', 'See the yard stock', ' gm-phone-only') +
     '</nav></section>' +
@@ -424,10 +467,14 @@ function headHTML(s) {
     return '<div class="gm-win-head"><div><h2>Send to a site</h2><p>Your yard is empty</p></div><button type="button" class="gm-x" data-gm-close aria-label="Close">&times;</button></div>';
   if (G.mode === 'send') {
     title = site ? 'Send to ' + site.name : 'Send to a site';
-    sub = 'Tap what goes, then how much';
+    sub = live() ? 'Tap what goes, then type exactly how many' : 'Tap what goes, then how much';
   } else if (G.mode === 'back') {
     title = site ? 'Bring back from ' + site.name : 'Bring back';
-    sub = site ? 'Tap what comes back, or bring everything' : 'From which site?';
+    sub = site
+      ? live()
+        ? 'Tap what comes back, then how many'
+        : 'Tap what comes back, or bring everything'
+      : 'From which site?';
   } else if (G.mode === 'add') {
     title = 'Add stock to the yard';
     sub = 'Tap what arrived, then how much';
@@ -439,8 +486,8 @@ function headHTML(s) {
     sub = sfSub(site) ?? 'On site now';
   } else if (G.mode === 'truck') {
     const t = (s.trucks ?? []).find((x) => x.id === G.truck);
-    title = t ? truckWords(s, t).word : 'Truck';
-    sub = t ? truckKind(t) : '';
+    title = t ? (live() ? t.name : truckWords(s, t).word) : 'Truck';
+    sub = t ? (live() ? truckKind(t) + ' · ' + glTruckWord(s, t) : truckKind(t)) : '';
   } else if (!products(s).length) {
     title = 'Your scaffold parts';
     sub = 'Which scaffold do you use? Tap one or more.';
@@ -652,6 +699,9 @@ function amountHTML(s) {
   if (!G.sel || !PICKING.includes(G.mode)) return '';
   const p = products(s).find((x) => x.id === G.sel);
   if (!p) return '';
+  // a real yard: the exact number, never snapped; the pack size is a hint beside it
+  if (live() && G.mode !== 'add')
+    return glAmountHTML(p, G.picks.get(p.id) ?? 0, liveItem(s, p.id), G.mode, gaItem(p, 'gm-amt-pic'));
   const stops = stopsFor(s, p),
     q = G.picks.get(p.id) ?? 0,
     i = stops.findIndex((x) => x.qty === q),
@@ -691,7 +741,7 @@ function amountHTML(s) {
 }
 // What else rides along in the picked stillages (a mixed stillage, or what is stacked on one): shown before Send so nothing is a surprise.
 function extrasHTML(s) {
-  if (!['send', 'back'].includes(G.mode) || !G.picks.size) return '';
+  if (!['send', 'back'].includes(G.mode) || !G.picks.size || live()) return '';
   const list = itemsFor(pickLoc(s));
   if (!list) return '';
   const r = gpChoose(
@@ -729,6 +779,39 @@ function actsHTML(s) {
       gaImg(GA_BUTTONS.add(), 'gm-go-img') +
       'Add stock first</button></div>'
     );
+  if (G.mode === 'send' && live()) {
+    const ok = !!site && picks.length > 0 && !G.busy;
+    return (
+      '<div class="gm-acts">' +
+      (picks.length ? '<p class="gm-est">' + esc(loadWords(s, picks)) + '</p>' : '') +
+      '<button type="button" class="gm-go gm-go-big" data-gm-do="order"' +
+      (ok ? '' : ' disabled') +
+      '>' +
+      gaImg(GA_BUTTONS.send(), 'gm-go-img') +
+      (site ? 'Order for ' + esc(site.name) : 'Order') +
+      '</button><p class="gm-foot">Held exactly as you typed. Then pick a truck and driver.</p></div>'
+    );
+  }
+  if (G.mode === 'back' && live()) {
+    const has = site && hasStock(s, site.id);
+    return (
+      '<div class="gm-acts">' +
+      (picks.length
+        ? '<button type="button" class="gm-go gm-go-big" data-gm-do="backorder"' +
+          (G.busy ? ' disabled' : '') +
+          '>' +
+          gaImg(GA_BUTTONS.back(), 'gm-go-img') +
+          'Ask to bring these back</button>'
+        : '') +
+      '<button type="button" class="gm-go' +
+      (picks.length ? ' gm-go-alt' : ' gm-go-big') +
+      '" data-gm-do="backorderall"' +
+      (has && !G.busy ? '' : ' disabled') +
+      '>' +
+      (picks.length ? '' : gaImg(GA_BUTTONS.back(), 'gm-go-img')) +
+      'Bring everything back</button><p class="gm-foot">Then pick a truck and driver. The driver confirms what they collect.</p></div>'
+    );
+  }
   if (G.mode === 'send') {
     const ok = !!site && picks.length > 0 && !G.busy;
     return (
@@ -781,13 +864,6 @@ function actsHTML(s) {
       'Load my parts list</button></div>'
     );
   // the real yard: what comes next, and Remove site for a site with nothing recorded there (the same question and Undo as the Practice yard)
-  if (G.mode === 'site' && live())
-    return sfActs(
-      s,
-      site,
-      ops(),
-      '<div class="gm-acts"><p class="gm-foot gm-live-next">' + esc(LIVE_SITE_NEXT) + '</p></div>',
-    );
   if (G.mode === 'site')
     return sfActs(
       s,
@@ -803,8 +879,29 @@ function actsHTML(s) {
         (hasStock(s, G.site) ? '' : ' disabled') +
         '>' +
         gaImg(GA_BUTTONS.back(), 'gm-go-img') +
-        'Bring back</button></div>',
+        'Bring back</button></div>' +
+        (live() && site && ops() ? minutesHTML(s, site) : ''),
     );
+  if (G.mode === 'truck' && live()) {
+    const t = (s.trucks ?? []).find((x) => x.id === G.truck);
+    if (!t) return '';
+    const x = glRow(s, t.id);
+    return (
+      '<div class="gm-acts">' +
+      (x?.estimate
+        ? '<p class="gm-foot">' +
+          (x.late
+            ? 'Later than usual and not confirmed yet. Call the driver, or confirm for them on the truck page.'
+            : 'Where it is on the road is an estimate from when it left. It arrives on the map when Delivered is confirmed.') +
+          '</p>'
+        : '') +
+      '<div class="gm-acts-2"><button type="button" class="gm-go" data-gm-cam="truck" data-gm-for="' +
+      esc(t.id) +
+      '">Follow it</button><button type="button" class="gm-go gm-go-alt" data-view="' +
+      (t.payload >= HEAVY ? 'TRUCK12' : 'TRUCK2') +
+      '">Truck page</button></div></div>'
+    );
+  }
   if (G.mode === 'truck') {
     const t = (s.trucks ?? []).find((x) => x.id === G.truck);
     if (!t) return '';
@@ -878,6 +975,10 @@ function truckWords(s, t) {
   };
 }
 function tripsHTML(s) {
+  if (live())
+    return glTripsHTML(s, G.mode === 'truck' ? G.truck : null, (t) =>
+      ovImg(t.payload >= HEAVY ? 'spr-truck12' : 'spr-truck2', 'gm-trip-img'),
+    );
   const list = (s.trucks ?? [])
     .filter((t) => !t.retired && (t.game || t.status === 'IN_TRANSIT'))
     .sort((a, b) => byName(a.name, b.name));
@@ -971,8 +1072,17 @@ function hintOf(s) {
       text: 'Now open your first client site: tap an empty block on the map.',
       act: ['Open a site', 'newsite'],
     };
-  // the real yard: said once; not while a site's window is open (it says what comes next for that site)
-  else if (live()) h = G.mode === 'site' ? null : { id: 'live-next', text: LIVE_NEXT };
+  // the real yard: Send makes an exact order; the map moves only on a confirmation
+  else if (live())
+    h = !(s.liveBoard?.trucks ?? []).some((x) => x.state !== 'PARKED')
+      ? {
+          id: 'live-send',
+          text:
+            'Tap Send to order exact pieces for ' + sites[0].name + '. Trucks move here only when a driver confirms.',
+          act: ['Send', 'send'],
+          point: 'send',
+        }
+      : null;
   else if (moving && !delivered)
     h = { id: 'watch', text: 'In the Practice yard the crew and trucks are simulated. Watch them work.' };
   else if (!delivered)
@@ -1147,7 +1257,36 @@ function popInner(text, kind, act) {
   );
 }
 // ---------------------------------------------------------------- the small window over the map: a new site
+// After a real yard's Send or Bring back: which truck and driver take it (the team's drivers come from GET /api/team).
+function openBook(order) {
+  openWin({ kind: 'book', order, trips: {} });
+  // the trips already booked today and tomorrow: a second trip on the same truck starts an hour after the last
+  const today = G.ctx?.state?.liveBoard?.today ?? G.ctx?.state?.calendar?.today;
+  if (today && G.ctx?.get)
+    for (const day of [today, glTomorrow(today)])
+      G.ctx
+        .get('trips?day=' + day)
+        .then((r) => {
+          const w = G.win;
+          if (w?.kind !== 'book' || w.order.id !== order.id) return;
+          w.trips = { ...w.trips, [day]: r.trips ?? [] };
+          refreshNow();
+        })
+        .catch(() => {});
+  if (!G.team && G.ctx?.get)
+    G.ctx
+      .get('team')
+      .then((t) => {
+        G.team = t;
+        const w = G.win;
+        if (w?.kind === 'book' && !w.driver) w.driver = (t.people ?? []).find((p) => p.kind === 'driver')?.id;
+        refreshNow();
+      })
+      .catch(() => {});
+}
 function win2HTML() {
+  if (G.win?.kind === 'book')
+    return glBookHTML(G.win, G.ctx?.state, G.team, G.ctx?.state?.liveBoard?.today ?? G.ctx?.state?.calendar?.today);
   if (G.win?.kind !== 'newsite') return '';
   return (
     '<div class="gm-nw" role="dialog" aria-labelledby="gm-nw-h"><button type="button" class="gm-x" data-gm-win-x aria-label="Close">&times;</button><div class="gm-nw-pic">' +
@@ -1258,9 +1397,19 @@ export function gmUpdate(ctx) {
     );
   }
   pops(s);
+  if (live()) replays(s);
   sfUpdate(s);
   bindOnce(root);
   syncCard();
+}
+// A real yard: each confirmation of the last 15 minutes is shown once on this screen: a pop with its words, and for a delivery a short replay
+// of the truck arriving at the site (world.js). Which were shown is kept in this browser.
+function replays(s) {
+  const key = 'gm-replayed:' + (G.ctx?.account?.company?.id ?? '');
+  for (const r of glReplaysDue(s, store, key)) {
+    pop(r.words, r.step === 'DELIVERED' || r.step === 'RETURNED' ? 'tick' : 'go');
+    if (r.step === 'DELIVERED' && r.truck) setTimeout(() => wmReplay(r.truck, r.site), 60);
+  }
 }
 // A first-day tip is retired for good once its step has been done (stock was added, a site opened, a delivery made), so it never comes back just
 // because the yard is empty again.
@@ -1296,10 +1445,20 @@ function ensureItems(s) {
   G.items.busy = true;
   const who = G.who;
   G.ctx
-    .get('game-items?loc=' + encodeURIComponent(loc))
+    .get((live() ? 'live-items?loc=' : 'game-items?loc=') + encodeURIComponent(loc))
     .then((r) => {
       if (G.who !== who) return;
       G.items = { loc: r.loc, list: r.items ?? [], at: Date.now(), busy: false };
+      if (live()) {
+        // a real yard: the first amount of a part tapped before its count came; nothing already picked is ever changed
+        if (G.pending && PICKING.includes(G.mode) && !G.picks.get(G.pending)) {
+          const q = glFirst(liveItem(G.ctx.state, G.pending), G.mode);
+          if (q) G.picks.set(G.pending, q);
+        }
+        G.pending = null;
+        refreshNow();
+        return;
+      }
       if (G.pending && PICKING.includes(G.mode)) {
         const p = products(G.ctx.state).find((x) => x.id === G.pending),
           first = stopsFor(G.ctx.state, p)[0];
@@ -1399,11 +1558,6 @@ const sfApi = () => ({
 }); // soft: being removed (its site window shows Removing)
 const openSheet = () => document.querySelector('.gm-body')?.classList.add('sheet');
 function setMode(mode, site) {
-  // the real yard: nothing is sent or brought back from the board yet (a person confirms each step, next)
-  if (live() && (mode === 'send' || mode === 'back')) {
-    pop(LIVE_NEXT, 'tick');
-    return;
-  }
   hideCard();
   G.mode = mode;
   G.picks = new Map();
@@ -1657,7 +1811,13 @@ function onClick(e) {
       return;
     }
     G.sel = id;
-    if (!G.picks.get(id)) {
+    if (!G.picks.get(id) && live() && G.mode !== 'add') {
+      const it = liveItem(s, id);
+      if (it) {
+        const q = glFirst(it, G.mode);
+        if (q) G.picks.set(id, q);
+      } else G.pending = id;
+    } else if (!G.picks.get(id)) {
       const p = products(s).find((x) => x.id === id),
         first = stopsFor(s, p)[0];
       if (first) G.picks.set(id, first.qty);
@@ -1670,6 +1830,26 @@ function onClick(e) {
     G.picks.delete(G.sel);
     G.sel = null;
     refreshNow();
+    return;
+  }
+  if (b.dataset.gmStep && live() && G.mode !== 'add') {
+    const q = Math.max(0, (G.picks.get(G.sel) ?? 0) + Number(b.dataset.gmStep));
+    if (q) G.picks.set(G.sel, q);
+    else G.picks.delete(G.sel);
+    refreshNow();
+    return;
+  }
+  if (b.dataset.gmPack) {
+    const pack = Number(b.dataset.gmPack),
+      q = G.picks.get(G.sel) ?? 0;
+    if (pack > 0 && G.sel) G.picks.set(G.sel, Math.max(pack, Math.round(q / pack) * pack));
+    refreshNow();
+    return;
+  }
+  if (b.hasAttribute('data-gm-later')) {
+    const o = G.win?.order;
+    closeWin();
+    if (o) pop(o.label + ' waits on Today until a truck is booked.', 'go');
     return;
   }
   if (b.dataset.gmStep) {
@@ -1709,7 +1889,26 @@ function onClick(e) {
         setMode('yard');
         wmFocus('director');
       };
-    if (b.dataset.gmDo === 'send')
+    // a real yard: an order of exactly these pieces, then a truck and driver
+    const booked = (r) => {
+      G.lastSite = site;
+      G.hintOff.add('live-send'); // the first order is made: the tip has done its job
+      store.set(hintKey(), [...G.hintOff].join(','));
+      setMode('yard');
+      openBook(r.order);
+    };
+    if (b.dataset.gmDo === 'order') run('orderCreate', { site, lines, source: 'board' }, booked);
+    else if (b.dataset.gmDo === 'backorder') run('bringBackCreate', { site, lines, source: 'board' }, booked);
+    else if (b.dataset.gmDo === 'backorderall') {
+      const all = (itemsFor(site) ?? [])
+        .filter((x) => x.free > 0)
+        .map((x) => ({ product: x.product, quantity: x.free }));
+      if (!all.length) {
+        ctx.notify('Nothing at ' + name + ' is free to bring back.');
+        return;
+      }
+      run('bringBackCreate', { site, lines: all, source: 'board' }, booked);
+    } else if (b.dataset.gmDo === 'send')
       run('gameSend', { site, lines }, (r) => {
         G.lastSite = site;
         if (r.queued) pop(r.message, 'go');
@@ -1740,6 +1939,17 @@ function setPickFromIndex(k) {
   const s = G.ctx.state,
     p = products(s).find((x) => x.id === G.sel);
   if (!p) return;
+  // a real yard: the slider is in single pieces, the number is exactly what it shows
+  if (live() && G.mode !== 'add') {
+    const q = Math.max(0, Math.floor(k));
+    if (q) G.picks.set(p.id, q);
+    else G.picks.delete(p.id);
+    const box = document.querySelector('[data-gm-num]');
+    if (box && document.activeElement !== box) box.value = String(q);
+    const w = document.querySelector('[data-gm-words]');
+    if (w) w.textContent = glWords(q, liveItem(s, p.id), G.mode);
+    return;
+  }
   const stops = stopsFor(s, p);
   if (!stops.length) return;
   if (k <= 0) G.picks.delete(p.id);
@@ -1769,9 +1979,34 @@ function setPickFromIndex(k) {
 }
 function onInput(e) {
   if (e.target.matches('[data-gm-range]')) setPickFromIndex(Number(e.target.value));
+  // a real yard: the words under the part follow the number as it is typed (kept exactly, never snapped)
+  if (e.target.matches('[data-gm-num]') && live() && G.mode !== 'add' && G.sel) {
+    const q = Math.max(0, Math.floor(Number(e.target.value) || 0));
+    if (q) G.picks.set(G.sel, q);
+    else G.picks.delete(G.sel);
+    const w = document.querySelector('[data-gm-words]');
+    if (w) w.textContent = glWords(q, liveItem(G.ctx.state, G.sel), G.mode);
+    const r = document.querySelector('[data-gm-range]');
+    if (r) {
+      if (q > Number(r.max)) r.max = String(q);
+      r.value = String(q);
+    }
+  }
 }
 function onChange(e) {
   const t = e.target;
+  // the truck booking after a real yard's Send: a new truck or day moves the time to that truck's next free hour; a time picked stays
+  if (t.closest?.('[data-gm-book-form]') && G.win?.kind === 'book') {
+    const w = G.win;
+    if (t.name === 'time') w.time = t.value;
+    else if (t.name === 'truck' || t.name === 'day' || t.name === 'driver') {
+      w[t.name] = t.value;
+      if (!w.timeSet) w.time = null;
+      refreshNow();
+    }
+    if (t.name === 'time') w.timeSet = true;
+    return;
+  }
   if (t.matches('[data-gm-range]')) {
     setPickFromIndex(Number(t.value));
     t.blur();
@@ -1784,7 +2019,9 @@ function onChange(e) {
     if (!p) return;
     const want = Math.max(0, Math.floor(Number(t.value) || 0));
     let q = want;
-    if (G.mode === 'add') {
+    if (live() && G.mode !== 'add')
+      q = want; // a real yard: kept exactly as typed, never snapped
+    else if (G.mode === 'add') {
       const step = p.packQuantity > 0 ? p.packQuantity : null;
       if (step && want) q = Math.ceil(want / step) * step;
     } else q = gpSnap(stopsFor(s, p), want);
@@ -1799,6 +2036,42 @@ function onChange(e) {
   }
 }
 function onSubmit(e) {
+  const bk = e.target.closest('[data-gm-book-form]');
+  if (bk) {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(bk)),
+      w = G.win;
+    if (!w?.order) return;
+    Object.assign(w, { truck: d.truck, driver: d.driver, day: d.day, time: d.time, err: null, busy: true });
+    refreshNow();
+    G.ctx
+      .cmd('tripBook', {
+        orders: [w.order.id],
+        truck: d.truck,
+        driver: d.driver,
+        day: d.day || undefined,
+        time: d.time || undefined,
+      })
+      .then(async (r) => {
+        G.win = null;
+        await G.ctx.refresh();
+        pop(r.message, 'go');
+      })
+      .catch((err) => {
+        if (G.win === w) Object.assign(w, { err: err.message, busy: false });
+      })
+      .finally(() => refreshNow());
+    return;
+  }
+  const mf = e.target.closest('[data-gm-mins]');
+  if (mf) {
+    e.preventDefault();
+    const v = String(new FormData(mf).get('minutes') ?? '').trim();
+    run('siteDetails', { id: mf.dataset.gmMins, plannedMinutes: v === '' ? null : Number(v) }, () =>
+      pop(v ? 'Trips there usually take ~' + v + ' min.' : 'Learnt from the confirmed trips.', 'tick'),
+    );
+    return;
+  }
   const f = e.target.closest('[data-gm-newsite-form]');
   if (!f) return;
   e.preventDefault();
@@ -1812,8 +2085,7 @@ function onSubmit(e) {
       G.win = null;
       G.lastSite = r.site.id;
       sfUndo(r.site, sfApi());
-      // the real yard sends nothing from the board yet: the new site opens (its window says what comes next), no second "comes next" toast
-      setMode(live() ? 'site' : 'send', r.site.id);
+      setMode('send', r.site.id);
       setTimeout(() => wmFocus('site', r.site.id), 700);
     },
   );

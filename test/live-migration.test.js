@@ -1,6 +1,6 @@
 // Migration 007 (LIVE mode, company time zone, ledger provenance) on an existing database: every company becomes the Practice yard (DEMO),
 // every old ledger row is ENGINE with occurred_at = created_at, and nothing else changes. SCAFFOLD_MIGRATION_SAMPLE=<a copy of a real
-// database at schema 6> runs the same check on that copy too (never the live database: the copy is copied again into a temp folder).
+// database at schema 5 or 6> runs the same check on that copy too (never the live database: the copy is copied again into a temp folder).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -87,7 +87,7 @@ function checkMigrated(path, backups = null) {
     db.close();
   }
   if (backups) {
-    const saved = readdirSync(backups).filter((n) => /-before-update-v6-to-v8-.*.sqlite$/.test(n));
+    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v8-.*.sqlite$/.test(n));
     assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
     assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }
@@ -153,7 +153,8 @@ test('migration 007 on a copy of a real database (SCAFFOLD_MIGRATION_SAMPLE)', (
   for (const ext of ['', '-wal', '-shm']) if (existsSync(sample + ext)) copyFileSync(sample + ext, path + ext);
   const v = new DatabaseSync(path);
   try {
-    assert.equal(v.prepare('SELECT MAX(version) v FROM schema_migrations').get().v, 6, 'the sample is at schema 6');
+    const at = v.prepare('SELECT MAX(version) v FROM schema_migrations').get().v;
+    assert.ok(at >= 5 && at <= 6, 'the sample is from before the real yard (schema 5 or 6), not ' + at);
     v.exec('DELETE FROM engine_lease;PRAGMA wal_checkpoint(TRUNCATE)');
   } finally {
     v.close();

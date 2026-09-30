@@ -17,7 +17,7 @@ const fail = (/** @type {number} */ status, /** @type {string} */ message) => {
 };
 const TOKEN = /^[0-9a-f]{64}$/;
 /** @typedef {import('node:sqlite').DatabaseSync} Db */
-/** @typedef {{id:string,company_id:string,name:string,email:string,crew?:{driver:string,device:string}}} User */
+/** @typedef {{id:string,company_id:string,name:string,email:string,crew?:{driver:string,device:string,renewed?:boolean}}} User */
 
 /** @param {Db} db @param {string} company @param {string} id */
 function activeDriver(db, company, id) {
@@ -54,10 +54,18 @@ export function crewLink(service, user, input) {
       cached(db, 'INSERT INTO memberships(company_id,user_id) VALUES(?,?)').run(user.company_id, userId);
     } else {
       cached(db, 'UPDATE users SET name=? WHERE id=?').run(driver.name, userId);
-      cached(db, 'UPDATE memberships SET removed_at=NULL WHERE company_id=? AND user_id=?').run(
-        user.company_id,
-        userId,
-      );
+      // taken off the company (Account) and now given a new link: every phone signed in before stays signed out (a lost phone never
+      // comes back to life); only the phone that opens this new link signs in
+      if (
+        cached(db, 'SELECT removed_at FROM memberships WHERE company_id=? AND user_id=?').get(user.company_id, userId)
+          ?.removed_at
+      ) {
+        crewEndAll(db, user.company_id, { user: userId }, user.id);
+        cached(db, 'UPDATE memberships SET removed_at=NULL WHERE company_id=? AND user_id=?').run(
+          user.company_id,
+          userId,
+        );
+      }
     }
     cached(db, "INSERT OR IGNORE INTO user_roles VALUES(?,?,'CREW')").run(user.company_id, userId);
     const id = randomUUID(),
@@ -124,6 +132,22 @@ export function crewClaim(service, input) {
     return { token: device, device: id, driver: { id: driver.id, name: driver.name }, company: link.company };
   });
 }
+// Every phone of a driver (or of a crew sign-in) signed out, and their open links cancelled: when the driver leaves the team, when the
+// sign-in is taken off the company (Account), and before a removed sign-in is given a new link.
+/** @param {Db} db @param {string} company @param {{user?:string,driver?:string}} who @param {string} by */
+export function crewEndAll(db, company, who, by) {
+  const at = new Date().toISOString(),
+    [col, id] = who.user ? ['user_id', who.user] : ['driver_id', who.driver];
+  if (!id) return;
+  cached(
+    db,
+    `UPDATE crew_devices SET revoked_at=?,revoked_by=? WHERE company_id=? AND ${col}=? AND revoked_at IS NULL`,
+  ).run(at, by, company, id);
+  cached(
+    db,
+    `UPDATE crew_links SET cancelled_at=? WHERE company_id=? AND ${col}=? AND used_at IS NULL AND cancelled_at IS NULL`,
+  ).run(at, company, id);
+}
 // A request from a driver's phone: its device, still signed in, for a driver still on the team, in a company they still belong to.
 // Renews the device's 180 days at most once an hour.
 /** @param {Db} db @param {string|undefined} token @returns {User} */
@@ -136,7 +160,8 @@ export function crewAuthenticate(db, token) {
   ).get(hash(/** @type {string} */ (token)), Date.now());
   if (!row || !activeDriver(db, row.company_id, row.driver_id))
     fail(401, 'This phone is not signed in. Ask the office for a link.');
-  if (Date.now() - Date.parse(row.last_seen_at) > CREW_RENEW_MS)
+  const renewed = Date.now() - Date.parse(row.last_seen_at) > CREW_RENEW_MS;
+  if (renewed)
     cached(db, 'UPDATE crew_devices SET last_seen_at=?,expires_at=? WHERE id=?').run(
       new Date().toISOString(),
       Date.now() + CREW_DEVICE_MS,
@@ -147,7 +172,7 @@ export function crewAuthenticate(db, token) {
     company_id: row.company_id,
     name: row.name,
     email: row.email,
-    crew: { driver: row.driver_id, device: row.device },
+    crew: { driver: row.driver_id, device: row.device, renewed },
   };
 }
 // "Sign out this phone", from the phone itself.

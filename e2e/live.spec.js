@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-// Phase 1A part 1: the owner keeps his Practice yard and starts his real yard from Account. The real yard's board says "Live", has no Send
-// or Bring back, and its Office has no Control room or Schedule; the chip switches between the two yards with two big choices.
+// Phase 1A part 1: the owner keeps his Practice yard and starts his real yard from Account. The real yard's board says "Live" (with Send
+// and Bring back since part 2), and its Office has no Control room or Schedule; the chip switches between the two yards with two big choices.
 async function signUp(page, name) {
   await page.getByRole('textbox', { name: 'Company name', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Tee');
@@ -36,8 +36,9 @@ test('start the real yard from Account, see the LIVE board and Office, and switc
   await page.locator('[data-gm-size="S"]').click();
   await expect(bar(page)).toBeVisible({ timeout: 45000 });
   await expect(bar(page).getByRole('button', { name: 'Add stock', exact: true })).toBeVisible();
+  // part 2: Send and Bring back make exact orders in the real yard (people confirm each step: live-trips-ui.spec.js)
   for (const name of ['Send', 'Bring back'])
-    await expect(bar(page).getByRole('button', { name, exact: true })).toHaveCount(0);
+    await expect(bar(page).getByRole('button', { name, exact: true })).toBeVisible();
   // the Office: no Control room, no Schedule; the pages that keep records are there
   await page.getByRole('button', { name: 'Office', exact: true }).first().click();
   const tiles = page.getByRole('navigation', { name: 'Main navigation' });

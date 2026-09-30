@@ -50,12 +50,48 @@ import {
   OFFICE_TILES,
 } from './game.js'; // the game board (the main screen) and the Office drawer
 import { sfFinishedHTML, sfOfficeActs, sfClick } from './game-finish.js'; // Client sites: Remove site, Removed sites, Open again
-import { isLive, LIVE_STRIP, LIVE_HIDDEN_TILES, LIVE_TRUCK_NEXT, LIVE_SITES_NEXT, LIVE_CREW_NEXT } from './mode.js'; // the real yard (LIVE) or the Practice yard
+import { isLive, LIVE_STRIP, LIVE_HIDDEN_TILES, LIVE_SITES_NEXT, LIVE_CREW_NEXT } from './mode.js'; // the real yard (LIVE) or the Practice yard
 // The real yard: no simulation strip, Pause, demo answers, re-stack by the simulated crew or synthetic catalogue on its pages.
 const liveMode = () => isLive(account);
 const SIM_STRIP =
   '<div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div>';
 const modeStrip = () => (liveMode() ? LIVE_STRIP : SIM_STRIP);
+// A real yard's trips, orders and phone links (public/live-office.js, ADR 0009): loaded the first time a real yard's page needs them (ADR 0007).
+let LOM = null,
+  loLoading = false;
+const loHost = {
+  get: (p) => api(p),
+  post: (p, d) => api(p, d),
+  cmd: (a, d) => command(a, d),
+  notify: (t) => notify(t),
+  state: () => state,
+  refresh: () => refresh(true),
+  redraw: () => loRedraw(),
+};
+function lo() {
+  if (!liveMode()) return null;
+  if (!LOM && !loLoading && typeof document !== 'undefined') {
+    loLoading = true;
+    import('./live-office.js')
+      .then((m) => {
+        LOM = m;
+        m.loSetup(loHost);
+        loRedraw();
+      })
+      .catch(() => {
+        loLoading = false;
+      });
+  }
+  return LOM;
+}
+// New trip data or an opened form: Today morphs itself; another Office page is drawn again unless someone is typing in a trip form.
+function loRedraw() {
+  if (typeof document === 'undefined' || !onPage() || deferRender) return;
+  if (view === 'TODAY') return tdRedraw();
+  if (!['TRUCK12', 'TRUCK2', 'WORKERS'].includes(view)) return;
+  if (document.activeElement?.closest?.('.lo-form, .lo-link-box')) return;
+  render();
+}
 // Remove site's one fix button for an open stocktake: the stock page opens at that stocktake, marked for a moment.
 function sfFocus(id) {
   requestAnimationFrame(() => {
@@ -9129,6 +9165,7 @@ const trkScene = (heavy) =>
         : '<use href="#spr-truck2" x="196" y="54" width="160" height="90"/>') +
       '<use href="#spr-stillage" x="110" y="112" width="62" height="41"/><use href="#spr-stillage" x="110" y="88" width="62" height="41"/><use href="#spr-forklift-load" x="152" y="118" width="80" height="62"/><use href="#spr-worker" x="298" y="134" width="22" height="41"/>',
   );
+const liveTruck = (t) => (state?.liveBoard?.trucks ?? []).find((x) => x.truck === t.id) ?? null;
 const trkWhere = (t) =>
   t.status === 'IN_TRANSIT'
     ? ['road', 'On the road']
@@ -9137,7 +9174,17 @@ const trkWhere = (t) =>
       : ['yard', 'At the yard'];
 // What the truck is doing, in the truck-stage words the Overview and Home use, as a pill in the crew-card colours.
 const trkDoing = (t) => {
-  if (liveMode()) return ['idle', 'Parked']; // the real yard: a record of where it is, never a stage of a simulated run
+  // the real yard: its last confirmed step (state.liveBoard), never a stage of a simulated run
+  if (liveMode()) {
+    const x = liveTruck(t);
+    if (!x || x.state === 'PARKED') return ['idle', 'Parked'];
+    if (x.late || x.flag) return ['job', 'Not confirmed'];
+    return x.state === 'BOOKED'
+      ? ['job', 'Booked']
+      : x.state === 'AT_SITE'
+        ? ['job', 'At the site']
+        : ['drive', x.state === 'TO_SITE' ? 'Loaded & left' : 'Coming back'];
+  }
   if (t.status === 'IN_TRANSIT') return t.deckArea > 0 ? ['drive', 'Delivering a load'] : ['walk', 'Travelling empty'];
   const s = truckStage(t, state);
   return s === 'UNLOADING'
@@ -9251,19 +9298,22 @@ function trkTrip(t) {
     to = t.destination,
     trip = t.trip,
     art = heavyTruck(t) ? 'spr-truck12' : 'spr-truck2';
-  const note = road
-    ? 'Truck travelling. Its cargo remains truck stock.'
-    : trip?.status === 'ARRIVED'
-      ? 'Arrived from ' + esc(name(trip.from)) + (t.deckArea > 0 ? ' with a load on' : '')
-      : trip?.status === 'DELIVERED'
-        ? 'Last trip delivered to ' + esc(name(trip.to))
-        : trip?.status === 'RETURNED'
-          ? 'Last trip came back empty'
-          : liveMode()
-            ? 'Parked where it was last recorded.'
-            : to
-              ? 'Next stop picked. Dispatch when loaded.'
-              : 'No destination yet. Pick one below.';
+  const note = liveMode()
+    ? esc(liveTruck(t)?.words ?? 'Parked where it was last recorded.') +
+      (liveTruck(t)?.estimate ? ' <small>(an estimate: it arrives when Delivered is confirmed)</small>' : '')
+    : road
+      ? 'Truck travelling. Its cargo remains truck stock.'
+      : trip?.status === 'ARRIVED'
+        ? 'Arrived from ' + esc(name(trip.from)) + (t.deckArea > 0 ? ' with a load on' : '')
+        : trip?.status === 'DELIVERED'
+          ? 'Last trip delivered to ' + esc(name(trip.to))
+          : trip?.status === 'RETURNED'
+            ? 'Last trip came back empty'
+            : liveMode()
+              ? 'Parked where it was last recorded.'
+              : to
+                ? 'Next stop picked. Dispatch when loaded.'
+                : 'No destination yet. Pick one below.';
   return (
     '<div class="trk-trip' +
     (road ? ' moving' : '') +
@@ -9395,7 +9445,13 @@ function trkGarage(t) {
     trkGauges(t) +
     trkTrip(t) +
     '</div></div>' +
-    (lv ? '<p class="trk-live-next">' + esc(LIVE_TRUCK_NEXT) + '</p>' : trkRuns(t) + rtTruckPanel(t)) +
+    (lv
+      ? (lo()?.loTripsFor({
+          truck: t.id,
+          ops: isOps(),
+          empty: 'No trips for this truck today. Book one from Send on the board, or on Today.',
+        }) ?? '')
+      : trkRuns(t) + rtTruckPanel(t)) +
     manifestPanel(
       state.deliveries.find((d) => d.id === t.delivery),
       'Delivery docket on board',
@@ -21618,6 +21674,7 @@ function tdhDay(p, today, sel) {
     (rel ? '<span class="tdh-tag' + (sel === today ? ' is-today' : '') + '">' + rel + '</span>' : '') +
     '</div>' +
     '<div class="tdh-items">' +
+    (liveMode() && !past ? (lo()?.loWaitingHTML({ day: sel, ops: tdhCanPlan() }) ?? '') : '') +
     body +
     empty +
     '</div>' +
@@ -21804,7 +21861,9 @@ function tdhItem(v) {
       '</span></p>';
   if (v.type === 'TRUCK') {
     if (v.driverRow) body += '<ul class="tdh-people">' + tdhPerson(v.driverRow, v, 'driver') + '</ul>';
-    if (v.loads?.length)
+    // a real yard: the booking's trips, each with its docket, the steps people confirmed and the next one (the office can confirm for the driver)
+    if (liveMode() && !v.hire) body += lo()?.loTripsFor({ day: v.day, truckPlan: v.id, ops }) ?? '';
+    if (v.loads?.length && !liveMode())
       body +=
         '<p class="tdh-meta">Takes: ' +
         v.loads.map((l) => 'the list for ' + esc(l.siteName ?? 'a site')).join(', ') +
@@ -21851,6 +21910,7 @@ function tdhItem(v) {
       ' &middot; ' +
       (v.truckPlanName ? 'goes on ' + esc(v.truckPlanName) : 'goes on the next free truck') +
       '</p>';
+    if (liveMode()) body += lo()?.loListOrder(v.id, v.day) ?? ''; // its order: "O-1 · Waiting for a truck · held exactly"
     for (const s of v.short ?? [])
       body +=
         '<p class="tdh-problem">Short: ' + num(s.missing) + ' &times; ' + esc(s.name) + ' weren’t in the yard</p>';
@@ -23858,15 +23918,26 @@ function tmTeam() {
       (drv ? 'data-cw-driver' : 'data-cw-open') +
       '="' +
       esc(x.id) +
-      '">' +
+      '"' +
+      (drv && liveMode()
+        ? ' title="The office answers their asks for them here. Their own phone: Phone link below."'
+        : '') +
+      '>' +
       tdhPhone +
-      '<span>Phone view</span></button><button type="button" class="tdh-link" data-tm-remove="' +
+      // a real yard's driver has their own phone (Phone link, below): this one is the office answering for them
+      (drv && liveMode() ? '<span>Answer for them</span>' : '<span>Phone view</span>') +
+      '</button><button type="button" class="tdh-link" data-tm-remove="' +
       esc(x.id) +
       '"' +
       (x.away ? ' disabled title="Away at a site today"' : '') +
-      '>Remove</button></span></li>'
+      '>Remove</button></span></li>' +
+      // a real yard: the driver's own phone (a link to send, the phones signed in, Sign out this phone)
+      (drv && liveMode() && LOM
+        ? '<li class="tm-phone-row">' + LOM.loPhoneHTML({ id: x.id, name: x.name }) + '</li>'
+        : '')
     );
   };
+  if (liveMode()) lo();
   const add =
     '<form class="tm-add" data-tm-add><b class="tm-add-title">Add a person</b><label class="tm-f"><span>Name</span><input name="name" maxlength="60" value="' +
     esc(tmAddDraft.name) +

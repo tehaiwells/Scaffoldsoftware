@@ -584,7 +584,13 @@ function settingsHome() {
     ops = state.permissions.includes('operations.manage'),
     roles = myRoles();
   const on = state.systems.filter((x) => x.enabled),
-    users = state.users ?? [];
+    // a driver's phone sign-in (role CREW) is not a person who signs in here: phones are on Workers, Your team
+    users = (state.users ?? []).filter(
+      (u) =>
+        !String(u.roles ?? '')
+          .split(',')
+          .includes('CREW'),
+    );
   const count = (r) =>
     users.filter((u) =>
       String(u.roles ?? '')

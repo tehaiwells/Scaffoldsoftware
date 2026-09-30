@@ -1,0 +1,443 @@
+/* A driver's phone: "My trips" (public/crew.js). Built for a phone at 375 px in the sun: big type, dark ink on a light page, big buttons. */
+:root {
+  --cr-ink: #0d1f17;
+  --cr-soft: #3d5247;
+  --cr-page: #f3f0e6;
+  --cr-card: #ffffff;
+  --cr-line: #c9cfc2;
+  --cr-green: #16382c;
+  --cr-go: #1b5e3f;
+  --cr-lime: #d2ea83;
+  --cr-amber: #8a4a00;
+  --cr-amber-bg: #ffe7c2;
+  --cr-done: #1f6b3a;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--cr-page);
+  color: var(--cr-ink);
+  font:
+    19px/1.4 system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Arial,
+    sans-serif;
+}
+.cr {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 14px calc(28px + env(safe-area-inset-bottom));
+}
+.cr-loading {
+  padding: 40px 6px;
+  font-size: 20px;
+  color: var(--cr-soft);
+}
+.cr-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -14px 14px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 14px;
+  background: var(--cr-green);
+  color: #fff;
+}
+.cr-top b {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cr-lime);
+  letter-spacing: 0.02em;
+}
+.cr-top h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+.cr-truck {
+  width: 58px;
+  height: 33px;
+  flex: none;
+}
+.cr-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #e2ecd9;
+  font-weight: 600;
+}
+.cr-bar.off {
+  background: var(--cr-amber-bg);
+  color: var(--cr-amber);
+}
+.cr-dot {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  animation: cr-blink 1.6s ease-in-out infinite;
+}
+@keyframes cr-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cr-dot {
+    animation: none;
+  }
+}
+.cr-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 2px solid var(--cr-amber);
+  border-radius: 12px;
+  background: var(--cr-amber-bg);
+  color: var(--cr-amber);
+}
+.cr-problem p {
+  margin: 0;
+  flex: 1;
+}
+.cr-day {
+  margin: 18px 2px 8px;
+  font-size: 17px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cr-soft);
+}
+.cr-card {
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 2px solid var(--cr-line);
+  border-radius: 16px;
+  background: var(--cr-card);
+  box-shadow: 0 2px 0 #0000000f;
+}
+.cr-card.is-open {
+  border-color: var(--cr-go);
+  box-shadow: 0 0 0 3px #1b5e3f33;
+}
+.cr-card.is-flag {
+  border-color: var(--cr-amber);
+}
+.cr-card.is-done {
+  opacity: 0.86;
+}
+.cr-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.cr-time {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--cr-green);
+  color: #fff;
+  font-weight: 800;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.cr-where b {
+  display: block;
+  font-size: 23px;
+  line-height: 1.2;
+}
+.cr-where small {
+  display: block;
+  margin-top: 2px;
+  font-size: 17px;
+  color: var(--cr-soft);
+}
+.cr-state {
+  display: inline-block;
+  margin: 10px 0 0;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: #e4e9df;
+  font-size: 16px;
+  font-weight: 700;
+}
+.cr-state.st-loaded,
+.cr-state.st-collected {
+  background: #fff1c9;
+}
+.cr-state.st-delivered,
+.cr-state.st-returned {
+  background: #d6efd9;
+  color: var(--cr-done);
+}
+.cr-state.st-delivered_short,
+.cr-state.is-flag {
+  background: var(--cr-amber-bg);
+  color: var(--cr-amber);
+}
+.cr-contact {
+  margin: 8px 0 0;
+  font-size: 17px;
+}
+.cr-contact a {
+  color: var(--cr-go);
+  font-weight: 700;
+}
+.cr-lines {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--cr-line);
+}
+.cr-lines li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--cr-line);
+}
+.cr-name {
+  min-width: 0;
+  font-size: 18px;
+}
+.cr-name small {
+  display: block;
+  font-size: 15px;
+  color: var(--cr-amber);
+  font-weight: 700;
+}
+.cr-n {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.cr-total {
+  margin: 6px 0 0;
+  text-align: right;
+  color: var(--cr-soft);
+  font-size: 16px;
+}
+.cr-steps {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 17px;
+}
+.cr-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.cr-done {
+  color: var(--cr-done);
+  font-weight: 600;
+}
+.cr-tick {
+  font-weight: 900;
+}
+.cr-wait {
+  color: var(--cr-amber);
+  font-weight: 600;
+}
+.cr-big {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  margin: 14px 0 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--cr-go);
+  color: #fff;
+  font: inherit;
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 3px 0 #0b2e1e;
+}
+.cr-big:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #0b2e1e;
+}
+.cr-big.cr-soft {
+  min-height: 54px;
+  background: #fff;
+  color: var(--cr-go);
+  border: 2px solid var(--cr-go);
+  box-shadow: none;
+  font-size: 20px;
+}
+.cr-big:focus-visible,
+.cr-link:focus-visible,
+.cr-step:focus-visible,
+input:focus-visible {
+  outline: 3px solid #e0ad1f;
+  outline-offset: 2px;
+}
+.cr-link {
+  border: 0;
+  background: none;
+  color: var(--cr-go);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  padding: 10px 4px;
+  cursor: pointer;
+}
+.cr-confirm .cr-link {
+  display: block;
+  margin: 6px auto 0;
+}
+.cr-ask {
+  margin: 12px 0 0;
+  font-weight: 600;
+}
+.cr-edit li.changed {
+  background: #fff7e3;
+}
+.cr-qty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.cr-step {
+  width: 48px;
+  height: 48px;
+  border: 2px solid var(--cr-line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--cr-ink);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.cr-qty input {
+  width: 74px;
+  height: 48px;
+  border: 2px solid var(--cr-ink);
+  border-radius: 12px;
+  text-align: center;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 800;
+}
+.cr-rcv {
+  display: block;
+  margin: 14px 0 0;
+  font-weight: 700;
+}
+.cr-rcv input {
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin-top: 6px;
+  padding: 0 14px;
+  border: 2px solid var(--cr-ink);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 21px;
+}
+.cr-err {
+  margin: 10px 0 0;
+  color: var(--cr-amber);
+  font-weight: 700;
+}
+.cr-none,
+.cr-gate {
+  margin: 24px 0;
+  padding: 26px 18px;
+  border-radius: 16px;
+  background: var(--cr-card);
+  text-align: center;
+}
+.cr-gate .cr-truck,
+.cr-none .cr-truck {
+  width: 84px;
+  height: 48px;
+}
+.cr-gate h1,
+.cr-none h2 {
+  margin: 12px 0 6px;
+  font-size: 24px;
+}
+.cr-small {
+  color: var(--cr-soft);
+  font-size: 17px;
+}
+.cr-foot {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cr-line);
+}
+.cr-out {
+  color: #7a2419;
+}
+/* "Jarrah Smith again?": last time's name at this site, offered, never filled in */
+.cr-chip {
+  display: inline-block;
+  margin: 10px 0 0;
+  padding: 10px 16px;
+  border: 2px solid var(--cr-go);
+  border-radius: 999px;
+  background: #eef6ea;
+  color: var(--cr-go);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+/* a finished trip: one line under "Done" */
+.cr-card.cr-one {
+  padding: 10px 14px;
+  opacity: 1;
+  border-width: 1px;
+  background: #fbfaf5;
+}
+.cr-one-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+}
+.cr-one-line .cr-time {
+  font-size: 17px;
+  background: #5c7065;
+}
+.cr-one-line b {
+  display: block;
+  font-size: 19px;
+  line-height: 1.2;
+}
+.cr-one-line small {
+  display: block;
+  color: var(--cr-done);
+  font-size: 16px;
+  font-weight: 600;
+}
+.cr-back {
+  margin-top: 4px;
+  font-size: 17px;
+}
+.cr-back small {
+  font-weight: 500;
+  color: var(--cr-soft);
+}

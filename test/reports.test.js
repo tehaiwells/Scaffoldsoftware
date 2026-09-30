@@ -378,7 +378,8 @@ test('50,000 ledger rows: the first report replays them within budget and the ne
   assert.ok(r.pieces.check.ok, 'rebuilt ' + r.pieces.check.rebuilt + ' vs live ' + r.pieces.check.actual);
   assert.equal(r.pieces.now, 200 + added);
   assert.equal(r2.pieces.now, 201 + added);
-  assert.ok(cold < 1500, 'cold replay took ' + cold + ' ms');
+  // about 250 ms alone; the budget leaves room for a busy machine running the whole suite in parallel (the benchmark smoke gates speed)
+  assert.ok(cold < 3000, 'cold replay took ' + cold + ' ms');
   assert.ok(warm < 5, 'cached read took ' + warm + ' ms');
   assert.ok(step < 250, 'incremental took ' + step + ' ms');
 });

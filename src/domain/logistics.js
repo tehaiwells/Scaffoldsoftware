@@ -162,6 +162,8 @@ export const logisticsMethods = {
   },
   archive(input) {
     const site = this.repo.get(input.id, 'site');
+    const busy = this.tripSiteBusy?.(site.id); // a real yard: an order or a trip for it still open (ADR 0009)
+    requireRule(!busy, busy);
     requireRule(
       !this.containers().some((c) => c.location === site.id),
       'Return all containers and stock before archiving.',

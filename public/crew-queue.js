@@ -2,11 +2,13 @@
 // a place to keep text (localStorage) and a way to send (fetch); the tests give it fakes. Used by the crew page (public/crew.js).
 //   tap(action, input)  a tap is stored at once, with its own idempotency key and the time of the tap (atSource 'tap'), before anything is sent
 //   flush()             sends the stored taps in order, each with its own key, until one cannot be sent (offline, or the server is busy)
-// A tap is dropped from the queue only when the server answered it: done (2xx), already done by someone else (409 ALREADY_CONFIRMED), or
-// refused for good (another 4xx: kept in problems() for the driver to see). A lost answer is resent with the SAME key and input, so the server
-// replays its first answer and the step is recorded once.
+// A tap is dropped from the queue only when the server answered it: done (2xx), already done by someone else (409 ALREADY_CONFIRMED: quietly
+// when they recorded the same, else kept in problems() with what the office recorded, so the driver sees the difference), or refused for good
+// (another 4xx: kept in problems() for the driver to see). A lost answer is resent with the SAME key and input, so the server replays its
+// first answer and the step is recorded once. A phone that is not signed in any more (401) keeps its taps: they go once it signs in again.
 const KEY = 'sy-crew-taps',
-  PROBLEMS = 'sy-crew-problems';
+  PROBLEMS = 'sy-crew-problems',
+  SIGNED_OUT = 'sy-crew-signed-out';
 /**
  * @typedef {{key:string,action:string,input:Record<string,any>,tappedAt:string,tries:number}} Tap
  * @typedef {{status:number,body:any}} Answer
@@ -39,6 +41,9 @@ export function createCrewQueue(store, send, { mintKey, now = () => Date.now(), 
     pending: () => read(KEY),
     problems: () => read(PROBLEMS),
     clearProblems: () => write(PROBLEMS, []),
+    // true after the server said this phone is not signed in (the taps wait for a new link)
+    signedOut: () => read(SIGNED_OUT).length > 0,
+    signedIn: () => write(SIGNED_OUT, []),
     /** @param {string} action @param {Record<string,any>} input @returns {Tap} */
     tap(action, input) {
       const at = new Date(now()).toISOString();
@@ -71,10 +76,21 @@ export function createCrewQueue(store, send, { mintKey, now = () => Date.now(), 
               break; // offline, or the answer was lost: the same tap (same key) goes again next time
             }
             if (answer.status >= 500 || answer.status === 429) break; // busy: try again later, same key
+            if (answer.status === 401) {
+              write(SIGNED_OUT, [now()]); // not signed in any more: every tap stays, to go after a new link
+              break;
+            }
+            if (answer.status < 300) write(SIGNED_OUT, []);
             const rest = read(KEY).filter((x) => x.key !== t.key);
             write(KEY, rest);
             answered++;
-            if (answer.status >= 400 && !(answer.status === 409 && answer.body?.code === 'ALREADY_CONFIRMED'))
+            const already = answer.status === 409 && answer.body?.code === 'ALREADY_CONFIRMED';
+            if (already && answer.body?.detail?.same === false)
+              write(PROBLEMS, [
+                ...read(PROBLEMS),
+                { ...t, error: answer.body?.error ?? 'Already recorded.', status: 409, conflict: answer.body.detail },
+              ]);
+            else if (answer.status >= 400 && !already)
               write(PROBLEMS, [
                 ...read(PROBLEMS),
                 { ...t, error: answer.body?.error ?? 'Not recorded.', status: answer.status },
