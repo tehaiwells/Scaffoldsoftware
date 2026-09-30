@@ -1,3 +1,4 @@
+// @ts-check
 import { cached } from '../database.js';
 import { AppError } from '../service.js';
 import { requireRule,integer } from './geometry.js';
@@ -27,6 +28,17 @@ import { localDay,addDays,daysBetween,calendarNow,dayLabel } from './schedule.js
 // rate changes. Pieces collected before the minimum hire add a 'minimum hire' top-up line (the rate in force on the return day), on the statement whose
 // period holds the return day. Amount per line rounded to the cent; GST is 10% of the subtotal, rounded to the cent.
 // A material with no rate is flagged and left out of every total.
+/** A day as 'YYYY-MM-DD' (local calendar day). @typedef {string} Day */
+/** Why a lot stopped being on hire: null = collected; the others never charge a minimum-hire top-up except 'transit'.
+ * @typedef {null|'transit'|'counted'|'removed'|'transfer'} CloseReason */
+/** Pieces on hire since start (first: when they first went out, for pieces transferred from another site). @typedef {{q:number,start:Day,first?:Day|null}} OpenLot */
+/** @typedef {{q:number,start:Day,end:Day,first?:Day|null,why?:CloseReason,tag?:string}} ClosedLot */
+/** @typedef {{open:OpenLot[],closed:ClosedLot[]}} HireSlot */
+/** Lots per site id, then per product id. @typedef {Map<string,Map<string,HireSlot>>} HireBook */
+/** One dated rate version, in cents ex GST. @typedef {{from:Day|null,week:number|null,day:number|null,minDays:number|null}} RateVersion */
+/** A rate object as stored (versions, or the older single week/day/minDays). @typedef {{versions?:RateVersion[],week?:number|null,day?:number|null,minDays?:number|null}} RateRecord */
+/** The rate that applies (hireRateFor). @typedef {{week:number|null,day:number|null,minDays:number|null,source:'site'|'standard'|null,minSource:'site'|'standard'|null,priced:boolean,rule:null|'both'|'day'|'week',perDay:number|null,perWeek:number|null}} HireRate */
+/** A period with one rate in force (to null = on). @typedef {{from:Day|null,to:Day|null,rate:HireRate}} RateSegment */
 export const GST_PERCENT=10;
 const MAX_DAYS=400,BATCH=5000,MAX_CENTS=10000000;
 const ADD=new Set(['OPENING_BALANCE','PURCHASE']),REMOVE=new Set(['STOCK_REMOVED','DEMO_PURGED']),ADJUST='STOCKTAKE_ADJUSTMENT',MOVE=new Set(['PICKUP','PLACEMENT','REPACK_PICKUP']);
@@ -37,32 +49,39 @@ const TOPUP=new Set([undefined,null,'collected','transit']);
 
 // ---- The pure core (tested in node): a book of lots per site and product, replayed in ledger order. ----
 // A lot: {q, start, first?} (first: the day the pieces first went out when they came from another site). A closed lot: {q, start, end, first?, why?, tag?}.
+/** @returns {HireBook} */
 export function hireBook(){return new Map();}
 const slot=(book,site,product)=>{let m=book.get(site);if(!m)book.set(site,m=new Map());let s=m.get(product);if(!s)m.set(product,s={open:[],closed:[]});return s;};
 // Open lots stay in start order (FIFO); lots with the same start (and first) merge.
 function openAdd(s,lot){let i=s.open.length;while(i>0&&s.open[i-1].start>lot.start)i--;const prev=s.open[i-1];if(prev&&prev.start===lot.start&&(prev.first??null)===(lot.first??null)){prev.q+=lot.q;return;}s.open.splice(i,0,{q:lot.q,start:lot.start,...(lot.first?{first:lot.first}:{})});}
+/** @param {HireBook} book @param {string} site @param {string} product @param {number} q @param {Day} day @param {Day|null} [first] */
 export function hireArrive(book,site,product,q,day,first=null){if(!(q>0))return;openAdd(slot(book,site,product),{q,start:day,first:first&&first<day?first:null});}
 const sameClosed=(a,b)=>a.start===b.start&&a.end===b.end&&(a.first??null)===(b.first??null)&&(a.why??null)===(b.why??null)&&(a.tag??null)===(b.tag??null);
 // Ends hire for q pieces, oldest first. why: null (collected), 'transit', 'counted', 'removed' or 'transfer'; tag marks the lots one truck load took.
 // Returns the pieces that could not be matched to anything on hire (a ledger that starts mid-story).
+/** @param {HireBook} book @param {string} site @param {string} product @param {number} q @param {Day} day @param {CloseReason} [why] @param {string|null} [tag] @returns {number} */
 export function hireLeave(book,site,product,q,day,why=null,tag=null){if(!(q>0))return 0;const s=slot(book,site,product);let left=q;
  while(left>0&&s.open.length){const lot=s.open[0],n=Math.min(lot.q,left),rec={q:n,start:lot.start,end:day,...(lot.first?{first:lot.first}:{}),...(why?{why}:{}),...(tag?{tag}:{})};
   const last=s.closed.at(-1);if(last&&sameClosed(last,rec))last.q+=n;else s.closed.push(rec);lot.q-=n;left-=n;if(!lot.q)s.open.shift();}
  return left;}
 // Puts up to q pieces of the closed lots that match back on hire with their original start day (most recently closed first). Returns how many.
+/** @param {HireBook} book @param {string} site @param {string} product @param {number} q @param {(lot:ClosedLot)=>boolean} match @returns {number} */
 export function hireReopen(book,site,product,q,match){const s=slot(book,site,product);let left=q;
  for(let i=s.closed.length-1;i>=0&&left>0;i--){const c=s.closed[i];if(!match(c))continue;const n=Math.min(c.q,left);c.q-=n;left-=n;openAdd(s,{q:n,start:c.start,first:c.first??null});if(!c.q)s.closed.splice(i,1);}
  return q-left;}
 // Settles the lots one truck load took (tag): why = null (collected), 'transfer' or 'removed'. Returns them (for a transfer they arrive at the next site).
+/** @param {HireBook} book @param {string} site @param {string} product @param {string} tag @param {CloseReason} [why] @returns {OpenLot[]} */
 export function hireSettle(book,site,product,tag,why=null){const s=slot(book,site,product),out=[];
  for(const c of s.closed){if(c.tag!==tag)continue;delete c.tag;if(why)c.why=why;else delete c.why;out.push({q:c.q,start:c.start,first:c.first??null});}
  return out;}
 // Days of [start, end) that fall inside [from, to] (to inclusive).
+/** @type {(start:Day,end:Day,from:Day,to:Day)=>number} */
 export const overlapDays=(start,end,from,to)=>{const a=start>from?start:from,b0=addDays(to,1),b=end<b0?end:b0;return b>a?daysBetween(a,b):0;};
 // Every lot of one site and product as [q, start, end) with open lots running to the end of today.
 const lotsOf=(s,today)=>[...s.closed.map(l=>({q:l.q,start:l.start,end:l.end,first:l.first??null,why:l.why??null,closed:true})),...s.open.map(l=>({q:l.q,start:l.start,end:addDays(today,1),first:l.first??null,why:null,closed:false}))];
 const heldFor=l=>daysBetween(l.first??l.start,l.end);
 // Per-day pieces on hire, piece-days and minimum-hire top-up piece-days for one site and product over [from, to].
+/** @param {HireSlot} s @param {Day} from @param {Day} to @param {Day} today @param {number|null} [minDays] @returns {{daily:number[],pieceDays:number,topUp:number,start:number,end:number}} */
 export function hirePeriod(s,from,to,today,minDays=null){
  const lots=lotsOf(s,today),n=daysBetween(from,to)+1,daily=new Array(Math.max(0,n)).fill(0);let pieceDays=0,topUp=0;
  for(const l of lots){const d=overlapDays(l.start,l.end,from,to);if(!d)continue;pieceDays+=l.q*d;const first=daysBetween(from,l.start>from?l.start:from);for(let i=0;i<d;i++)daily[first+i]+=l.q;}
@@ -70,6 +89,7 @@ export function hirePeriod(s,from,to,today,minDays=null){
  return {daily,pieceDays,topUp,start:daily[0]??0,end:daily.at(-1)??0};}
 // The rate that applies from a standard version and a site version: a site price (week and/or day) replaces the standard price as a whole (a negotiated
 // week price is never mixed with the standard day price); the minimum comes from the site when it sets one, else from the standard.
+/** @param {RateVersion|null} standard @param {RateVersion|null} override @returns {HireRate} */
 export function hireRateFor(standard,override){const own=!!override&&(override.week!=null||override.day!=null),src=own?override:standard;
  const week=src?.week??null,day=src?.day??null,minDays=override?.minDays??standard?.minDays??null,priced=day!=null||week!=null;
  return {week,day,minDays,source:own?'site':priced?'standard':null,minSource:minDays==null?null:override?.minDays!=null?'site':'standard',priced,rule:!priced?null:day!=null&&week!=null?'both':day!=null?'day':'week',
@@ -77,16 +97,22 @@ export function hireRateFor(standard,override){const own=!!override&&(override.w
 // Sevenths of a cent for one piece held d days from the start of its lot (integers, so a line rounds once and never on a half cent).
 const cost7=(r,d)=>r.rule==='both'?7*(Math.floor(d/7)*r.week+Math.min((d%7)*r.day,r.week)):r.rule==='day'?7*d*r.day:d*r.week;
 // Cents for one piece held d days (the rule above); null with no rate.
+/** @type {(rate:HireRate|null,d:number)=>number|null} */
 export const hireCost=(rate,d)=>rate?.priced?cost7(rate,d)/7:null;
 // Cents for piece-days at a day-only or week-only rate (whole cents; a seventh of a week rate is rounded once). Rates with both use hireCharge (per lot).
+/** @type {(pieceDays:number,rate:HireRate|null)=>number|null} */
 export const hireAmount=(pieceDays,rate)=>!rate?.priced?null:rate.rule==='day'?pieceDays*rate.day:Math.round(pieceDays*rate.week/7);
+/** @type {(subtotal:number)=>number} */
 export const hireGst=subtotal=>Math.round(subtotal*GST_PERCENT/100);
+/** Cents as dollars and cents ('12.50'); '' for null. @type {(c:number|null)=>string} */
 export const hireMoney=c=>c==null?'':(c<0?'-':'')+String(Math.floor(Math.abs(c)/100))+'.'+String(Math.abs(c)%100).padStart(2,'0');
 // Dated versions of a rate object ({from: null (every day) or a day, week, day, minDays}), oldest first. Objects saved before versions: one version for every day.
+/** @type {(o:RateRecord|null|undefined)=>RateVersion[]} */
 export const hireVersions=o=>!o?[]:(Array.isArray(o.versions)&&o.versions.length?[...o.versions]:[{from:null,week:o.week??null,day:o.day??null,minDays:o.minDays??null}]).sort((a,b)=>(a.from??'')<(b.from??'')?-1:(a.from??'')>(b.from??'')?1:0);
 const versionAt=(list,day)=>{let v=null;for(const x of list)if(x.from==null||(day!=null&&x.from<=day))v=x;return v;};
 const sameRate=(x,y)=>x.week===y.week&&x.day===y.day&&x.minDays===y.minDays&&x.source===y.source&&x.minSource===y.minSource;
 // The rate in force for every day: [{from (null = from the beginning), to (null = on), rate}], from the standard and site versions.
+/** @param {RateRecord|null} standard @param {RateRecord|null} override @returns {RateSegment[]} */
 export function hireTimeline(standard,override){const a=hireVersions(standard),b=hireVersions(override),days=[...new Set([...a,...b].map(v=>v.from).filter(Boolean))].sort(),starts=[null,...days],segs=[];
  starts.forEach((from,i)=>{const rate=hireRateFor(versionAt(a,from),versionAt(b,from)),to=i+1<starts.length?addDays(starts[i+1],-1):null,last=segs.at(-1);if(last&&sameRate(last.rate,rate))last.to=to;else segs.push({from,to,rate});});
  return segs;}
@@ -95,6 +121,7 @@ const inSeg=(seg,d)=>(seg.from==null||seg.from<=d)&&(seg.to==null||d<=seg.to);
 // Arithmetic per lot (no per-day arrays), so the overview stays fast over years of history.
 // Day numbers (days since 1970) for the arithmetic below; the strings repeat a lot, so they are kept.
 const DN=new Map();const dn=d=>{let v=DN.get(d);if(v===undefined){if(DN.size>200000)DN.clear();const [y,m,x]=d.split('-').map(Number);v=Date.UTC(y,m-1,x)/86400000;DN.set(d,v);}return v;};
+/** @param {HireSlot} s @param {Day} from @param {Day} to @param {Day} today @param {RateSegment[]} segs */
 export function hireCharge(s,from,to,today,segs){const F=dn(from),T=dn(to),OPEN=dn(today)+1,out=segs.map(seg=>({seg,a:seg.from?dn(seg.from):-Infinity,b:seg.to?dn(seg.to):Infinity,pieceDays:0,n7:0,topUp:0,top7:0}));
  const add=(q,S,E)=>{if(S>T||E<=F)return;for(const o of out){const a=Math.max(S,F,o.a),b=Math.min(E-1,T,o.b);if(b<a)continue;const n=b-a+1,before=a-S;o.pieceDays+=q*n;if(o.seg.rate.priced)o.n7+=q*(cost7(o.seg.rate,before+n)-cost7(o.seg.rate,before));}};
  for(const l of s.open)add(l.q,dn(l.start),OPEN);
@@ -200,7 +227,7 @@ export const hireMethods={
   for(const [sid,x] of sums.sites){const s=siteById.get(sid);if(!s)continue;if(x.pieces)sitesOn++;pieces+=x.pieces;weekSum+=x.thisWeek;monthSum+=x.thisMonth;monthMissing+=x.monthMissing?1:0;runRate+=x.runRate;weekMissing+=x.missing.length?1:0;
    if(x.longest&&(!longest||x.longest.since<longest.since))longest={site:sid,siteName:s.name,product:x.longest.product,name:product(x.longest.product).name,since:x.longest.since,days:x.longest.days};
    rows.push({id:sid,name:s.name,client:s.client??null,address:s.address??null,status:s.status,pieces:x.pieces,since:x.since,days:x.since?daysBetween(x.since,today)+1:0,first:x.first,accrued:x.accrued,thisWeek:x.thisWeek,runRate:x.runRate,missing:x.missing,overrides:siteRates.filter(r=>r.site===sid).length,collection:nextCollection.get(sid)??null});}
-  rows.sort((a,b)=>(b.pieces>0)-(a.pieces>0)||(a.since??'9').localeCompare(b.since??'9')||a.name.localeCompare(b.name,undefined,{numeric:true}));
+  rows.sort((a,b)=>Number(b.pieces>0)-Number(a.pieces>0)||(a.since??'9').localeCompare(b.since??'9')||a.name.localeCompare(b.name,undefined,{numeric:true}));
   // The live count at sites (contents table), so the page can show the replay agrees with the Stock page.
   let actual=0;for(const r of cached(this.db,"SELECT json_extract(o.data,'$.location') loc,SUM(ct.quantity) q FROM contents ct JOIN objects o ON o.company_id=ct.company_id AND o.id=ct.container_id WHERE ct.company_id=? AND ct.quantity>0 GROUP BY loc").all(this.user.company_id))if(siteById.has(r.loc))actual+=r.q;
   const products=[...new Set([...sums.everOn,...rates.map(r=>r.product),...siteRates.map(r=>r.product)])].map(id=>({...product(id),onHire:sums.onHire.get(id)??0,everOnHire:sums.everOn.has(id)})).sort((a,b)=>b.onHire-a.onHire||(b.everOnHire-a.everOnHire)||a.name.localeCompare(b.name,undefined,{numeric:true}));

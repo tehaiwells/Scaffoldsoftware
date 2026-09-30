@@ -14,9 +14,13 @@
     "seed:demo": "node scripts/seed-demo.js",
     "benchmark": "node scripts/benchmark.js",
     "check": "node scripts/check.js",
-    "benchmark:movement": "node scripts/movement-writes.js"
+    "benchmark:movement": "node scripts/movement-writes.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "benchmark:smoke": "node scripts/benchmark.js --containers=200 --ledger=2000 --gate-ms=250 && node scripts/movement-writes.js --seconds=5 --warmup=2"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0"
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.0",
+    "typescript": "5.9.3"
   }
 }
