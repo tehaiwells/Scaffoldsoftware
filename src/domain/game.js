@@ -25,6 +25,9 @@ export const GAME_SIZES={S:{w:20000,d:16000,name:'Small yard'},M:{w:30000,d:2000
 const TRUCK_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='truck' AND json_type(data,'$.game')='object' LIMIT 1",ORDER_PROBE="SELECT 1 FROM objects WHERE company_id=? AND kind='gameOrder' LIMIT 1";
 const HEAVY=10000000,RETRY_MS=4000,STILLAGE={type:'STILLAGE',length:2000,width:1000,height:1000,envelopeLength:2000,envelopeWidth:1000,tare:50000};
 const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
+// While the yard is paused nothing moves, so a Send or Bring back from the board is refused at once with these words (the board offers Resume)
+// instead of loading a truck that then sits still with no sign. Add stock is not refused: it lands in the yard straight away.
+export const GAME_PAUSED="The yard is paused, so the trucks can't go.";
 const OPEN_RT=['REQUESTED','BOOKED','LOADING'];
 // Not free right now (being moved, loaded, or on its way back): a waiting order keeps waiting for it instead of being dropped.
 const notYet=(ok,message)=>{if(!ok)throw Object.assign(new AppError(409,message),{wait:true});};
@@ -108,7 +111,9 @@ export const gameMethods={
     return stack(7)??this.stackStillage(yard);},
   // Materials to a site: the stillages holding them (game-pick.js, tops of piles first), loaded onto the next free truck; what does not fit goes
   // on the next one. Each truck then drives, unloads and comes home by itself (gameTick).
+  gamePaused(input){requireRule(input?.fromQueue||input?.byRemove||!this.repo.all('config')[0]?.paused,GAME_PAUSED);},
   gameSend(input){
+    this.gamePaused(input);
     const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');requireRule(!site.finishing,site.name+' is being removed. Tap Keep it first.');const lines=lineList(input.lines);
     let trucks=this.gameFreeTrucks(yard);if(input.truck){const t=trucks.find(x=>x.id===input.truck);requireRule(t,'That truck is busy. Pick another one.');trucks=[t,...trucks.filter(x=>x!==t)];}
     if(!trucks.length){requireRule(!input.fromQueue,'Every truck is busy.');const here=this.containers().filter(c=>c.location===yard.id);requireRule(lines.some(l=>here.some(c=>this.repo.quantity(c.id,l.product)>0)),'None of that is in the yard.');return this.gameWait('SEND',site,{lines});}
@@ -129,7 +134,7 @@ export const gameMethods={
   // Stuff back from a site: everything there, or the stillages holding the picked materials. A collection for today on the next free truck (it
   // shows on the Schedule), and the truck drives there empty; the site crane loads it and it comes home by itself (gameTick).
   gameCollect(input){
-    const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');
+    this.gamePaused(input);const yard=this.gameYard(),site=this.repo.get(input?.site,'site');requireRule(site.status==='ACTIVE','Choose an active site.');
     // a board truck already on its way to bring things back from this site: everything is being fetched already, or the rest waits for it
     const going=this.repo.all('truck').filter(t=>t.game?.kind==='COLLECT'&&t.game.site===site.id).map(t=>{try{return this.repo.get(t.game.collection,'collection');}catch{return null;}}).filter(o=>o&&OPEN_RT.includes(o.status));
     requireRule(!going.some(o=>o.scope==='ALL'),'A truck is already on its way to bring everything back from '+site.name+'.');
