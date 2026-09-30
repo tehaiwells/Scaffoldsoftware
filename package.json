@@ -16,7 +16,9 @@
     "check": "node scripts/check.js",
     "benchmark:movement": "node scripts/movement-writes.js",
     "typecheck": "tsc -p tsconfig.json",
-    "benchmark:smoke": "node scripts/benchmark.js --containers=200 --ledger=2000 --gate-ms=250 && node scripts/movement-writes.js --seconds=5 --warmup=2"
+    "benchmark:smoke": "node scripts/benchmark.js --containers=200 --ledger=2000 --gate-ms=250 && node scripts/movement-writes.js --seconds=5 --warmup=2",
+    "restore-drill": "node scripts/restore-drill.js",
+    "decrypt-backup": "node scripts/decrypt-backup.js"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

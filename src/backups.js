@@ -1,7 +1,9 @@
 import { DatabaseSync, backup } from 'node:sqlite';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { stamp } from './relocate.js';
+import { AppError } from './service.js';
+import { createBackupKey, encryptBackup, ENCRYPTED_SUFFIX, offsiteSettingsPath, readDrillLog, restoreDrill } from './protect.js';
 
 // Automatic backups: <name>-YYYY-MM-DD.sqlite, one per day. "Back up now" writes <name>-YYYY-MM-DDTHH-MM-SS-manual.sqlite; the 10 newest of those are kept.
 // <name> is "scaffold" for the app's own database and names any other (DATABASE_PATH) database uniquely (backupName in paths.js), so databases sharing a folder never mix.
@@ -27,10 +29,26 @@ export function planRotation(names,today=new Date(),{daily=14,weeks=8,manual=10,
 
 // Runs inside the server process. Backups read the live file through their own read-only connection and copy it in one step on a worker thread,
 // so they never run inside a scheduler transaction and never block the event loop for the copy itself (WAL readers do not block the writer).
-export function createBackups({databasePath,directory,name='scaffold',log=console.log,now=()=>new Date(),minGapMs=60000,keepManual=10}={}){
-  databasePath=resolve(databasePath);directory=resolve(directory);
+// Encrypted copy (optional, set up in Account > Backups): after every backup, the same file encrypted (src/protect.js) into a folder the
+// administrator chose (a USB drive, another synced folder). Its settings (the folder and a passphrase-locked key) are in settingsPath.
+export function createBackups({databasePath,directory,name='scaffold',log=console.log,now=()=>new Date(),minGapMs=60000,keepManual=10,settingsPath,keyCost}={}){
+  databasePath=resolve(databasePath);directory=resolve(directory);settingsPath=resolve(settingsPath??offsiteSettingsPath(databasePath));
   const {daily:DAILY,manual:MANUAL,partial:PARTIAL}=patterns(name);
-  let running=null,lastAttempt=null,lastError=null,lastManual=0,timer=null,startTimer=null;
+  let running=null,lastAttempt=null,lastError=null,lastManual=0,timer=null,startTimer=null,lastCopy=null;
+  const readSettings=()=>{try{const s=JSON.parse(readFileSync(settingsPath,'utf8'));return s?.folder&&s?.key?.publicKey?s:null;}catch{return null;}};
+  // The encrypted copy of one finished backup. Never fails the backup itself: a missing folder (USB drive not plugged in) is reported and retried next time.
+  const copyEncrypted=(file,settings=readSettings())=>{
+    if(!settings)return null;const when=now();
+    try{
+      let ok=false;try{ok=statSync(settings.folder).isDirectory();}catch{}
+      if(!ok)throw new Error(`the folder ${settings.folder} is not there (is the USB drive plugged in?). The next backup will try again`);
+      const dest=join(settings.folder,basename(file)+ENCRYPTED_SUFFIX);encryptBackup(file,dest,settings.key);
+      const names=readdirSync(settings.folder).filter(n=>n.endsWith(ENCRYPTED_SUFFIX)).map(n=>n.slice(0,-ENCRYPTED_SUFFIX.length));
+      for(const old of planRotation(names,when,{name,manual:keepManual}).remove)try{rmSync(join(settings.folder,old+ENCRYPTED_SUFFIX));}catch{}
+      lastCopy={at:when.toISOString(),ok:true,file:dest};log(`Encrypted copy saved: ${dest}`);
+    }catch(error){lastCopy={at:when.toISOString(),ok:false,error:error.message};log(`Encrypted copy NOT saved: ${error.message}`);}
+    return lastCopy;
+  };
   const list=()=>{try{return readdirSync(directory).filter(n=>DAILY.test(n)||MANUAL.test(n)).map(file=>({name:file,at:statSync(join(directory,file)).mtimeMs,manual:MANUAL.test(file)})).sort((a,b)=>b.at-a.at);}catch{return [];}};
   // Unfinished copies of this database left by a server that stopped mid-backup.
   const sweep=()=>{if(running)return;let names=[];try{names=readdirSync(directory);}catch{return;}for(const file of names.filter(n=>PARTIAL.test(n)))try{rmSync(join(directory,file),{force:true});}catch(error){log(`Could not remove the unfinished backup ${file}: ${error.message}`);}};
@@ -47,7 +65,7 @@ export function createBackups({databasePath,directory,name='scaffold',log=consol
         const copy=new DatabaseSync(partial);try{const check=copy.prepare('PRAGMA quick_check').get();if(Object.values(check)[0]!=='ok')throw new Error('the copy failed its check');copy.exec('PRAGMA journal_mode=DELETE');}finally{copy.close();}
         renameSync(partial,path);
         const removed=[];for(const old of planRotation(readdirSync(directory),when,{name,manual:keepManual}).remove){try{rmSync(join(directory,old));removed.push(old);}catch(error){log(`Backup rotation could not remove ${old}: ${error.message}`);}}
-        lastAttempt={at:when.getTime(),ok:true,file:path};lastError=null;
+        lastAttempt={at:when.getTime(),ok:true,file:path};lastError=null;copyEncrypted(path);
         log(`Backup saved: ${path}${removed.length?` (removed ${removed.length} old backup${removed.length>1?'s':''}: ${removed.join(', ')})`:''}`);
         return {ok:true,file:path,removed};
       }catch(error){
@@ -72,7 +90,24 @@ export function createBackups({databasePath,directory,name='scaffold',log=consol
       const wait=lastManual+minGapMs-Date.now();if(wait>0)return {ok:false,busy:true,error:`A backup was made moments ago. Try again in ${Math.ceil(wait/1000)} s.`};
       lastManual=Date.now();return run(`${name}-${stamp(now())}-manual.sqlite`);
     },
-    status(){const all=list(),last=all[0];return {databasePath,directory,lastBackup:last?{name:last.name,at:new Date(last.at).toISOString(),manual:last.manual}:null,daily:all.filter(b=>!b.manual).length,manual:all.filter(b=>b.manual).length,lastError,lastAttempt:lastAttempt&&{at:new Date(lastAttempt.at).toISOString(),ok:lastAttempt.ok},running:!!running,policy:`The 14 newest daily backups are kept, plus one per week for 8 weeks, and the ${keepManual} newest made with “Back up now”.`};}
+    // Turns the encrypted copy on (a folder that exists, a passphrase that is never stored) and copies the newest backup there at once.
+    async setOffsite({folder,passphrase}={}){
+      if(typeof folder!=='string'||!folder.trim()||!isAbsolute(folder.trim()))throw new AppError(400,'Type the full folder path, for example E:\\ for a USB drive.');
+      folder=resolve(folder.trim());let ok=false;try{ok=statSync(folder).isDirectory();}catch{}
+      if(!ok)throw new AppError(400,'That folder was not found. Plug in the drive (or make the folder) and try again.');
+      if(folder===directory)throw new AppError(400,'Choose a different place from the normal backup folder.');
+      const probe=join(folder,`.scaffold-yard-write-test-${process.pid}`);try{writeFileSync(probe,'ok');rmSync(probe);}catch{throw new AppError(400,'Scaffold Yard cannot write to that folder.');}
+      const key=createBackupKey(passphrase,keyCost),settings={folder,key,since:now().toISOString()};
+      const partial=settingsPath+'.partial';mkdirSync(resolve(settingsPath,'..'),{recursive:true});writeFileSync(partial,JSON.stringify(settings,null,1),{mode:0o600});renameSync(partial,settingsPath);
+      lastCopy=null;const newest=list()[0];if(newest)copyEncrypted(join(directory,newest.name),settings);
+      return this.status();
+    },
+    clearOffsite(){rmSync(settingsPath,{force:true});lastCopy=null;},
+    // Account > Backups "Test the newest backup": the restore drill on the newest normal backup (read-only; logged like npm run restore-drill).
+    async drill(){if(running)throw new AppError(429,'A backup is being made. Try again in a moment.');return restoreDrill({databasePath,directory,name,now});},
+    status(){const all=list(),last=all[0],settings=readSettings(),drill=readDrillLog(directory);return {databasePath,directory,
+      offsite:settings?{configured:true,folder:settings.folder,since:settings.since,lastCopy}:{configured:false},
+      lastDrill:drill&&{at:drill.at,ok:drill.ok,encrypted:!!drill.encrypted},lastBackup:last?{name:last.name,at:new Date(last.at).toISOString(),manual:last.manual}:null,daily:all.filter(b=>!b.manual).length,manual:all.filter(b=>b.manual).length,lastError,lastAttempt:lastAttempt&&{at:new Date(lastAttempt.at).toISOString(),ok:lastAttempt.ok},running:!!running,policy:`The 14 newest daily backups are kept, plus one per week for 8 weeks, and the ${keepManual} newest made with “Back up now”.`};}
   };
 }
 const removeSet=path=>{for(const suffix of ['','-wal','-shm','-journal'])rmSync(path+suffix,{force:true});};

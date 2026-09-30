@@ -68,6 +68,8 @@ export function createApp(db,{backups=null}={}) {
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
       else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups){send(200,{configured:false});return;}send(200,backups.status());}
       else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),file:result.file});}
+      else if(path==='/api/backup-offsite'&&req.method==='POST') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');if(body.off===true)backups.clearOffsite();else await backups.setOffsite({folder:body.folder,passphrase:body.passphrase});send(200,backups.status());}// the encrypted copy (src/protect.js)
+      else if(path==='/api/restore-drill'&&req.method==='POST') {service.require(user,'company.manage');if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const drill=await backups.drill();send(200,{...backups.status(),drill:{ok:drill.ok,at:drill.at,error:drill.error??null}});}
       else if(path==='/api/company-details'||path==='/api/company-logo') await bdRoute(req,res,simulation,path,body,send);
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}
@@ -86,7 +88,8 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   const {path:databasePath,status}=prepared;
   // An existing database is expected here: never let SQLite create an empty one in its place.
   if(!['new','env','default'].includes(status)&&!existsSync(databasePath))refuse(`the database ${databasePath} disappeared while starting; start again`);
-  const db=openDatabase(databasePath);console.log(`Database: ${databasePath}`);
+  // A start-up migration first saves a checked copy of the database as it was into the backup folder (src/database.js); if it cannot, nothing is changed.
+  let db;try{db=openDatabase(databasePath,{backupDirectory:backupDirectory(),backupName:backupName({databasePath})});}catch(error){refuse(error.message);}console.log(`Database: ${databasePath}`);
   const stop=startScheduler(db);prepared.release();
   const backups=createBackups({databasePath,directory:backupDirectory(),name:backupName({databasePath})});backups.start();
   const server=createApp(db,{backups});server.listen(Number(process.env.PORT??3000),process.env.HOST??'127.0.0.1',()=>{const {address,port}=server.address();console.log(`Scaffold Yard: http://127.0.0.1:${port}`+(address!=='127.0.0.1'?` (listening on ${address} — reachable from other devices on this network at http://<this PC's IP>:${port})`:''));});
