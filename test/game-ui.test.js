@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { openDatabase,atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
@@ -119,14 +118,18 @@ test('item pictures know scaffold parts by name first, then by category, with a 
   assert.deepEqual(GA_TABS.map(x=>x.id),['all','tubes','frame','boards','fittings','access','beams']);assert.equal(gaTab({name:'Scaffold tube 3 m'}),'tubes');assert.equal(gaTab({name:'Kwikstage transom 1.2 m'}),'frame');assert.equal(gaTab({name:'Lattice girder 6.39 m'}),'beams');
 });
 
-test('the main screen is the game board (view HOME, fed by the Home poll) for the yard office, wired into render, the poll and the CSP',()=>{
-  const ops=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8'),game=readFileSync(new URL('../public/game.js',import.meta.url),'utf8'),css=readFileSync(new URL('../public/game.css',import.meta.url),'utf8'),html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8'),server=readFileSync(new URL('../src/server.js',import.meta.url),'utf8');
-  assert.ok(ops.includes("view=userState.permissions?.includes('operations.manage')?'HOME':'CONTROL'"),'operations people open on the game board');
-  assert.ok(ops.includes("if(view==='HOME'&&!force&&app.querySelector(':scope>.game-mode')){state=next;projMap=null;gmUpdate(gameCtx());return;}"),'the poll patches the board');
-  assert.ok(ops.includes("const viewHTML=view==='CONTROL'?homeView():"),'the old Home page is the Office\'s Control room');assert.ok(!ops.includes("'GAME'"),'no separate GAME view: the Home poll feeds the board');
-  assert.ok(ops.includes(":not([data-gm-live])"),'dragging the amount slider does not stop the poll');
-  assert.ok(html.includes('<link rel="stylesheet" href="/game.css">'));for(const f of ['game.js','game-art.js','game-pick.js','game.css'])assert.ok(server.includes("'/"+f+"'"),f+' is served');assert.ok(server.includes("path==='/api/game-items'"),'the slider asks for its stillages itself');
-  assert.ok(!/\sstyle="/.test(game),'no inline style attributes in the board');assert.match(css,/\.gm-board \.world-svg \.tg/,'no stillage and crew tags on the board');assert.match(css,/@media \(max-width:760px\)/);
+// The wiring of the board into the page (the poll patches it in place, it asks for the map block, nothing breaks the CSP) is checked in the
+// real browser: e2e/behaviour.spec.js. Here: who opens on the board, and that nothing the board draws carries a style attribute.
+test('the yard office opens on the game board and everyone else on the Control room; nothing the board draws has a style attribute (the CSP drops them)',async t=>{
+  const T=(await import('../public/operations.js')).__test;
+  assert.equal(T.startView(['operations.manage','requests.create']),'HOME');assert.equal(T.startView(['sites.assigned','requests.create']),'CONTROL');assert.equal(T.startView(undefined),'CONTROL');
+  const f=board(t);f.cmd('gameStart',{size:'S'});fast(f);f.cmd('gameCatalogue');const std=f.sim.repo.all('product').find(p=>p.name==='Kwikstage standard 3.0 m');f.cmd('gameAddStock',{lines:[{product:std.id,quantity:200}]});
+  const {site}=f.cmd('gameSite',{name:'George St'});f.cmd('gameSend',{site:site.id,lines:[{product:std.id,quantity:40}]});f.tick(20);
+  const s=f.snap(),ctx=ctxOf(f,s);__gm.reset();const drawn=[__gm.shell(ctx),__gm.start(ctx),__gm.office(ctx),__gm.sysbar(s)];
+  for(const mode of ['yard','add','send','back']){__gm.setMode(mode,site.id);drawn.push(__gm.head(s),__gm.acts(s),__gm.grid(s),__gm.amount(s),__gm.trips(s));}
+  const truck=s.trucks[0];if(truck){__gm.setTruck(truck.id);drawn.push(__gm.head(s));}
+  drawn.push(cardHTML(s,std),cardTight(s,std));
+  for(const html of drawn){assert.equal(typeof html,'string');assert.ok(!/\sstyle=/.test(html),'no style attribute in: '+html.slice(0,120));}
 });
 
 test('no truck codes on the board: a truck is a Big truck or a Truck in its window, its card and on the map; the codes stay in the Office',t=>{
@@ -138,12 +141,7 @@ test('no truck codes on the board: a truck is a Big truck or a Truck in its wind
   assert.ok(!__gm.trips(s).includes(truck.name),'no code on the trip card, not even in its tooltip');
   const card=cardHTML(s,std);assert.match(card,/On a big truck/);assert.ok(!card.includes(truck.name),'no code in the hover card');
   assert.match(cardTight(s,std),/Kwikstage standard 3\.0 m<\/b><span>\d+ in the yard<\/span>/,'the one-line card for a short strip of map on a phone');
-  const world=readFileSync(new URL('../public/world.js',import.meta.url),'utf8'),ops=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8'),css=readFileSync(new URL('../public/game.css',import.meta.url),'utf8');
-  assert.ok(ops.includes('onPick:gmPick,onCamera:gmCamera,inset:gmInset,glow:gmGlow(),plain:true'),'the board asks the map for plain words');assert.match(world,/who=plain\(\)\?truckWord\(t\):t\.name/,'the map names trucks by kind on the board');
-  assert.match(css,/\.gm-board \.wm-truck\.parked:not\(\.followed\) \.wm-ttag\{display:none\}/,'parked trucks carry no tag on the board');
-  // the board is view HOME, so its poll is the one that carries the map block (?world=, grouped with revisions)
-  assert.ok(ops.includes("wmParam=()=>view==='HOME'&&typeof document!=='undefined'"),'the poll of the board asks for the map block');
-  assert.ok(ops.includes("wm:()=>wmAttach({...wmCtx(),"),'the board draws with the Home map context (the last map block stands in until the next poll)');
+  // on the map itself the board names trucks by kind (e2e/game.spec.js) and the poll brings the map block (e2e/behaviour.spec.js)
 });
 
 test('Send with an empty yard says one thing (Add stock first) and opens no site naming box; the words for a load are plain',t=>{
@@ -152,9 +150,8 @@ test('Send with an empty yard says one thing (Add stock first) and opens no site
   assert.match(head,/Your yard is empty/);assert.ok(!head.includes('data-gm-newsite')&&!head.includes('No sites yet'),'no site chooser, no second instruction');
   assert.match(acts,/data-gm-go="add"[^>]*>.*Add stock first/);assert.ok(!acts.includes('data-gm-do="send"'),'no Send button to press');
   assert.match(grid,/Nothing in the yard to send yet\./);assert.ok(!/Tap <b>Add stock<\/b>/.test(grid),'the button says it, not the grid too');
-  const src=readFileSync(new URL('../public/game.js',import.meta.url),'utf8');assert.match(src,/if\(mode==='send'&&!site&&!sites\.length&&ops\(\)&&hasStock\(s,yardOf\(s\)\?\.id\)\)openWin/,'the naming box waits until there is something to send');
-  // the amount box snaps to what will really go (whole stillages): it is set from the pick, never left showing a typed number
-  assert.match(src,/if\(q\)G\.picks\.set\(p\.id,q\);else G\.picks\.delete\(p\.id\);t\.value=String\(q\);/);
+  // In the browser: the naming box waits until there is something to send (e2e/behaviour.spec.js), and the amount box snaps a typed
+  // number to what will really go (e2e/game.spec.js).
 });
 
 test('Add stock with two scaffold systems: one system at a time (Quickstage first), a switch above the kinds, and no part the crew could not lift',t=>{

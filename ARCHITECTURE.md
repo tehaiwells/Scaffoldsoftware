@@ -17,7 +17,9 @@ The existing Node 24 / SQLite / browser JavaScript stack was retained, as permit
 - public/app.js: authentication and company/team settings.
 - public/operations.js and visual.js: connected views, interaction and SVG.
 - catalogues/synthetic.json: original DEMO ONLY seed, outside the UI.
-- scripts/: demo seed, reviewed import, backup, benchmark and syntax checks.
+- scripts/: demo seed, reviewed import, backup, restore drill, decrypt-backup, benchmarks and syntax checks.
+- src/protect.js: encrypted backup copies and the restore drill; src/database.js saves a checked copy before any start-up migration.
+- docs/adr/: the architecture decision records, one page each.
 - test/ and e2e/: business, integration, recovery, frontend and browser tests.
 - data/: ignored runtime databases.
 

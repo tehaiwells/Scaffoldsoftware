@@ -1,11 +1,15 @@
+// @ts-check
 import { integer,requireRule,rect,carryRoute,turnPath,contains,overlap,bbox } from './geometry.js';
 import { AppError } from '../service.js';
 import { label } from './catalogue.js';
 import { active,spotProblem } from './inventory.js';
 import { parseDay,parseSlot } from './schedule.js';
 // Optional free-text site details (client company, contact, email, phone): empty means null, never a placeholder.
+/** @type {(v:unknown,name:string,max?:number)=>string|null} */
 const optional=(v,name,max=250)=>{if(v===undefined||v===null)return null;requireRule(typeof v==='string',name+' must be text.');const s=v.trim();if(!s)return null;requireRule(s.length<=max,name+' can be at most '+max+' characters.');return s;};
 const EMAIL=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Free-text contact details kept on a client site (siteDetailFields). @typedef {{client:string|null,contact:string|null,email:string|null,phone:string|null}} SiteDetails */
+/** Commands and reads about sites and material requests, mixed into Simulation.prototype (this = the Simulation). */
 export const logisticsMethods={
   cancelRequest(input){const request=this.repo.get(input.id,'request');this.assertSite(request.site);requireRule(!request.loadList||input.fromList,'This request belongs to a yard list. Cancel the yard list instead.');requireRule(!['CANCELLED','DELIVERED','RETURNED'].includes(request.status),'This request is already closed.');const tasks=this.tasks().filter(t=>t.request===request.id&&active(t));requireRule(!tasks.some(t=>t.picked),'Finish placement of material currently on equipment before cancelling the remainder.');for(const task of tasks.reverse()){task.state='CANCELLED';this.repo.save(task);this.release(task);}request.status='CANCELLED';request.cancelledBy=this.user.id;request.reason=label(input.reason,'Cancellation reason');this.repo.save(request);this.releaseTruck(request.truck);this.notify('Request cancelled','Unstarted reservations released; already moved stock stays at its actual location.',request.site);return request;},
   siteDetailFields(input){const email=optional(input.email,'Contact email',254)?.toLowerCase()??null;requireRule(!email||EMAIL.test(email),'Enter a valid contact email.');return {client:optional(input.client,'Client company'),contact:optional(input.contact,'Site contact'),email,phone:optional(input.phone,'Contact phone',60)};},

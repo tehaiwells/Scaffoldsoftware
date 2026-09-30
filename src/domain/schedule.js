@@ -15,6 +15,7 @@ export const dayLabel=day=>{const [,m,d]=day.split('-').map(Number);return `${DA
 export const daysBetween=(from,to)=>Math.round((utc(to)-utc(from))/86400000);
 // Working days are Monday to Friday; there is no holiday calendar.
 export function calendarNow(now=new Date()){const today=localDay(now),wd=weekdayOf(today);return {today,tomorrow:addDays(today,1),nextWorkday:addDays(today,wd===4?3:wd===5?2:1),weekStart:mondayOf(today),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone};}
+/** A needed-on day ('YYYY-MM-DD') or null. @param {unknown} value @param {{required?:boolean,cal?:any}} [options] */
 export function parseDay(value,{required=false,cal}={}){
   if(value===undefined||value===null||value===''){requireRule(!required,'Choose a needed-on date.');return null;}
   requireRule(typeof value==='string'&&DAY.test(value)&&addDays(value,0)===value,'Enter the needed-on date as YYYY-MM-DD.');

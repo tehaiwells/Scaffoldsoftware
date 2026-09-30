@@ -1,0 +1,17 @@
+{
+  "//": "npm run typecheck: JSDoc type checking of the files that carry // @ts-check (src/repository.js and the hire, logistics and plan rules). Other files are read for their types but not checked yet; add // @ts-check to a file (and it to the list below) to bring it in.",
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitThis": false,
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "files": ["src/repository.js", "src/domain/hire.js", "src/domain/logistics.js", "src/domain/plan.js"]
+}

@@ -1,3 +1,4 @@
+// @ts-check
 // The Today planner: calendar items that run themselves on their day (the Today page's monthly calendar).
 //   TRUCK      a fleet truck (or a hired-in one for the day) with a driver, who is asked at once and must say yes
 //   MATERIALS  a list for a site: the yardsman is asked to pack it on the day (or the day before); packing holds whole stillages (a reservation
@@ -20,19 +21,37 @@ import { gpChoose,gpPerStillage } from '../../public/game-pick.js';
 import { idleWorker } from './fleet.js';
 import { DEMO_NAME } from './team.js';
 import { lineList } from './game.js';
+/** @typedef {import('../repository.js').StoredObject} StoredObject */
+/** @typedef {'TRUCK'|'MATERIALS'|'WORKERS'|'RESTACK'} PlanType */
+/** PLANNED and ACTIVE are open; DONE, CANCELLED and CALLED_OFF are closed; MISSED waits for a new day or Cancel. @typedef {'PLANNED'|'ACTIVE'|'DONE'|'MISSED'|'CANCELLED'|'CALLED_OFF'} PlanStatus */
+/** One line of an item's history. @typedef {{at:string,text:string}} PlanLog */
+/** A calendar item (kind 'planItem'); stage says where an open item is in its day (ASKING, READY, WAITING, BOOKED, ...).
+ * @typedef {StoredObject & {type:PlanType,day:string,time:string,site:string|null,yard?:string,status:PlanStatus,stage:string,note:string|null,problem:string|null,log:PlanLog[]}} PlanItem */
+/** An in-app message to a person about an item (kind 'message'); planDeliver is the one place a message is sent.
+ * @typedef {StoredObject & {person:string,personKind:string,personName:string,item:string,itemType:PlanType,day:string,time:string,site:string|null,subject:string,needsAnswer:boolean,status:'WAITING_TO_SEND'|'SENT'|string,sendAt:string,sentAt:string|null,answeredAt:string|null,seenAt:string|null,answer:string|null,attempt:number,channel:'IN_APP'}} PlanMessage */
 export { planSimAnswer };
+/** Commands the planner handles. @type {string[]} */
 export const PLAN_OPS=['planTruck','planMaterials','planWorkers','planRestack','planMove','planCancel','planAsk','messageAnswer','messageSeen','teamAdd','teamUpdate','teamRemove','teamStart','teamNames','planReplies'];
+/** @type {string[]} */
 export const PAPERWORK_OPS=['paperworkAdd','paperworkUpdate','paperworkRemove','paperworkSettings'];
+/** @type {PlanStatus[]} */
 export const PLAN_OPEN=['PLANNED','ACTIVE'],MSG_OPEN=['WAITING_TO_SEND','SENT'];
 // MISSED: a list whose day ended before it went (its stillages are let go); it waits on the calendar, red, for a new day or Cancel.
+/** @type {PlanStatus[]} */
 export const PLAN_FIXABLE=[...PLAN_OPEN,'MISSED'];
 const HEAVY=10000000,DAY=/^\d{4}-\d{2}-\d{2}$/,LOG_KEEP=20,PRUNE_DAYS=400,QUIET_MS=60000,YARD_KEEP=2,SLOT_MS=1800000;
+/** @type {(ms:number)=>string} */
 const iso=ms=>new Date(ms).toISOString();
+/** @type {(n:number,one:string,many?:string)=>string} */
 const plural=(n,one,many=one+'s')=>n+' '+(n===1?one:many);
+/** @type {(a:{name?:unknown},b:{name?:unknown})=>number} */
 const byName=(a,b)=>String(a.name).localeCompare(String(b.name),undefined,{numeric:true});
+/** @type {(event:string,fields:Record<string,unknown>)=>void} */
 const logError=(event,fields)=>{try{console.error(JSON.stringify({event,...fields}));}catch{}};
+/** An optional note (at most 200 characters): null when empty. @type {(v:unknown)=>string|null} */
 const note=v=>{if(v===undefined||v===null)return null;requireRule(typeof v==='string','A note must be text.');const s=v.trim();if(!s)return null;requireRule(s.length<=200,'A note can be at most 200 characters.');return s;};
 // The engine's last full pass per database and company (throttle, once-a-day prune).
+/** @type {WeakMap<object,Map<string,any>>} */
 const runs=new WeakMap();
 // open items and MISSED lists (the engine steps only the open ones; a removed site, truck or person reaches the missed ones too)
 const OPEN_ITEMS="SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='planItem' AND json_extract(data,'$.status') IN ('PLANNED','ACTIVE','MISSED') ORDER BY rowid";

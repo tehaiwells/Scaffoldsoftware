@@ -1,11 +1,15 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-export function openDatabase(path) {
+// Migrations are one-way. Before a start-up migration changes an existing database, a copy of it as it was is saved and checked
+// (<backupName>-before-update-v<from>-to-v<to>-<time>.sqlite in backupDirectory; default: a before-update folder next to the database).
+// If the copy cannot be saved, nothing is migrated and opening fails with a plain message. backupDirectory:null skips it (tests only).
+export function openDatabase(path, { backupDirectory, backupName='scaffold' } = {}) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
+  const existing = path !== ':memory:' && !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();
   // synchronous=NORMAL: WAL stays consistent; a power cut (not a process crash) can lose the last few commits.
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY);
@@ -29,12 +33,27 @@ export function openDatabase(path) {
     db.prepare('INSERT OR IGNORE INTO role_permissions VALUES(?,?)').run(role,p);
   }
   for (const [id,name] of [['quickstage','Quickstage'],['at-pac','AT-PAC'],['tube-clip','Tube & Clip']]) db.prepare('INSERT OR IGNORE INTO scaffold_systems VALUES(?,?)').run(id,name);
+  if(existing&&backupDirectory!==null){const pending=pendingMigrations(db);if(pending.length)try{saveBeforeUpdate(db,backupDirectory??join(dirname(resolve(path)),'before-update'),backupName,pending);}catch(error){db.close();throw error;}}
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=2').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/002_simulation.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=3').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/003_memberships.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=4').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/004_manager_stock_adjust.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=5').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/005_perf_indexes.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=6').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/006_invitations.sql',import.meta.url),'utf8')));
   return db;
+}
+
+// Migration files (NNN_name.sql in src/migrations) whose version is not recorded yet.
+const MIGRATIONS=new URL('./migrations/',import.meta.url);
+export function pendingMigrations(db){const done=new Set(db.prepare('SELECT version FROM schema_migrations').all().map(r=>r.version));return readdirSync(MIGRATIONS).map(f=>/^(\d+)_.*\.sql$/.exec(f)).filter(Boolean).map(m=>Number(m[1])).filter(v=>!done.has(v)).sort((a,b)=>a-b);}
+const stampNow=(d=new Date())=>{const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;};
+function saveBeforeUpdate(db,directory,name,pending){
+  const from=db.prepare('SELECT MAX(version) v FROM schema_migrations').get().v,file=join(resolve(directory),`${name}-before-update-v${from}-to-v${pending.at(-1)}-${stampNow()}.sqlite`),partial=file+'.partial';
+  try{
+    mkdirSync(dirname(file),{recursive:true});rmSync(partial,{force:true});
+    db.exec(`VACUUM INTO '${partial.replaceAll("'","''")}'`);// a consistent copy, even with other readers
+    const copy=new DatabaseSync(partial);try{const ok=Object.values(copy.prepare('PRAGMA quick_check').get())[0];if(ok!=='ok')throw new Error('the copy failed its check');copy.exec('PRAGMA journal_mode=DELETE');}finally{copy.close();}
+    renameSync(partial,file);console.log(`Saved a copy of the database before updating it: ${file}`);return file;
+  }catch(error){try{rmSync(partial,{force:true});}catch{}throw new Error(`Could not save a copy of the database before updating it (${error.message}). Nothing was changed`);}
 }
 
 // One prepared statement per SQL text per connection (statements are synchronous and reset after every call).

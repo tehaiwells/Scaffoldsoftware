@@ -66,10 +66,7 @@ test('the print buttons sit on yard list cards, the docket panel, the Schedule c
  const m=prPickSheet(ss,l2.id,opts);assert.ok(m,'a supervisor can print their list');assert.equal(m.yard,null);assert.deepEqual(m.lines[0].sources,[],'no yard stillages in a supervisor snapshot');assert.equal(m.lines[0].short,0,'and not reported short: the yard is just not visible');const supHTML=prSheetHTML(m);assert.ok(supHTML.includes('Chosen by the yard')&&!supHTML.includes('pr-key'),'no stillage count or Reserved/Suggested legend on a supervisor sheet');
  T.setState(ss,acct(f,['requests.create']));T.setView('SITES');assert.ok(T.requestView().includes('data-pr-print="pick" data-pr-id="'+l2.id+'"'));});
 
-test('print CSS: A4 portrait, only the sheet prints, and the sheet block is the last one in design.css',async()=>{const {readFileSync}=await import('node:fs');const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');const i=css.indexOf('/* ===== Print sheets:');
- assert.ok(i>0,'the Print sheets block exists');const block=css.slice(i);assert.ok(block.includes('@page{size:A4 portrait'),'A4 portrait');assert.ok(block.includes('body.pr-open>*:not(.pr-host):not(svg){display:none!important}'),'everything but the sheet is hidden in print');
- assert.ok(block.includes('.pr-toolbar{display:none!important}'),'the preview toolbar does not print');assert.ok(!/@media print/.test(css.slice(0,i)),'no other print rules to fight with');});
-
+// Print (A4 portrait, only the sheet prints, without its toolbar) is checked in the browser, on the real stylesheet: e2e/behaviour.spec.js.
 test('a partly sent yard list keeps a pick list for the lines still to send; sheet dates use one fixed style',async t=>{const f=fixture(t),{__test:T,prPickSheet,prSheetHTML}=await load();const [P,Q]=f.products;
  const l=list(f,[{product:P.id,quantity:100},{product:Q.id,quantity:16}]),s=structuredClone(f.sim.snapshot()),x=s.loadLists.find(y=>y.id===l.id);
  // the state the existing list logic reports after one line went out: the list reads DELIVERED while a line is still REQUESTED with nothing sent

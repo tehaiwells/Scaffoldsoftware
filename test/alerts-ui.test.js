@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { fixture } from './helpers/fixture.js';
 import { __test, alTest, materialFacts, materialCardHTML, materialsView } from '../public/operations.js';
 // The alerts UI in node (no DOM): the bell, the Needs attention strip, the drawer, the minimum chips, the stockpile mark and the hover-card line, from live snapshots.
-const css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
 const ops=f=>({permissions:['operations.manage','stock.adjust','requests.create'],systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:f.user.id}});
 const sup={permissions:['requests.create','sites.assigned'],systems:[{id:'quickstage',name:'Quickstage',enabled:true}],users:[],company:{id:'c',name:'Demo'},user:{id:'s'}};
 // A world with every kind of alert the fixture can make: a material under its minimum, a damaged stillage with stock and a blocked move.
@@ -55,8 +53,4 @@ test('stockpile tiles and the hover card mark a component below its minimum (the
   assert.equal(alTest.tileMark(p.id),'');
 });
 
-test('alerts CSS: one appended block, the drawer hides with [hidden], and the Home strip shows one row of alerts at each width',()=>{
-  assert.equal((css.match(/===== Alerts and minimum stock levels/g)||[]).length,1);
-  assert.ok(css.indexOf('===== Alerts and minimum stock levels')>css.lastIndexOf('.sg-done{grid-template-columns:minmax(0,1fr)}'),'appended at the end');
-  assert.match(css,/\.al-drawer\[hidden\]\{display:none\}/);assert.match(css,/\.al-strip-list \.al-item:nth-child\(n\+4\)\{display:none\}/);
-});
+// How the alerts look (the drawer hides, the Home strip keeps to one row) is checked in the browser, on the real stylesheet: e2e/behaviour.spec.js.

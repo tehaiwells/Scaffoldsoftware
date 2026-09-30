@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { gsFold, gsWords, gsEntries, gsSearch, gsMark } from '../public/operations.js';
 // Global search: the matching and ranking are pure (client state in, grouped results out), so every case runs in node without a DOM.
 const systems=[{id:'quickstage',name:'Quickstage'},{id:'at-pac',name:'AT-PAC'},{id:'tube-clip',name:'Tube & Clip'}];
@@ -122,15 +121,8 @@ test('instant on a big yard: 580 products and 400 stillages index and search in 
   assert.ok(build<25,'index build '+build.toFixed(2)+' ms');assert.ok(search<10,'search '+search.toFixed(2)+' ms');
 });
 
-test('the search box lives in the header, keeps polling alive and is hooked into render, bindPage, refresh and stopOperations',()=>{
-  const ops=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8'),css=readFileSync(new URL('../public/design.css',import.meta.url),'utf8');
-  assert.match(ops,/function render\(\)\{mountSprites\(\);gsMount\(\);/);assert.match(ops,/hideCard\(\);gsStop\(\);\}/);assert.match(ops,/finally\{refreshing=false;gsAfterRefresh\(\);\}/);assert.match(ops,/placeSoon\(\);gsReflash\(\);/);
-  assert.match(ops,/id="gs-input" type="search" data-live-search/,'data-live-search: typing does not pause the poll');
-  assert.match(ops,/role="combobox"/);assert.match(ops,/role="listbox"/);
-  const block=ops.slice(ops.indexOf('// ----- Global search (gs*)'));assert.ok(!/\sstyle="/.test(block),'no inline style attributes (the CSP drops them)');
-  assert.match(css,/\/\* ={3,} Global search/);assert.match(css,/\.gs\.sheet/);
-});
-
+// The search box in the running app (in the page header, results as a listbox, typing and polls do not close it, gone when you
+// leave the Office pages, nothing breaks the CSP) is checked in the browser: e2e/behaviour.spec.js.
 test('a label-like word (letters-dash-digits) is one term: s-0 finds stillages, not every material with an s and a 0',()=>{
   const s=world();s.products.push(P('base','Starter / base collar 0.30 m','QS-BC-030'),P('sj','Swiveljack 0.78 m','QS-SJ-078'));
   const r=find(s,'s-0');assert.deepEqual(names(r,'STILLAGE'),['S-012','S-013']);assert.deepEqual(names(r,'MATERIAL'),[],'no loose s + 0 matches');assert.equal(r.groups.length,1);

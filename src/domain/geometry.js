@@ -1,7 +1,8 @@
 import { AppError } from '../service.js';
 import { cross,on,intersects,inside,overlap,contains,fitsPolygon,ringArea,ringProblems,cleanCorners,footprint,TURN_ANCHORS,turnSpot,turnSweep,circleBox,circleHits,pileTurn,sweepOf,sameRing,sameGround,simplifyRing,freeZone,bbox,ringInside } from '../../public/shape.js';
 export { cross,on,intersects,inside,overlap,contains,fitsPolygon,ringArea,ringProblems,cleanCorners,footprint,TURN_ANCHORS,turnSpot,turnSweep,circleBox,circleHits,pileTurn,sweepOf,sameRing,sameGround,simplifyRing,freeZone,bbox,ringInside };
-export const requireRule=(ok,message)=>{if(!ok)throw new AppError(409,message);};
+/** Throws a 409 with the message unless ok. @param {unknown} ok @param {string} message @returns {asserts ok} */
+export function requireRule(ok,message){if(!ok)throw new AppError(409,message);}
 export function integer(value,label,min=0,max=1000000000){if(!Number.isSafeInteger(value)||value<min||value>max)throw new AppError(400,`${label} must be a whole number between ${min} and ${max}.`);return value;}
 const directions={RIGHT:[1,0],LEFT:[-1,0],UP:[0,-1],DOWN:[0,1],NE:[1,-1],SE:[1,1],SW:[-1,1],NW:[-1,-1]};
 export function vertices(segments){requireRule(Array.isArray(segments)&&segments.length<=100,'Use at most 100 boundary segments.');const points=[{x:0,y:0}];for(const s of segments){const d=directions[s.direction];requireRule(d,'Choose a direction.');integer(s.length,'Segment length',1,1000000);const scale=Math.hypot(...d),p=points.at(-1);points.push({x:p.x+d[0]*s.length/scale,y:p.y+d[1]*s.length/scale});}return points;}

@@ -1,7 +1,6 @@
 process.env.TZ='Australia/Sydney';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { fixture } from './helpers/fixture.js';
 // Client side of the Hire page, rendered in node from a live /api/hire result: hero, sites, statement, rates, the A4 sheet, money parsing and the owner-only nav.
 const load=async()=>{const m=await import('../public/operations.js');return {T:m.__test,H:m.__hr,cents:m.hrCents,aud:m.hrAUD,prSheetHTML:m.prSheetHTML};};
@@ -42,10 +41,13 @@ test('the A4 hire statement: HIRE STATEMENT, lines, GST, total, and a DEMO water
  assert.equal(s.demo,f.products[0].verification==='DEMO ONLY');if(s.demo)assert.ok(html.includes('class="pr-watermark"')&&html.includes('not a real hire statement'));
  assert.ok(html.includes('statement only, not a tax invoice'));});
 
-test('Hire is owner only: nav entry filtered by finance.view, next to Client sites',async t=>{const f=setup(t),{T,H}=await load();
+test('Hire is owner only: the Office drawer shows its tile only to someone with finance.view, next to Reports',async t=>{const f=setup(t),{T,H}=await load();
  T.setState(f.sim.snapshot(),acct(f,['operations.manage','requests.create','stock.adjust']));assert.equal(H.ok(),false);assert.ok(H.view().includes('Hire is for the owner'));
  T.setState(f.sim.snapshot(),acct(f));assert.equal(H.ok(),true);
- const src=readFileSync(new URL('../public/operations.js',import.meta.url),'utf8');assert.ok(src.includes("['SITES','Client sites'],['HIRE','Hire'],['YARD'"));// the pages now live behind the Office door (game.js): the drawer is told whether this person sees Hire, and leaves the tile out otherwise
- assert.ok(src.includes("officeHTML({state,account,hire:hrOK(),view})"));assert.ok(src.includes("hire:hrOK(),refresh"),'the game board passes it too');
+ // the Office drawer, from the board's own context, as each person would see it: the owner has a Hire tile beside Reports; a manager has none
+ const {officeHTML:office}=await import('../public/game.js'),views=html=>[...html.matchAll(/data-view="([A-Z0-9]+)"/g)].map(m=>m[1]);
+ const owner=views(office(T.gameCtx()));assert.ok(owner.includes('HIRE'),'owner: Hire');assert.equal(owner[owner.indexOf('HIRE')+1],'REPORTS','Hire next to Reports');
+ T.setState(f.sim.snapshot(),acct(f,['operations.manage','requests.create','stock.adjust']));const manager=views(office(T.gameCtx()));assert.ok(!manager.includes('HIRE'),'manager: no Hire');assert.ok(manager.includes('REPORTS')&&manager.includes('SITES'),'the rest is there');
+ T.setState(f.sim.snapshot(),acct(f));
  const {officeHTML}=await import('../public/game.js'),s=f.sim.snapshot();assert.ok(officeHTML({state:s,account:acct(f),hire:true}).includes('data-view="HIRE"'));assert.ok(!officeHTML({state:s,account:acct(f),hire:false}).includes('data-view="HIRE"'));
  const o=officeHTML({state:s,account:acct(f),hire:true});assert.ok(o.indexOf('data-view="SITES"')<o.indexOf('data-view="HIRE"'),'next to Client sites');});

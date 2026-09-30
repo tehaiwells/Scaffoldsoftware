@@ -106,6 +106,9 @@ export function createHandler(db,{backups=null,lan=false}={}) {
       // A backup copies the whole server, so file paths and "Back up now" are for the server administrator only (audit D6). Another company's owner is told when the last copy was made.
       else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups){send(200,{configured:false});return;}const status=backups.status();if(!service.isAdmin(user)){send(200,{configured:true,serverManaged:true,lastBackup:status.lastBackup&&{at:status.lastBackup.at}});return;}send(200,status);}
       else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),file:result.file});}
+      // The encrypted copy and the restore test act on the whole server too: administrator only.
+      else if(path==='/api/backup-offsite'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');if(body.off===true)backups.clearOffsite();else await backups.setOffsite({folder:body.folder,passphrase:body.passphrase});send(200,backups.status());}// the encrypted copy (src/protect.js)
+      else if(path==='/api/restore-drill'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const drill=await backups.drill();send(200,{...backups.status(),drill:{ok:drill.ok,at:drill.at,error:drill.error??null}});}
       else if(path==='/api/company-details'||path==='/api/company-logo') await bdRoute(req,res,simulation,path,body,send);
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}
@@ -146,7 +149,8 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
     const {path:databasePath,status}=prepared;
     // An existing database is expected here: never let SQLite create an empty one in its place.
     if(!['new','env','default'].includes(status)&&!existsSync(databasePath))refuse(`the database ${databasePath} disappeared while starting; start again`);
-    db=openDatabase(databasePath);console.log(`Database: ${databasePath}`);
+    // A start-up migration first saves a checked copy of the database as it was into the backup folder (src/database.js); if it cannot, nothing is changed.
+    db=openDatabase(databasePath,{backupDirectory:backupDirectory(),backupName:backupName({databasePath})});console.log(`Database: ${databasePath}`);
     stop=startScheduler(db);prepared.release();
     backups=createBackups({databasePath,directory:backupDirectory(),name:backupName({databasePath})});backups.start();
   }catch(error){refuse(error.message);}
