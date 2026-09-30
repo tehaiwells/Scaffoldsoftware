@@ -202,14 +202,14 @@ test('RESTACK: part-full stillages of a part with no pack size are topped up to 
   const it=f.item(r.item.id);assert.equal(it.status,'DONE');assert.equal(it.moved.pieces,q2);assert.match(it.log.at(-1).text,new RegExp('^Re-stack done: '+q2+' pieces topped up into fuller stillages, '));
   assert.ok(!f.sim.deriveJobs(f.yard).some(j=>j.key.startsWith('P5:CONSOLIDATE:')),'back to the normal rules');
   const off=f.cmd('planRestack',{day:D1,time:'07:00'});f.cmd('jobsMode',{jobs:false});f.clock(D1,'07:00');f.pass();assert.equal(f.item(off.item.id).problem,'Turn yard jobs on in the Control room so the crew can re-stack.');
-  f.clock(D2,'08:00');f.pass();assert.equal(f.item(off.item.id).status,'DONE');assert.equal(f.view(off.item.id).words,'Did not run: the day passed');
+  f.clock(D2,'08:00');f.pass();assert.equal(f.item(off.item.id).status,'MISSED','never written as done');assert.equal(f.view(off.item.id).words,"Didn't go");assert.equal(f.item(off.item.id).why,'yard jobs were switched off');
 });
 
 test('catch-up after the app was closed: a whole missed day of workers is closed without moving anyone, a late list still goes, late asks say so',t=>{
   const f=planFixture(t,{now:L(D0,'09:00')});const s=f.site();team(f,['Liam','Noah']);const {p,per}=f.stock(1);f.cmd('planReplies',{on:false});
   const w=f.cmd('planWorkers',{day:D1,site:s.id,count:1}),w2=f.cmd('planWorkers',{day:D2,site:s.id,count:1}),m=f.cmd('planMaterials',{day:D1,site:s.id,lines:[{product:p.id,quantity:per}]});
   f.clock(D2,'10:00');f.pass();
-  const a=f.item(w.item.id);assert.equal(a.status,'DONE');assert.ok(a.log.some(l=>l.text==='The day passed while the app was closed.'));
+  const a=f.item(w.item.id);assert.equal(a.status,'MISSED','never written as done');assert.ok(a.log.some(l=>l.text==="Didn't go: the day passed while the app was closed."));
   assert.ok(f.sim.repo.all('resource').filter(r=>r.type==='WORKER').every(r=>!r.away));
   const b=f.item(w2.item.id);assert.ok(b.log.some(l=>l.text==='Sent late: the app was closed.'));assert.equal(f.msgs(b.id).length,1);
   // a list whose whole day passed while the app was closed never goes by itself days late: nobody is asked, it waits, red, for a new day

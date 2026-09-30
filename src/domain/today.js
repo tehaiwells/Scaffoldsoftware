@@ -77,8 +77,9 @@ export const todayMethods={
       words=it.status==='DONE'?'Done':it.status==='CANCELLED'?'Cancelled':it.stage==='BOOKED'?'Messages go out '+dayLabel(addDays(it.day,-1))+' at 3:00 pm':it.stage==='ON_SITE'?here+' of '+it.count+' at '+(siteName??'the site'):yes+' of '+it.count+' said yes';}
     else if(it.type==='RESTACK'){Object.assign(v,{consolidate:it.consolidate!==false,stackEmpties:it.stackEmpties!==false,startedAt:it.startedAt??null,finishedAt:it.finishedAt??null,moved:it.moved??{pieces:0,jobs:0,stacked:0}});
       words=it.status==='DONE'?(it.startedAt?(!(it.moved?.pieces)&&!(it.moved?.stacked)?'Done: the yard was already tidy':'Done: '+plural(it.moved?.pieces??0,'piece')+' topped up, '+plural(it.moved?.stacked??0,'empty','empties')+' stacked'):'Did not run: the day passed'):it.status==='CANCELLED'?'Cancelled':it.stage==='WORKING'?'Crew is re-stacking':'Starts at '+timeWords(it.time);}
+    if(missed)words="Didn't go";
     const canCancel=ctx.ops&&fix&&!(it.type==='MATERIALS'&&['LOADING','ON_THE_WAY'].includes(it.stage));
-    const canMove=ctx.ops&&fix&&(it.type==='TRUCK'?it.status==='PLANNED'&&now<atLocal(it.day,'06:00'):it.type==='MATERIALS'?['WAITING','PACKING','PACKED','MISSED'].includes(it.stage):it.type==='WORKERS'?!it.people.some(p=>p.moved):it.stage==='WAITING');
+    const canMove=ctx.ops&&fix&&(it.type==='TRUCK'?missed||(it.status==='PLANNED'&&now<atLocal(it.day,'06:00')):it.type==='MATERIALS'?['WAITING','PACKING','PACKED','MISSED'].includes(it.stage):it.type==='WORKERS'?!it.people.some(p=>p.moved):it.stage==='WAITING');
     if(!fix)red=it.status==='DONE'&&it.type==='MATERIALS'&&((it.short??[]).length>0||(it.leftOver??0)>0);
     return Object.assign(v,{words,flags:{needsAnswer:open&&needsAnswer,red,late,done:it.status==='DONE',warn:open&&warn,missed},canMove,canCancel,canEdit:ctx.ops&&open&&it.type==='MATERIALS'&&it.stage==='WAITING',canAsk:ctx.ops&&open&&['TRUCK','WORKERS'].includes(it.type)});},
   // Yard lists, single requests and collections as calendar runs (the views the snapshot builds).

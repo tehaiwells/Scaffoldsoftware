@@ -50,7 +50,7 @@ test("MATERIALS end of day: a list that never went lets its stillages go, says w
   f.clock(D1,'17:00');f.pass();let it=f.item(r.item.id);assert.equal(it.status,'MISSED');assert.equal(it.problem,"Didn't go: Dave never said yes. Pick a new day or cancel it.");
   assert.equal(holds(f,r.item.id),0,'its stillages are free again');assert.ok(f.msgs(r.item.id).every(m=>m.closedAt),'its pack message is closed');
   assert.ok(f.sim.repo.all('notification').some(n=>n.title==="Didn't go"));const v=f.view(it.id);assert.equal(v.words,"Didn't go");assert.equal(v.flags.red,true);assert.equal(v.canMove,true);assert.equal(v.canCancel,true);
-  f.clock(D3,'09:00');const tv=f.sim.todayView();assert.ok(tv.beginToday.missed.some(x=>x.id===it.id));assert.match(tv.summary.sentence,/1 booking didn't go/);
+  f.clock(D3,'09:00');const tv=f.sim.todayView();assert.ok(tv.beginToday.missed.some(x=>x.id===it.id));assert.match(tv.summary.sentence,/2 bookings didn't go/,'the list, and the truck booking Dave never said yes to (never written as done)');
   assert.ok(f.sim.snapshot().alerts.items.some(x=>x.kind==='MISSED'&&x.target.day===D1&&/Dave never said yes/.test(x.detail)));assert.ok(f.sim.planMonth(D3.slice(0,7)).missed.some(x=>x.id===it.id));
   f.pass();assert.equal(f.item(it.id).status,'MISSED','the engine leaves it alone');
   assert.throws(()=>f.cmd('planMove',{id:it.id,time:'08:00'}),/Pick a new day for it\./);
