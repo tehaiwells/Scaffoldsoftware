@@ -44,8 +44,10 @@ const DOT_TONE = {
   BOOKED: 'booked',
   ASKED: 'asked',
   YES: 'yes',
+  ARRIVED: 'arrived', // at the pickup (ADR 0011)
   PACKED: 'packed',
   LOADED: 'road',
+  AT_SITE: 'atsite', // at the drop
   DELIVERED: 'done',
   BACK: 'back',
 };

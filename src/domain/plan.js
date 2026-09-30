@@ -117,6 +117,44 @@ const SENT_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.status')='SENT' AND coalesce(json_type(data,'$.closedAt'),'null')='null' ORDER BY rowid";
 const PERSON_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.person')=? ORDER BY rowid";
+// messages about something that is not a plan item (a rostered day, a task: ADR 0011), by the record they are about
+const ABOUT_MSGS =
+  "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.about.id')=? ORDER BY rowid";
+// ---------- message kinds (ADR 0011 §11.1) ----------
+// What a message is about: a plan item (every message before part 5), a rostered day or a task. Each kind registers its hooks once; plan.js
+// registers the plan-item kind itself with the behaviour it always had, so nothing changes for existing messages. All hooks get the Simulation.
+//   isOpen(sim, m)        may this message still be delivered or answered? (clockDeliverDue calls it off when false)
+//   deadline(sim, m)      ms: after this a phone's answer is "Too late to answer, call the office."
+//   text(sim, m)          the message body;  summary(sim, m)  the notification words
+//   onAnswer(sim, m, now) after the answer is saved (a phone, the office, or a simulated reply);  onSeen?(sim, m, now)  after Got it
+//   scope?(sim, m, user)  an extra phone scope (default: the message names the phone's person)
+/** @type {Map<string, any>} */
+export const MESSAGE_KINDS = new Map();
+/** @param {string} kind @param {any} hooks */
+export function registerMessageKind(kind, hooks) {
+  MESSAGE_KINDS.set(kind, hooks);
+}
+/** The kind a message is about ('planItem' when it says nothing). @type {(m:any)=>string} */
+export const messageKindOf = (m) => m?.about?.kind ?? 'planItem';
+registerMessageKind('planItem', {
+  isOpen(sim, m) {
+    let it = null;
+    try {
+      it = sim.repo.get(m.item, 'planItem');
+    } catch {}
+    return !!it && PLAN_OPEN.includes(it.status);
+  },
+  deadline(sim, m) {
+    return sim.planAt(m.day, m.time);
+  },
+  text(sim, m) {
+    return sim.planMsgText(m, sim.repo.get(m.item, 'planItem'));
+  },
+  summary(sim, m) {
+    return sim.planMsgSummary(m);
+  },
+  onAnswer() {},
+});
 const PROBE = `SELECT EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='planItem' AND json_extract(data,'$.status') IN ('PLANNED','ACTIVE'))
  OR EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='message' AND json_extract(data,'$.status') IN ('WAITING_TO_SEND','SENT') AND coalesce(json_type(data,'$.closedAt'),'null')='null')
  OR EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='resource' AND json_type(data,'$.away')='object')
@@ -229,6 +267,9 @@ export const planMethods = {
     const who = !m.personName || DEMO_NAME.test(m.personName) ? 'there' : m.personName.split(' ')[0],
       when = dayLabel(it.day),
       at = timeWords(it.time);
+    // a gear list's day-before ask and day-of notice to the driver (gear.js, ADR 0011)
+    if ((m.subject === 'READY' || m.subject === 'DAY') && typeof this.gearMsgText === 'function')
+      return this.gearMsgText(m, it, who);
     if (m.subject === 'DRIVE') {
       const loads = this.planRows(DAY_ITEMS, it.day)
         .filter((x) => x.type === 'MATERIALS' && x.truckPlan === it.id && x.status !== 'CANCELLED')
@@ -314,26 +355,35 @@ export const planMethods = {
     }
     if (m.subject === 'PACK')
       return 'Asked ' + who + ' to pack the list for ' + this.planSiteName(m.site) + ' on ' + when + '.';
+    if (m.subject === 'READY') return 'Asked ' + who + ' to be ready for ' + when + '.';
+    if (m.subject === 'DAY') return 'Told ' + who + " about today's run.";
     return 'Asked ' + who + ' to work at ' + this.planSiteName(m.site) + ' on ' + when + '.';
   },
   // A new ask of one person for one item; sent at once when it is due (it always is: asks are made when their time comes).
-  planAskPerson(it, person, personKind, subject, now, { quiet = false, sendAt = now } = {}) {
+  // about: {kind, id} when the message is about something other than a plan item (a rostered day, a task: ADR 0011); `it` then only
+  // lends its day, time and site, and the message stores item: null. needsAnswer: a notice (Got it) rather than an ask (yes / no).
+  /** @param {any} it @param {string} person @param {string} personKind @param {string} subject @param {number} now
+   * @param {{quiet?:boolean,sendAt?:number,about?:{kind:string,id:string},itemType?:string,needsAnswer?:boolean}} [opts] */
+  planAskPerson(it, person, personKind, subject, now, opts = {}) {
+    const { quiet = false, sendAt = now, about, itemType, needsAnswer } = opts;
     const p = this.teamPerson(person);
     if (!p) return null;
-    const attempt =
-      this.planRows(ITEM_MSGS, it.id).filter((m) => m.person === person && m.subject === subject).length + 1;
+    const kind = about?.kind ?? 'planItem',
+      earlier = kind === 'planItem' ? this.planRows(ITEM_MSGS, it.id) : this.planRows(ABOUT_MSGS, about.id);
+    const attempt = earlier.filter((m) => m.person === person && m.subject === subject).length + 1;
     const m = this.repo.add('message', {
       person,
       personKind,
       personName: p.name,
-      item: it.id,
-      itemType: it.type,
+      item: kind === 'planItem' ? it.id : null,
+      itemType: itemType ?? it.type,
       day: it.day,
       time: it.time,
       site: it.site ?? null,
       subject,
       text: '',
-      needsAnswer: subject !== 'PACK',
+      needsAnswer: needsAnswer ?? !['PACK', 'DAY', 'TASK_DAY'].includes(subject),
+      ...(kind === 'planItem' ? {} : { about: { kind, id: about.id } }),
       status: 'WAITING_TO_SEND',
       sendAt: iso(Math.max(sendAt, now)),
       sentAt: null,
@@ -357,12 +407,18 @@ export const planMethods = {
     if (msg.status !== 'WAITING_TO_SEND') return msg;
     const p = this.teamPerson(msg.person);
     if (p) msg.personName = p.name;
-    msg.text = this.planMsgText(msg, it);
+    const hook = MESSAGE_KINDS.get(messageKindOf(msg));
+    msg.text = messageKindOf(msg) === 'planItem' || !hook ? this.planMsgText(msg, it) : hook.text(this, msg);
     msg.status = 'SENT';
     msg.sentAt = iso(now);
     msg.outbound = { provider: null, ref: null };
     this.repo.save(msg);
-    if (!quiet) this.notify('Message sent', this.planMsgSummary(msg), msg.site);
+    if (!quiet)
+      this.notify(
+        'Message sent',
+        messageKindOf(msg) === 'planItem' || !hook ? this.planMsgSummary(msg) : hook.summary(this, msg),
+        msg.site,
+      );
     return msg;
   },
   planCallOff(id, why, now) {
@@ -414,6 +470,17 @@ export const planMethods = {
           '. Ask someone else on the Today page.',
         m.site,
       );
+    // a rostered day or a task follows the answer at once (ADR 0011 §11.1); a plan item's own step reads the message as before
+    MESSAGE_KINDS.get(messageKindOf(m))?.onAnswer?.(this, m, at);
+    return m;
+  },
+  // Got it on a notice (a list to pack, today's run): seen, and the kind it is about is told.
+  planSeenMsg(m, at) {
+    if (!m.seenAt) {
+      m.seenAt = iso(at);
+      this.repo.save(m);
+      MESSAGE_KINDS.get(messageKindOf(m))?.onSeen?.(this, m, at);
+    }
     return m;
   },
   // Sending is the business clock's (clock.js clockDeliverDue), in the Practice yard too.
@@ -431,9 +498,18 @@ export const planMethods = {
         at = Date.parse(m.sentAt) + s.delaySec * 1000;
       if (now < at) continue;
       if (m.needsAnswer) this.planAnswerMsg(m, { yes: s.yes, reason: s.reason, by: null, via: 'SIMULATED' }, at);
-      else {
-        m.seenAt = iso(at);
-        this.repo.save(m);
+      else this.planSeenMsg(m, at);
+    }
+  },
+  // The clock's duties added by part 5 (ADR 0011 §5), the same three in both yards: the roster's fortnight fill, then the day-before and
+  // day-of asks for rostered days, gear lists and tasks. Each in its own savepoint, so one failing never stops the pass.
+  planPartFive(now) {
+    for (const name of ['rosterFillDue', 'rosterAsks', 'gearAsks', 'taskAsks']) {
+      if (typeof this[name] !== 'function') continue;
+      try {
+        savepoint(this.db, 'plan_' + name, () => this[name](now));
+      } catch (error) {
+        logError('plan_' + name + '_error', { message: error.message });
       }
     }
   },
@@ -468,6 +544,7 @@ export const planMethods = {
     if (this.live()) return this.clockPass(now); // a real yard: asks and flags only
     this.planDeliverDue(now);
     this.planSimReplies(now);
+    this.planPartFive(now);
     const items = this.planRows(OPEN_ITEMS)
       .filter((i) => PLAN_OPEN.includes(i.status))
       .sort(
@@ -548,6 +625,7 @@ export const planMethods = {
     if (!it.driver && it.needsDriver) problem = 'Needs a driver. Pick one.';
     if (!it.truck && !it.hire)
       problem = (it.truckGone ? it.truckGone + ' was removed. ' : '') + 'Cancel it and book another truck.';
+    if (!problem && it.readyNo?.words) problem = it.readyNo.words; // the driver said no to a gear list's day-before ask (gear.js)
     if (started && !end && it.status === 'PLANNED') {
       it.status = 'ACTIVE';
       it.stage = 'ON';
@@ -699,8 +777,12 @@ export const planMethods = {
       it.cancelReason = 'Site removed';
       it.problem = null;
       this.planLog(it, 'Cancelled: ' + siteName + ' was removed.', now);
+      if (typeof this.taskListSync === 'function') this.taskListSync(it.id, 'CANCELLED', now);
       return;
     }
+    // a gear list from a site (site -> yard, site -> site): nothing is packed at the yard; the truck fetches it (gear.js, ADR 0011)
+    if (it.gear && it.direction && it.direction !== 'OUT' && typeof this.gearStepDemo === 'function')
+      return this.gearStepDemo(it, now, today);
     // held stillages that are no longer in the yard (moved by hand, removed): off the list
     if ((it.left ?? []).length) {
       const keep = [];
@@ -751,6 +833,7 @@ export const planMethods = {
         this.planLog(it, 'The load on ' + (t?.name ?? 'the truck') + " didn't go. It is back in the yard.", now);
       }
       if (!trip.done && t?.status === 'AT_SITE' && t.at === it.site) {
+        if (it.gear) this.gearEngineMark?.(it, 'ARRIVED_DROP', now); // the truck is at the site: the chain's arrival dot (ADR 0011)
         const ids = new Set(trip.containers ?? []),
           b = this.tasks().find((x) => active(x) && x.state === 'BLOCKED' && ids.has(x.container));
         if (b) {
@@ -787,6 +870,7 @@ export const planMethods = {
     if (trips.length && !out && !(it.left ?? []).length && !['WAITING', 'PACKING'].includes(it.stage)) {
       if (trips.some((x) => x.delivered)) {
         it.stage = 'DELIVERED';
+        if (it.gear) this.gearEngineMark?.(it, 'DELIVERED', now);
         this.planFinish(it, now);
         this.notify('Delivered', 'Delivered to ' + siteName + ': the list for ' + dayLabel(it.day) + '.', it.site);
         return;
@@ -856,6 +940,7 @@ export const planMethods = {
         this.planLog(it, packer.name + ' has been asked to pack it.', now);
       } else this.planLog(it, 'No yardsman in the team, so nobody was sent a message.', now);
       it.stage = 'PACKING';
+      if (it.gear) this.gearEngineMark?.(it, 'RECEIVED', now); // the simulated crew has the list (the task's Received, ADR 0011)
       if (jobsOff && this.planPack(it, now))
         this.planLog(it, 'Packed by the office (yard jobs are switched off).', now);
     }
@@ -878,6 +963,7 @@ export const planMethods = {
     }
     if (it.stage !== 'WAITING' && it.status === 'PLANNED') it.status = 'ACTIVE'; // its day's work has started (packing)
     if (stuck) problem = stuck;
+    if (!problem && it.readyNo?.words) problem = it.readyNo.words; // the driver said no to the day-before ask (gear.js)
     if (!problem && (it.short ?? []).length)
       problem =
         'Short: ' +
@@ -1038,6 +1124,7 @@ export const planMethods = {
       'Packed: ' + plural(pick.ids.length, 'stillage') + ' set aside for ' + this.planSiteName(it.site) + '.',
       now,
     );
+    if (it.gear) this.gearEngineMark?.(it, 'PACKED', now);
     return true;
   },
   // A PACK yard job finished (jobs.js EFFECTS.PACK).
@@ -1139,6 +1226,11 @@ export const planMethods = {
       it.stage = 'LOADING';
       it.problem = null;
       this.planLog(it, t.name + ' is loading ' + plural(loaded.length, 'stillage') + ' for ' + site.name + '.', now);
+      if (it.gear) {
+        // the truck is at the yard's loading spot and the crew loads it: the chain's first two dots (ADR 0011)
+        this.gearEngineMark?.(it, 'ARRIVED_PICKUP', now);
+        this.gearEngineMark?.(it, 'LOADED', now);
+      }
       return true;
     });
   },
@@ -1389,8 +1481,10 @@ export const planMethods = {
     } catch {}
     let n = 0;
     for (const it of this.planRows(OPEN_ITEMS)) {
-      if (it.site !== siteId) continue;
+      if (it.site !== siteId && !(it.type === 'MATERIALS' && it.fromSite === siteId)) continue; // a move from that site too
       if (it.type === 'MATERIALS' && ['LOADING', 'ON_THE_WAY'].includes(it.stage)) continue;
+      if (it.type === 'MATERIALS' && typeof this.taskListSync === 'function')
+        this.taskListSync(it.id, 'CANCELLED', now);
       this.planEdit(it.id, (x) => {
         this.planRelease(x, now);
         this.planCallOffAll(x, 'The site was ' + why, now);
@@ -2188,6 +2282,9 @@ export const planMethods = {
         now,
       );
     if (this.live()) this.planLiveMoved(this.repo.get(it.id, 'planItem'), { moved, lines, tp });
+    // a gear list's day-before asks are for the old day: called off, sent again when due; its task follows (ADR 0011)
+    if (it.type === 'MATERIALS' && it.gear) this.gearMoved?.(it.id, now);
+    if (it.type === 'MATERIALS' && typeof this.taskListSync === 'function') this.taskListSync(it.id, 'MOVED', now);
     this.planStep(it.id);
     return {
       ...this.planReply(
@@ -2241,6 +2338,7 @@ export const planMethods = {
       x.problem = null;
       this.planLog(x, 'Cancelled by ' + this.user.name + '.', now);
     });
+    if (it.type === 'MATERIALS' && typeof this.taskListSync === 'function') this.taskListSync(it.id, 'CANCELLED', now);
     if (it.type === 'TRUCK')
       this.planUnlinkTruck(
         it.id,
@@ -2421,8 +2519,31 @@ export const planMethods = {
     requireRule(m.status !== 'CALLED_OFF', 'This was called off.');
     requireRule(m.status !== 'WAITING_TO_SEND', "This hasn't been sent yet.");
     requireRule(m.needsAnswer, "This one doesn't need an answer. Tap Got it.");
-    const it = this.planItemFor(m.item),
-      now = this.planNow();
+    const now = this.planNow();
+    // a message about a rostered day or a task (ADR 0011 §11.1): its own kind says whether it is still open and until when it can be answered
+    if (messageKindOf(m) !== 'planItem') {
+      const hook = MESSAGE_KINDS.get(messageKindOf(m));
+      requireRule(hook, 'That message is no longer there.');
+      if (hook.scope) requireRule(hook.scope(this, m, this.user), 'Record not found in your company.');
+      requireRule(m.status === 'SENT' && !m.closedAt, 'This is already answered.');
+      requireRule(hook.isOpen(this, m), 'This is already finished.');
+      if (via === 'PHONE_VIEW' || via === 'PHONE')
+        requireRule(now < hook.deadline(this, m), 'Too late to answer, call the office.');
+      const why = input.yes ? null : note(input.reason);
+      if (this.repo.provenance && !own)
+        this.repo.provenance = { ...this.repo.provenance, kind: 'ON_BEHALF', onBehalfOf: m.person };
+      this.planAnswerMsg(m, { yes: input.yes, reason: why, by: this.user.id, via: own ? 'PHONE' : 'OFFICE' }, now);
+      return {
+        ok: true,
+        message: input.yes
+          ? via === 'OFFICE'
+            ? 'Marked as yes for ' + m.personName + '.'
+            : 'Thanks. See you there.'
+          : 'Got it. The office will sort it.',
+        messageView: this.planMsgView(this.repo.get(m.id, 'message'), now),
+      };
+    }
+    const it = this.planItemFor(m.item);
     requireRule(PLAN_OPEN.includes(it.status) && !m.closedAt, 'This is already finished.');
     if (via === 'PHONE_VIEW' || via === 'PHONE')
       requireRule(now < this.planAt(m.day, m.time), 'Too late to answer, call the office.');
@@ -2466,13 +2587,10 @@ export const planMethods = {
     requireRule(m, 'That message is no longer there.');
     if (this.user.crew && m.person !== (this.user.crew.person ?? this.user.crew.driver))
       throw new AppError(404, 'Record not found in your company.');
-    requireRule(m.subject === 'PACK', 'Answer this one with the two buttons.');
+    requireRule(!m.needsAnswer, 'Answer this one with the two buttons.');
     requireRule(m.status !== 'CALLED_OFF', 'This was called off.');
     const now = this.planNow();
-    if (!m.seenAt) {
-      m.seenAt = iso(now);
-      this.repo.save(m);
-    }
+    this.planSeenMsg(m, now);
     return { ok: true, message: 'Got it.', messageView: this.planMsgView(m, now) };
   },
   planReplies(input) {

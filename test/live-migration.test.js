@@ -14,7 +14,12 @@ import { Simulation } from '../src/simulation.js';
 
 // Migrations 008 (trips, a driver's phone) and 009 (charge lines, the YARD role) come after it and are undone first (their triggers read
 // companies.mode).
+// Migration 010 (ADR 0011: the trip_arrival table, the plan-day index) comes after those and is undone first.
+const UNDO_010 =
+  'DROP TRIGGER trip_arrival_no_update;DROP TRIGGER trip_arrival_no_delete;DROP TRIGGER trip_arrival_live_only;DROP TABLE trip_arrival;DROP INDEX objects_plan_day;DELETE FROM schema_migrations WHERE version=10;' +
+  '';
 const UNDO_009 =
+  UNDO_010 +
   'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
   "DELETE FROM role_permissions WHERE permission IN ('packs.confirm','asks.answer');DELETE FROM permissions WHERE code IN ('packs.confirm','asks.answer');DELETE FROM roles WHERE code='YARD';DELETE FROM schema_migrations WHERE version=9;" +
   '';
@@ -61,7 +66,7 @@ function dump(path, { without = {} } = {}) {
   }
 }
 // Tables migration 008 adds (empty on a database from before it).
-const ADDED = ['trip_confirmation', 'crew_links', 'crew_devices', 'charge_lines'];
+const ADDED = ['trip_confirmation', 'crew_links', 'crew_devices', 'charge_lines', 'trip_arrival'];
 const NEW = {
   companies: ['mode', 'time_zone'],
   ledger: ['occurred_at', 'actor_kind', 'on_behalf_of', 'origin'],
@@ -93,7 +98,7 @@ function checkMigrated(path, backups = null) {
     db.close();
   }
   if (backups) {
-    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v9-.*.sqlite$/.test(n));
+    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v10-.*.sqlite$/.test(n));
     assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
     assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }

@@ -136,6 +136,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/game.css': ['game.css', 'text/css'],
   }); // the game board
   Object.assign(assets, { '/plan-cal.js': ['plan-cal.js', 'text/javascript'] });
+  Object.assign(assets, { '/gear.js': ['gear.js', 'text/javascript'] }); // gear lists: the form, the chain of dots, the week (ADR 0011)
   Object.assign(assets, { '/mode.js': ['mode.js', 'text/javascript'] }); // LIVE or Practice yard: the chip, the switcher, what each shows // the Today calendar's grid and chips (shared with src/domain/today.js)
   Object.assign(assets, {
     '/crew-queue.js': ['crew-queue.js', 'text/javascript'],
@@ -363,6 +364,11 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         const q = new URL(req.url, 'http://localhost').searchParams;
         send(200, simulation.runSheet({ day: q.get('day'), driver: q.get('driver') }));
       } else if (req.method === 'GET' && path === '/api/needs-you') send(200, simulation.needsYou());
+      // Part 5 (ADR 0011): gear lists with their chain (a day, or a week from today) and the places, trucks and drivers for the form
+      else if (req.method === 'GET' && path === '/api/gear') {
+        const q = new URL(req.url, 'http://localhost').searchParams;
+        send(200, simulation.gearView({ day: q.get('day'), days: Number(q.get('days') ?? 1) }));
+      } else if (req.method === 'GET' && path === '/api/gear/places') send(200, simulation.gearPlaces());
       else if (req.method === 'GET' && path === '/api/site-account') {
         const site = new URL(req.url, 'http://localhost').searchParams.get('site');
         simulation.assertSite(simulation.repo.get(site, 'site').id);

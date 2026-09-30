@@ -101,7 +101,7 @@ test('the Materials page keeps every control the page binds to, flags missing fi
   __test.setView('MATERIALS');
   const html = materialsView();
   assert.equal((html.match(/<h1[ >]/g) ?? []).length, 1);
-  assert.match(html, /<h1>Materials catalogue<\/h1>/);
+  assert.match(html, /<h1>Gear list<\/h1>/); // renamed for the owner (ADR 0011)
   for (const id of ['ALL', 'quickstage', 'at-pac']) assert.ok(html.includes('data-component-tab="' + id + '"'), id);
   for (const id of ['quickstage', 'at-pac']) assert.ok(html.includes('data-intake-tab="' + id + '"'), id);
   for (const sel of [

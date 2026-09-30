@@ -76,6 +76,11 @@ const PLAN_FLAGS = [
   'message',
   'packer',
   'packMessage',
+  // a gear list's day-before ask and day-of notice to the driver, and the driver's no (ADR 0011): the clock's, never a state
+  'driverAsk',
+  'dayNotice',
+  'readyNo',
+  'readyNotAsked',
 ];
 // Everything a real yard holds that is not a message, a notification or a flag on a booking: stock, stillages, trucks, people, sites, the
 // bookings themselves (day, time, who and what; open or not), the ledger, the commands. The clock and the engine must leave all of it exactly

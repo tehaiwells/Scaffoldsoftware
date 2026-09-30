@@ -162,7 +162,7 @@ test('the day panel: items in time order with one status line, the people and th
   );
   assert.ok(html.includes('class="gm-slot gm-mini tdh-slot"'), 'the list shows its parts as little slots');
   // the adds: the office on a coming day; never on a past day or for a supervisor
-  for (const k of ['TRUCK', 'MATERIALS', 'WORKERS', 'RESTACK']) assert.ok(html.includes('data-tdh-add="' + k + '"'), k);
+  for (const k of ['TRUCK', 'GEAR', 'WORKERS', 'RESTACK']) assert.ok(html.includes('data-tdh-add="' + k + '"'), k); // + Gear list (ADR 0011)
   const past = await show(w, OWNER, addDays(D0, -1));
   assert.ok(!past.includes('data-tdh-add') && past.includes('Past days are for looking back'));
   const sup = await show(w, SUPERVISOR);

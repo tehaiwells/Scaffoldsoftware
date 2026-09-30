@@ -643,6 +643,7 @@ export const gameMethods = {
       since: new Date().toISOString(),
       problem: null,
       retryAt: null,
+      ...(input.plan ? { plan: input.plan } : {}), // a gear list from a site (gear.js): the item follows this trip
     };
     this.repo.save(f);
     return {
@@ -651,6 +652,43 @@ export const gameMethods = {
       message:
         t.name + ' is on its way to ' + site.name + ' to bring ' + (scope === 'ALL' ? 'everything' : 'it') + ' back.',
     };
+  },
+  // A gear list from site A to site B (ADR 0011, the Practice yard): the truck drives to A empty, the site crew there loads what the list asks
+  // for (the stillages holding it, as a Bring back picks them), it drives on to B, unloads with B's crane and comes home. gameStep runs it.
+  gameMoveStart(input) {
+    this.gamePaused(input);
+    const yard = this.gameYard(),
+      from = this.repo.get(input?.from, 'site'),
+      to = this.repo.get(input?.to, 'site');
+    requireRule(from.status === 'ACTIVE' && to.status === 'ACTIVE', 'Choose two active sites.');
+    requireRule(from.id !== to.id, 'Choose two different sites.');
+    const lines = lineList(input.lines),
+      trucks = this.gameFreeTrucks(yard);
+    const t = trucks.find((x) => x.id === input.truck) ?? trucks[0];
+    requireRule(t, 'Every truck is busy.');
+    requireRule(
+      lines.some((l) =>
+        this.containers().some((c) => c.location === from.id && this.repo.quantity(c.id, l.product) > 0),
+      ),
+      'None of that is at ' + from.name + '.',
+    );
+    this.gameCrew(from);
+    this.gameCrew(to);
+    this.dispatch({ id: t.id, destination: from.id });
+    const f = this.repo.get(t.id, 'truck');
+    f.game = {
+      kind: 'MOVE',
+      site: to.id,
+      from: from.id,
+      lines,
+      stage: 'OUTBOUND',
+      since: new Date().toISOString(),
+      problem: null,
+      retryAt: null,
+      plan: input.plan ?? null,
+    };
+    this.repo.save(f);
+    return { truck: { id: t.id, name: t.name }, message: t.name + ' is on its way to ' + from.name + '.' };
   },
   // Every truck is out: the order waits (oldest first) and goes on the next truck back at the yard (gameTick). The picked amounts are chosen again
   // then, from what is there at that moment.
@@ -862,12 +900,72 @@ export const gameMethods = {
         home();
         return set({ stage: 'RETURNING' });
       }
+    } else if (g.kind === 'MOVE') {
+      // site A -> site B (gameMoveStart): the marks of the gear list's chain are written as each stage begins (gear.js gearMark)
+      if (g.stage === 'OUTBOUND') {
+        if (t.status !== 'AT_SITE' || t.at !== g.from) {
+          if (t.status === 'AT_YARD' && !cargo) set(null);
+          return;
+        }
+        this.gearMark?.(g.plan, 'ARRIVED_PICKUP');
+        const from = this.repo.get(g.from, 'site');
+        this.gameCrew(from);
+        const pick = gpChoose(this.gameItems([g.from]).get(g.from), g.lines);
+        if (!pick.ids.length) {
+          this.notify(
+            'Nothing to move',
+            'None of that could be lifted at ' + from.name + '. ' + t.name + ' is coming home.',
+            g.from,
+          );
+          home();
+          return set({ stage: 'RETURNING' });
+        }
+        let first = null,
+          n = 0;
+        for (const id of pick.ids)
+          try {
+            savepoint(this.db, 'game_move_load', () => this.loadTruck({ truck: t.id, containers: [id] }));
+            n++;
+          } catch (e) {
+            if (!e.status) throw e;
+            first ??= e.message;
+          }
+        requireRule(n, first ?? 'Nothing could be loaded.');
+        this.gearMark?.(g.plan, 'COLLECTED');
+        return set({ stage: 'LOADING', stillages: n });
+      }
+      if (g.stage === 'LOADING') {
+        if (t.status !== 'AT_SITE') return;
+        if (!cargo) {
+          home();
+          return set({ stage: 'RETURNING' });
+        }
+        this.dispatch({ id: t.id, destination: g.site });
+        return set({ stage: 'DRIVING' });
+      }
+      if (g.stage === 'DRIVING' || g.stage === 'UNLOADING') {
+        if (t.status !== 'AT_SITE' || t.at !== g.site) {
+          if (t.status === 'AT_YARD' && !cargo) end();
+          return;
+        }
+        if (cargo) {
+          this.gearMark?.(g.plan, 'ARRIVED_DROP');
+          this.gameCrew(this.repo.get(g.site, 'site'));
+          this.unload({ id: t.id });
+          return set({ stage: 'UNLOADING' });
+        }
+        this.gearMark?.(g.plan, 'DELIVERED');
+        this.notify('Delivered', 'Landed at ' + siteName() + '. ' + t.name + ' is heading back to the yard.', g.site);
+        home();
+        return set({ stage: 'RETURNING' });
+      }
     } else if (g.kind === 'COLLECT') {
       if (g.stage === 'OUTBOUND') {
         if (t.status !== 'AT_SITE' || t.at !== g.site) {
           if (t.status === 'AT_YARD' && !cargo) set(null);
           return;
         }
+        this.gearMark?.(g.plan, 'ARRIVED_PICKUP');
         let o = null;
         try {
           o = this.repo.get(g.collection, 'collection');
@@ -913,6 +1011,7 @@ export const gameMethods = {
               site.id,
             );
           }
+          this.gearMark?.(g.plan, 'COLLECTED');
           return set({ stage: 'LOADING', more });
         }
         home();
@@ -927,9 +1026,11 @@ export const gameMethods = {
     // RETURNING / UNLOADING at the yard (both kinds): unload what came back, then the trip is over.
     if (t.status !== 'AT_YARD' || t.at !== t.yard) return;
     if (cargo) {
+      if (g.kind === 'COLLECT') this.gearMark?.(g.plan, 'ARRIVED_DROP');
       this.unload({ id: t.id });
       return set({ stage: 'UNLOADING' });
     }
+    if (g.kind === 'COLLECT' && g.plan && (g.brought || g.stage === 'UNLOADING')) this.gearMark?.(g.plan, 'RETURNED');
     if (g.kind === 'COLLECT' && (g.brought || g.stage === 'UNLOADING'))
       this.notify(
         'Back at the yard',

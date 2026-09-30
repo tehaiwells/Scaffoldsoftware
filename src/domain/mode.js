@@ -101,6 +101,10 @@ export const LIVE_OPS = new Set([
   'siteFinish',
   'productValue',
   'needsYouDismiss',
+  // Part 5 (ADR 0011: gear lists, roster, tasks): a gear list books its truck and driver; the driver's arrival taps; CREW appends its names
+  'gearListCreate',
+  'gearListUpdate',
+  'tripArrived',
 ]);
 // Commands whose stock rows are brought in from before the app (opening balances): provenance IMPORT, still with the person who entered them.
 export const IMPORT_OPS = new Set(['opening']);

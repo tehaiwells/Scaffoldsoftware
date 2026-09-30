@@ -114,7 +114,7 @@ test('a link for a driver, claimed once by a phone; the phone opens its own trip
     me.json.trips.map((x) => x.id),
     [mine.id],
   );
-  assert.deepEqual(me.json.trips[0].next, ['tripLoaded']);
+  assert.deepEqual(me.json.trips[0].next, ['tripLoaded', 'tripArrived']); // the arrival: an optional gate (ADR 0011)
   // confirm: one key per tap; the same tap again answers the same; another driver's trip is not found; nothing but the four confirmations
   const tap = await req('POST', '/api/crew/commands/tripLoaded', {
     body: { trip: mine.id },

@@ -24,6 +24,7 @@ export const CREW_ACTIONS = {
   returnCount: { label: 'Counted back', ask: 'Count what came off the truck at the yard.' },
   messageAnswer: { label: 'Your answer', ask: '' },
   messageSeen: { label: 'Got it', ask: '' },
+  tripArrived: { label: 'Arrived', ask: '' }, // at the yard (or site A), then at the site (or the yard): one tap, no counts (ADR 0011)
   crewSignOn: { label: 'On site', ask: 'Who is here?' },
   planDone: { label: 'Done', ask: '' },
 };
@@ -58,7 +59,7 @@ const onTheRoad = (trip) => {
  * @param {any} trip @returns {{main:string|null,soft:string|null,softLabel:string|null}}
  */
 export function crewButtons(trip) {
-  const next = trip.next ?? [];
+  const next = (trip.next ?? []).filter((a) => a !== 'tripArrived'); // the arrival has its own quiet button
   if (next.includes('tripDelivered'))
     return {
       main: 'tripDelivered',
@@ -107,9 +108,31 @@ const dayWords = (day, today) => {
 export function crewTrip(trip, pending = []) {
   const mine = pending.filter((t) => t.input?.trip === trip.id);
   let next = trip.next ?? [];
-  for (const t of mine) next = AFTER[t.action] ?? [];
-  const waiting = mine.map((t) => ({ action: t.action, at: t.input?.at ?? t.tappedAt, lines: t.input?.lines ?? null }));
-  return { ...trip, next, waiting };
+  let arrival = trip.arrival ?? null;
+  for (const t of mine) {
+    if (t.action === 'tripArrived') {
+      // an arrival waiting to send: the next one is the drop's when the load has left, else nothing until it has
+      next = next.filter((a) => a !== 'tripArrived');
+      arrival = null;
+      continue;
+    }
+    next = AFTER[t.action] ?? [];
+    // once the load has left (a tap waiting on this phone), the drop's arrival is next, unless it was tapped already
+    arrival =
+      (t.action === 'tripLoaded' || t.action === 'tripCollected') &&
+      !trip.steps?.ARRIVED_DROP &&
+      !mine.some((x) => x.action === 'tripArrived' && x.tappedAt > t.tappedAt)
+        ? { step: 'ARRIVED_DROP', words: 'Arrived at ' + (trip.direction === 'BACK' ? 'yard' : trip.siteName) }
+        : null;
+    if (arrival) next = [...next, 'tripArrived'];
+  }
+  const waiting = mine.map((t) => ({
+    action: t.action,
+    at: t.input?.at ?? t.tappedAt,
+    lines: t.input?.lines ?? null,
+    words: t.action === 'tripArrived' ? (t.input?.words ?? 'Arrived') : null,
+  }));
+  return { ...trip, next, waiting, arrival };
 }
 // The numbers a confirmation starts from (what the server takes when nothing is changed).
 /** @param {any} trip @param {string} action */
@@ -144,9 +167,12 @@ const TRUCK =
 /** The step lines under a trip: what was confirmed, and taps still waiting on this phone. */
 function stepsHTML(trip, offline) {
   const out = [];
+  const arrivalWords = (k) => (trip.chain ?? []).find((c) => c.step === k)?.words ?? 'Arrived';
   for (const [k, words] of [
+    ['ARRIVED_PICKUP', arrivalWords('ARRIVED_PICKUP')],
     ['LOADED', 'Loaded & left'],
     ['COLLECTED', 'Collected'],
+    ['ARRIVED_DROP', arrivalWords('ARRIVED_DROP')],
     ['DELIVERED', 'Delivered'],
     ['RETURNED', 'Back at yard'],
   ]) {
@@ -162,7 +188,7 @@ function stepsHTML(trip, offline) {
   for (const w of trip.waiting ?? [])
     out.push(
       '<li class="cr-wait"><span class="cr-dot" aria-hidden="true"></span>' +
-        esc(CREW_ACTIONS[w.action]?.label + ' ' + hm(w.at)) +
+        esc((w.words ?? CREW_ACTIONS[w.action]?.label) + ' ' + hm(w.at)) +
         ' · ' +
         (offline ? 'saved, sends when there is signal' : 'sending…') +
         '</li>',
@@ -300,6 +326,15 @@ export function tripCard(trip, v) {
       '</ul>' +
       (trip.lines?.length > 1 ? '<p class="cr-total">' + plural(pieces, 'piece') + '</p>' : '') +
       stepsHTML(trip, v.offline) +
+      (trip.arrival && (trip.next ?? []).includes('tripArrived')
+        ? '<button type="button" class="cr-big cr-soft cr-arrive" data-cr-arrive="' +
+          esc(trip.id) +
+          '" data-words="' +
+          esc(trip.arrival.words) +
+          '">' +
+          esc(trip.arrival.words) +
+          '</button>'
+        : '') +
       (main
         ? '<button type="button" class="cr-big" data-cr-go="' +
           esc(main) +
@@ -393,7 +428,7 @@ export function askCard(a, v) {
       '<button type="submit" class="cr-big cr-soft">Send: can’t make it</button><button type="button" class="cr-link" data-cr-cancel>Never mind</button></form>';
   else if (!done)
     body =
-      a.subject === 'PACK'
+      a.subject === 'PACK' || !a.needsAnswer
         ? '<button type="button" class="cr-big" data-cr-seen="' + esc(a.id) + '">Got it</button>'
         : '<div class="cr-two"><button type="button" class="cr-big" data-cr-yes="' +
           esc(a.id) +
@@ -413,7 +448,11 @@ export function askCard(a, v) {
       ? 'Drive' + (where ? ' to ' + where : '')
       : a.subject === 'PACK'
         ? 'Pack a list for ' + (where || 'a site')
-        : 'Work at ' + (where || 'a site')) +
+        : a.subject === 'READY'
+          ? 'Ready for tomorrow?' + (where ? ' ' + where : '')
+          : a.subject === 'DAY'
+            ? 'Today’s run' + (where ? ' · ' + where : '')
+            : 'Work at ' + (where || 'a site')) +
     '</b><small>' +
     when +
     (a.address ? ' · ' + esc(a.address) : '') +
@@ -941,6 +980,7 @@ function boot() {
     const b = /** @type {HTMLElement} */ (e.target).closest('button');
     if (!b) return;
     if (b.dataset.crGo) return openFor(b.dataset.trip, b.dataset.crGo);
+    if (b.dataset.crArrive) return tapNow('tripArrived', { trip: b.dataset.crArrive, words: b.dataset.words });
     if (b.dataset.crYes) return tapNow('messageAnswer', { id: b.dataset.crYes, yes: true });
     if (b.dataset.crSeen) return tapNow('messageSeen', { id: b.dataset.crSeen });
     if (b.dataset.crNo) {

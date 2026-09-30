@@ -62,7 +62,9 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
 
   // ---- the office books the day on Today
   await page.goto('/?view=TODAY');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   await expect(page.locator('#lt-needs')).toBeVisible({ timeout: 30000 }); // the Needs-you card is there, quiet
   await expect(page.locator('#lt-needs')).toContainText('Nothing needs you');
   const cell = page.locator(`.tdh-cell[data-tdh-day="${day}"]`);
@@ -74,7 +76,7 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await tform.locator('.tdh-go').click();
   const truck = page.locator('.tdh-item.tone-truck');
   await expect(truck).toContainText('Waiting for Dave to answer', { timeout: 20000 });
-  await page.getByRole('button', { name: /^\+ Materials/ }).click();
+  await page.getByRole('button', { name: /^\+ Gear list/ }).click(); // the list (ADR 0011): yard -> Bondi on Dave's truck
   await page.locator('[data-tdh-pick]').click();
   await page.locator(`.tdh-layer [data-pp-slot="${part.id}"]`).click();
   // a real yard's picker keeps the number typed (exact pieces): 24, not a whole stillage
@@ -83,8 +85,8 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await expect(page.locator('.tdh-layer [data-pp-words]')).toContainText('24 pieces');
   await page.locator('.tdh-layer [data-pp-done]').click();
   await expect(page.locator('.tdh-layer')).toHaveCount(0);
-  await expect(page.locator('[data-tdh-form="MATERIALS"] select[name=truckPlan]')).toContainText('Dave');
-  await page.locator('[data-tdh-form="MATERIALS"] .tdh-go').click();
+  await expect(page.locator('[data-tdh-form="GEAR"] select[name=driver]')).toContainText('Dave');
+  await page.locator('[data-tdh-form="GEAR"] .tdh-go').click();
   await expect(page.locator('.tdh-item.tone-mat')).toContainText('O-1', { timeout: 20000 }); // its exact order, held
   await page.getByRole('button', { name: /^\+ Workers/ }).click();
   const wform = page.locator('[data-tdh-form="WORKERS"]');
@@ -105,8 +107,9 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   // ---- the phones: Dave says yes, Jo can't make it (Crook), Lee can, Kev packs with the counts
   const dPhone = await phoneOf(dave);
   await expect(dPhone.getByRole('heading', { name: 'My trips, Dave' })).toBeVisible({ timeout: 30000 });
-  await dPhone.getByRole('button', { name: 'I’ll be there', exact: true }).click();
-  await expect(dPhone.locator('.cr-askcard')).toContainText('You said yes, see you there', { timeout: 20000 });
+  // the truck's own ask first (past 3 pm the gear list's "ready for tomorrow?" ask is there too, ADR 0011)
+  await dPhone.getByRole('button', { name: 'I’ll be there', exact: true }).first().click();
+  await expect(dPhone.locator('.cr-askcard').first()).toContainText('You said yes, see you there', { timeout: 20000 });
   const jPhone = await phoneOf(jo);
   await expect(jPhone.getByRole('heading', { name: 'My day, Jo' })).toBeVisible({ timeout: 30000 });
   await jPhone.getByRole('button', { name: 'Can’t make it', exact: true }).click();
@@ -213,7 +216,9 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await page.goto('/');
   await expect(page.locator('.gm-needs')).toContainText('Needs you · ' + needs.count, { timeout: 45000 });
   await page.locator('.gm-needs').click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   const needCard = page.locator('#lt-needs');
   await expect(needCard).toContainText('Needs you · ' + needs.count, { timeout: 30000 });
   await expect(needCard.locator('.lt-need')).toHaveCount(needs.count);

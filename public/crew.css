@@ -552,3 +552,8 @@ input:focus-visible {
     display: none;
   }
 }
+/* the driver's arrival tap (ADR 0011): a quiet button above the big one */
+.cr-big.cr-arrive {
+  min-height: 48px;
+  margin-bottom: 8px;
+}

@@ -35,6 +35,7 @@ import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS, PACK_OPS } f
 import { dispatchMethods, DISPATCH_OPS, PHONE_TAP_OPS, CREW_PHONE_OPS } from './domain/dispatch.js';
 import { returnsMethods, RETURN_OPS } from './domain/returns.js';
 import { needsMethods } from './domain/needs.js';
+import { gearMethods, GEAR_OPS } from './domain/gear.js';
 // Commands that can leave a stillage with fewer pieces than an order holds there (a real yard's exact holds are fitted after them)
 const HOLDS_FIT = new Set(['approveCount', 'stockRemoval', 'removeStock', 'quickAdjust', 'retire', 'scrapContainer']);
 const operational = [
@@ -86,6 +87,7 @@ const operational = [
 operational.push(...WORLD_OPS); // Home world map: moving a site on the map (src/domain/world.js)
 operational.push(...GAME_OPS); // the game board's one-tap commands (src/domain/game.js)
 operational.push(...PLAN_OPS); // the Today planner, messages and the team (src/domain/plan.js, team.js)
+operational.push(...GEAR_OPS); // gear lists (src/domain/gear.js, ADR 0011): the office's, in both yards
 export class Simulation {
   constructor(db, user) {
     this.db = db;
@@ -710,6 +712,7 @@ Object.assign(
   dispatchMethods,
   returnsMethods,
   needsMethods,
+  gearMethods,
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 installGame(Simulation.prototype); // the game board: one-tap commands, the truck autopilot after every tick, result.game

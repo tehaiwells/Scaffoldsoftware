@@ -29,14 +29,19 @@ export const LO_ACTIONS = {
   tripDelivered: 'Delivered',
   tripCollected: 'Collected',
   tripReturned: 'Back at yard',
+  tripArrived: 'Arrived', // the driver's arrival at the pickup or the drop (ADR 0011): a light step, one tap, no counts
 };
 const STEPS = [
+  ['ARRIVED_PICKUP', 'Arrived'],
   ['PACKED', 'Packed'],
   ['LOADED', 'Loaded & left'],
   ['COLLECTED', 'Collected'],
+  ['ARRIVED_DROP', 'Arrived'],
   ['DELIVERED', 'Delivered'],
   ['RETURNED', 'Back at yard'],
 ];
+/** The words of a step on a trip: an arrival says where (from the trip's chain), the rest their own. @param {any} t @param {string} k @param {string} words */
+const stepWords = (t, k, words) => (t.chain ?? []).find((c) => c.step === k)?.words ?? words;
 const TONE = {
   BOOKED: 'booked',
   PACKED: 'booked',
@@ -259,7 +264,7 @@ export function loSteps(t) {
     if (!s) continue;
     out.push(
       '<li><span class="lo-tick" aria-hidden="true">✓</span><span><b>' +
-        esc(words + ' ' + loHm(s.at)) +
+        esc(stepWords(t, k, words) + ' ' + loHm(s.at)) +
         '</b>' +
         (s.receivedBy ? ' · received by ' + esc(s.receivedBy) : '') +
         ' <small>' +
@@ -377,7 +382,9 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
         .map(
           (a) =>
             '<button type="button" class="lo-btn' +
-            (a === 'packConfirmed' || (a === 'tripReturned' && ['DELIVERED', 'LOADED'].includes(t.state))
+            (a === 'packConfirmed' ||
+            a === 'tripArrived' ||
+            (a === 'tripReturned' && ['DELIVERED', 'LOADED'].includes(t.state))
               ? ' soft'
               : '') +
             '" data-lo-go="' +
@@ -385,7 +392,13 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
             '" data-trip="' +
             esc(t.id) +
             '">' +
-            esc(a === 'tripReturned' && t.state === 'LOADED' ? 'Came back, not delivered' : LO_ACTIONS[a]) +
+            esc(
+              a === 'tripReturned' && t.state === 'LOADED'
+                ? 'Came back, not delivered'
+                : a === 'tripArrived'
+                  ? (t.arrival?.words ?? LO_ACTIONS.tripArrived)
+                  : LO_ACTIONS[a],
+            ) +
             '</button>',
         )
         .join('') +
@@ -424,6 +437,12 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
     lrTripExtraHTML(t, { ops }) +
     '</article>'
   );
+}
+/** One trip by id, compact (a gear list's card on Daily activities): its docket, steps and buttons. @param {string} id @param {string} day @param {boolean} ops */
+export function loTripOne(id, day, ops = true) {
+  const d = loDay(day);
+  const t = d ? [...d.trips, ...(d.upcoming ?? [])].find((x) => x.id === id) : null;
+  return t ? '<div class="lo-trips lo-one">' + loTripHTML(t, { ops, day: d.day }) + '</div>' : '';
 }
 /** A day's trips for one truck booking (Today) or one truck (the truck page). */
 export function loTripsFor({ day = null, truckPlan = null, truck = null, ops = true, empty = '' } = {}) {
@@ -650,6 +669,10 @@ function onClick(e) {
   const b = /** @type {HTMLElement} */ (e.target)?.closest?.('button,[data-lo-copy]');
   if (!b || !LO.host) return;
   const d = b.dataset;
+  if (d.loGo === 'tripArrived') {
+    run('tripArrived', { trip: d.trip }); // one tap: the step is chosen from the trip's state, nothing to count
+    return;
+  }
   if (d.loGo) {
     LO.open = { trip: d.trip, action: d.loGo };
     LO.book = null;

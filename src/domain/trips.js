@@ -16,6 +16,7 @@ import { requireLive } from './mode.js';
 import { zoneParts } from './zonetime.js';
 import { dayLabel, addDays } from './schedule.js';
 import { DAY_END, PLAN_TIMES, parseTime, timeWords } from './plantime.js';
+import { chainOf, chainWords, nextArrival, CHAIN_MOVES } from './gear-chain.js';
 /** @typedef {import('../repository.js').StoredObject} StoredObject */
 /** @typedef {'PACKED'|'LOADED'|'DELIVERED'|'COLLECTED'|'RETURNED'} TripStep */
 /** @typedef {{container:string,product:string,quantity:number}} Pick */
@@ -24,7 +25,9 @@ import { DAY_END, PLAN_TIMES, parseTime, timeWords } from './plantime.js';
 // operations.manage; the four confirmations need trips.confirm, and then the trip's own driver or the office (for the driver: ON_BEHALF).
 export const ORDER_OPS = ['orderCreate', 'bringBackCreate', 'orderCancel'];
 export const TRIP_OFFICE_OPS = ['tripBook', 'tripCancel'];
-export const TRIP_CONFIRM_OPS = ['tripLoaded', 'tripDelivered', 'tripCollected', 'tripReturned'];
+export const TRIP_CONFIRM_OPS = ['tripLoaded', 'tripDelivered', 'tripCollected', 'tripReturned', 'tripArrived'];
+// Arrivals (ADR 0011): light confirmations by the driver at the pickup place and the drop place; they move nothing (trip_arrival).
+export const ARRIVAL_STEPS = ['ARRIVED_PICKUP', 'ARRIVED_DROP'];
 // Packing and counting are the yard's (ADR 0010): a yard hand's phone (the YARD role) or the office (packs.confirm).
 export const PACK_OPS = ['packConfirmed', 'returnCount'];
 /** @type {Record<string,TripStep>} */
@@ -36,6 +39,8 @@ export const STEP_OF = {
   tripReturned: 'RETURNED',
 };
 export const STEP_WORDS = {
+  ARRIVED_PICKUP: 'Arrived',
+  ARRIVED_DROP: 'Arrived',
   PACKED: 'Packed',
   LOADED: 'Loaded & left',
   DELIVERED: 'Delivered',
@@ -106,7 +111,7 @@ const median = (xs) => {
 };
 const add = (/** @type {Map<string,number>} */ m, /** @type {string} */ k, /** @type {number} */ n) =>
   m.set(k, (m.get(k) ?? 0) + n);
-const RANK = { PACKED: 0, LOADED: 1, COLLECTED: 1, DELIVERED: 2, RETURNED: 3 };
+const RANK = { ARRIVED_PICKUP: 0, PACKED: 0, LOADED: 1, COLLECTED: 1, ARRIVED_DROP: 1, DELIVERED: 2, RETURNED: 3 };
 // A trip's latest confirmed step: the latest time, and the later step when two share a time. [step, record] or null.
 /** @param {any} t @returns {[string, any]|null} */
 export const tripLast = (t) =>
@@ -119,6 +124,8 @@ const OPEN_STATES = "json_extract(data,'$.state') IN ('BOOKED','PACKED','LOADED'
 const NOT_RETIRED = "coalesce(json_extract(data,'$.retired'),0)=0";
 const INSERT_CONFIRMATION =
   'INSERT INTO trip_confirmation(id,company_id,trip_id,site_id,step,lines,received_by,occurred_at,recorded_at,actor,actor_kind,on_behalf_of,origin,backdate_reason,command_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)';
+const INSERT_ARRIVAL =
+  'INSERT INTO trip_arrival(id,company_id,trip_id,site_id,step,occurred_at,recorded_at,actor,actor_kind,on_behalf_of,origin,backdate_reason,command_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)';
 
 /** @type {Record<string,any> & ThisType<any>} */
 export const tripMethods = {
@@ -275,13 +282,21 @@ export const tripMethods = {
     requireLive(this);
     return this.orderMake('BACK', input ?? {});
   },
-  /** @param {'OUT'|'BACK'} direction @param {any} input @param {{source?:string,planItem?:string|null}} [extra] */
+  // MOVE (ADR 0011): site -> site; input.fromSite is where the gear is (the holds), input.site where it goes. Made only through gearListCreate.
+  /** @param {'OUT'|'BACK'|'MOVE'} direction @param {any} input @param {{source?:string,planItem?:string|null}} [extra] */
   orderMake(direction, input, extra = {}) {
     const site = this.tripSite(input.site),
       yard = this.tripYard(),
       cal = this.planNowCal(),
       lines = lineList(input.lines);
     requireRule(!site.finishing, site.name + ' is being removed. Tap Keep it first.');
+    let fromSite = null;
+    if (direction === 'MOVE') {
+      const from = this.tripSite(input.fromSite);
+      requireRule(!from.finishing, from.name + ' is being removed. Tap Keep it first.');
+      requireRule(from.id !== site.id, 'Choose two different sites for a move.');
+      fromSite = from.id;
+    }
     const neededOn =
       input.neededOn === undefined || input.neededOn === null || input.neededOn === ''
         ? cal.today
@@ -301,6 +316,7 @@ export const tripMethods = {
       direction,
       site: site.id,
       yard: yard.id,
+      fromSite,
       neededOn,
       time,
       status: 'OPEN',
@@ -329,7 +345,7 @@ export const tripMethods = {
     });
     const short = this.orderHold(order);
     const view = this.orderView(this.repo.get(order.id, 'order')),
-      from = direction === 'OUT' ? 'in the yard' : 'at ' + site.name;
+      from = direction === 'OUT' ? 'in the yard' : 'at ' + (direction === 'MOVE' ? view.fromSiteName : site.name);
     const words = view.lines.map((/** @type {any} */ l) => l.requested + ' × ' + l.name).join(', ');
     const heldWords = short.length
       ? short
@@ -354,7 +370,9 @@ export const tripMethods = {
       message:
         (direction === 'OUT'
           ? 'Order ' + view.label + ' for ' + site.name + ': '
-          : 'Bring back ' + view.label + ' from ' + site.name + ': ') +
+          : direction === 'MOVE'
+            ? 'Move ' + view.label + ' from ' + view.fromSiteName + ' to ' + site.name + ': '
+            : 'Bring back ' + view.label + ' from ' + site.name + ': ') +
         words +
         '. ' +
         heldWords,
@@ -363,7 +381,7 @@ export const tripMethods = {
   // Holds exact pieces for every line that is not fully held yet (yard stock for OUT, the site's for BACK). Returns the lines still short.
   /** @param {any} order */
   orderHold(order) {
-    const place = order.direction === 'OUT' ? order.yard : order.site,
+    const place = order.direction === 'OUT' ? order.yard : order.direction === 'MOVE' ? order.fromSite : order.site,
       short = [],
       had = this.orderHeld(order.id);
     for (const l of order.lines) {
@@ -449,20 +467,22 @@ export const tripMethods = {
     const o = this.tripRowsBy(
       'objects_order_status',
       'order',
-      "json_extract(data,'$.status') IN ('OPEN','BOOKED','LOADED','COLLECTED') AND json_extract(data,'$.site')=?",
+      "json_extract(data,'$.status') IN ('OPEN','BOOKED','LOADED','COLLECTED') AND (json_extract(data,'$.site')=? OR json_extract(data,'$.fromSite')=?)",
+      siteId,
       siteId,
     )[0];
     if (o)
       return (
         this.orderLabel(o) +
-        ' for ' +
-        this.planSiteName(siteId) +
+        (o.direction === 'MOVE'
+          ? ' from ' + this.planSiteName(o.fromSite) + ' to ' + this.planSiteName(o.site)
+          : ' for ' + this.planSiteName(o.site)) +
         ' is ' +
         ORDER_STATE_WORDS[o.status].toLowerCase() +
         '. ' +
         (ORDER_OPEN.includes(o.status) ? 'Cancel it first.' : 'Confirm its trip first.')
       );
-    const t = this.tripOpenRows().find((/** @type {any} */ x) => x.site === siteId);
+    const t = this.tripOpenRows().find((/** @type {any} */ x) => x.site === siteId || x.fromSite === siteId);
     return t
       ? this.tripLabel(t) +
           ' to ' +
@@ -528,7 +548,7 @@ export const tripMethods = {
   },
   /** @param {any} o */
   orderLabel(o) {
-    return (o.direction === 'BACK' ? 'B-' : 'O-') + o.number;
+    return (o.direction === 'BACK' ? 'B-' : o.direction === 'MOVE' ? 'M-' : 'O-') + o.number;
   },
   /** @param {any} o */
   orderView(o) {
@@ -544,6 +564,8 @@ export const tripMethods = {
       direction: o.direction,
       site: o.site,
       siteName: site?.name ?? 'The site',
+      fromSite: o.fromSite ?? null,
+      fromSiteName: o.fromSite ? this.planSiteName(o.fromSite) : null,
       neededOn: o.neededOn,
       time: o.time,
       status: o.status,
@@ -589,6 +611,14 @@ export const tripMethods = {
       orders.every((o) => o.direction === direction),
       'A trip either sends or brings back. Book the other on its own trip.',
     );
+    const fromSite = direction === 'MOVE' ? orders[0].fromSite : null;
+    if (direction === 'MOVE') {
+      requireRule(
+        orders.every((o) => o.fromSite === fromSite),
+        'One pickup site per trip. Book the other on its own trip.',
+      );
+      this.tripSite(fromSite);
+    }
     const now = this.planNow();
     let tp;
     if (input.truckPlan) {
@@ -654,6 +684,7 @@ export const tripMethods = {
       truckPlan: tp.id,
       truck: tp.truck,
       site: site.id,
+      fromSite,
       yard: orders[0].yard,
       orders: orders.map((o) => o.id),
       time,
@@ -693,7 +724,7 @@ export const tripMethods = {
         view.truckName +
         ' with ' +
         view.driverName +
-        (direction === 'BACK' ? ' from ' : ' to ') +
+        (direction === 'MOVE' ? ' from ' + view.fromSiteName + ' to ' : direction === 'BACK' ? ' from ' : ' to ') +
         site.name +
         ' on ' +
         dayLabel(view.day) +
@@ -853,17 +884,50 @@ export const tripMethods = {
   // What may be confirmed next on a trip.
   /** @param {any} trip @returns {string[]} */
   tripNext(trip) {
+    let next;
     if (trip.direction === 'OUT')
-      return (
+      next =
         {
           BOOKED: ['packConfirmed', 'tripLoaded'],
           PACKED: ['tripLoaded'],
           LOADED: ['tripDelivered', 'tripReturned'], // Back at yard from here: it came back, not delivered
           DELIVERED: trip.steps.RETURNED ? [] : ['tripReturned'],
           DELIVERED_SHORT: ['tripReturned'],
-        }[trip.state] ?? []
-      );
-    return { BOOKED: ['tripCollected'], PACKED: ['tripCollected'], COLLECTED: ['tripReturned'] }[trip.state] ?? [];
+        }[trip.state] ?? [];
+    else if (trip.direction === 'MOVE')
+      // site A -> site B (ADR 0011): collected at A, delivered at B; what was not landed at B comes back to the yard
+      next =
+        {
+          BOOKED: ['tripCollected'],
+          PACKED: ['tripCollected'],
+          COLLECTED: ['tripDelivered'],
+          DELIVERED: [],
+          DELIVERED_SHORT: ['tripReturned'],
+        }[trip.state] ?? [];
+    else next = { BOOKED: ['tripCollected'], PACKED: ['tripCollected'], COLLECTED: ['tripReturned'] }[trip.state] ?? [];
+    // the arrival is an optional gate (ADR 0011): offered beside the movement step, never in its way
+    if (trip.state !== 'CANCELLED' && this.tripArrivalNext(trip)) next = [...next, 'tripArrived'];
+    return next;
+  },
+  // Which arrival a trip can record now: at the pickup place before it has left, at the drop place while the load is on the truck.
+  /** @param {any} trip @returns {string|null} */
+  tripArrivalNext(trip) {
+    return nextArrival(trip.direction, trip.steps ?? {});
+  },
+  // The two place names of a trip's chain: the pickup and the drop (a site's name, or 'the yard').
+  /** @param {any} trip */
+  tripPlaces(trip) {
+    const to = this.planSiteName(trip.site);
+    return trip.direction === 'OUT'
+      ? { from: 'the yard', to }
+      : trip.direction === 'MOVE'
+        ? { from: this.planSiteName(trip.fromSite), to }
+        : { from: to, to: 'the yard' };
+  },
+  // The chain of a trip as dots (gear-chain.js): arrivals and movement steps in order, each done or not, with who and when.
+  /** @param {any} trip */
+  tripChain(trip) {
+    return chainOf(trip.direction, trip.steps ?? {}, this.tripPlaces(trip));
   },
   /** @param {any} trip @param {{crew?:boolean}} [opts] */
   tripView(trip, { crew = false } = {}) {
@@ -880,7 +944,9 @@ export const tripMethods = {
     try {
       driver = tp?.driver ? this.repo.get(tp.driver, 'driver') : null;
     } catch {}
-    const next = this.tripNext(trip).filter((a) => !crew || TRIP_CONFIRM_OPS.includes(a));
+    const next = this.tripNext(trip).filter((a) => !crew || TRIP_CONFIRM_OPS.includes(a)),
+      arrival = this.tripArrivalNext(trip),
+      places = this.tripPlaces(trip);
     return {
       id: trip.id,
       number: trip.number,
@@ -898,6 +964,11 @@ export const tripMethods = {
       driverName: driver?.name ?? 'No driver',
       site: trip.site,
       siteName: site?.name ?? 'The site',
+      fromSite: trip.fromSite ?? null,
+      fromSiteName: trip.fromSite ? places.from : null,
+      // the gear list's chain (ADR 0011): the dots, and the arrival tap that is next (with its words), if any
+      chain: this.tripChain(trip),
+      arrival: arrival ? { step: arrival, words: chainWords(trip.direction, arrival, places) } : null,
       address: site?.address ?? null,
       contact: site?.contact ?? null,
       phone: site?.phone ?? null,
@@ -999,6 +1070,110 @@ export const tripMethods = {
   },
   tripReturned(/** @type {any} */ input) {
     return this.tripConfirm('tripReturned', input);
+  },
+  // Arrived (ADR 0011): the driver's tap at the pickup place before the load leaves, or at the drop place while it is on the truck. The step is
+  // chosen from the trip's state; one trip_arrival row, the mark on the trip, no stock, no ledger row. Refused once the movement step it gates
+  // is recorded ("Already loaded & left"). A real yard only; the Practice yard's engine writes the same marks on the item itself (gear.js).
+  tripArrived(/** @type {any} */ input) {
+    requireLive(this);
+    requireRule(input && typeof input === 'object', 'Choose a trip.');
+    const trip = this.repo.get(input.trip, 'trip'),
+      tp = this.tripPlan(trip),
+      who = this.tripWho(trip, tp),
+      now = this.planNow();
+    requireRule(trip.state !== 'CANCELLED', 'This trip was cancelled.');
+    const step = this.tripArrivalNext(trip),
+      mv = CHAIN_MOVES[trip.direction] ?? CHAIN_MOVES.OUT;
+    if (!step) {
+      // the arrival that would come next was already recorded, or its movement step went first
+      if (trip.steps?.[mv.in]) throw new AppError(409, 'This trip is finished.');
+      const done = trip.steps?.[mv.out] ? trip.steps?.ARRIVED_DROP : trip.steps?.ARRIVED_PICKUP;
+      if (!done)
+        throw new AppError(
+          409,
+          'Already ' + STEP_WORDS[mv.out].toLowerCase() + ': the arrival was not recorded in time.',
+        );
+      throw Object.assign(
+        new AppError(
+          409,
+          'Already confirmed: arrived at ' + this.tripHm(Date.parse(done.at)) + ' by ' + done.byName + '.',
+        ),
+        { code: 'ALREADY_CONFIRMED', detail: { same: true, step: 'ARRIVED', recorded: done } },
+      );
+    }
+    requireRule(tp?.truck, 'This trip has no truck. Book one on Today.');
+    const when = this.tripWhen(trip, step, input, now, tp),
+      byName = this.user.name ?? 'Someone',
+      places = this.tripPlaces(trip),
+      site =
+        step === 'ARRIVED_PICKUP'
+          ? trip.direction === 'OUT'
+            ? null
+            : (trip.fromSite ?? trip.site)
+          : trip.direction === 'BACK'
+            ? null
+            : trip.site;
+    const id = randomUUID();
+    cached(this.db, INSERT_ARRIVAL).run(
+      id,
+      this.repo.company,
+      trip.id,
+      site,
+      step,
+      when.at,
+      iso(now),
+      this.user.id,
+      who.kind,
+      who.onBehalfOf,
+      'command:tripArrived',
+      when.reason,
+      this.key ?? randomUUID(),
+    );
+    if (when.reason)
+      this.auth.audit(this.user, 'trip.backdated', {
+        trip: trip.id,
+        step,
+        occurredAt: when.at,
+        recordedAt: iso(now),
+        reason: when.reason,
+      });
+    const fresh = this.repo.get(trip.id, 'trip');
+    fresh.steps = {
+      ...(fresh.steps ?? {}),
+      [step]: {
+        id,
+        at: when.at,
+        recordedAt: iso(now),
+        by: this.user.id,
+        byName,
+        kind: who.kind,
+        onBehalfOf: who.onBehalfOf,
+        ...(when.reason ? { reason: when.reason } : {}),
+      },
+    };
+    this.repo.save(fresh);
+    // the list and the truck booking say so (a label: nothing changes state)
+    for (const oid of fresh.orders) {
+      let o = null;
+      try {
+        o = this.repo.get(oid, 'order');
+      } catch {}
+      if (o?.planItem)
+        try {
+          this.planEdit(o.planItem, (/** @type {any} */ x) =>
+            this.planLog(x, this.tripStepWords(fresh, step) + '.', now),
+          );
+        } catch {}
+    }
+    this.planEdit(fresh.truckPlan, (/** @type {any} */ x) => {
+      if (step === 'ARRIVED_PICKUP' && trip.direction === 'OUT' && x.status !== 'DONE') x.stage = 'AT_YARD';
+      this.planLog(x, this.tripLabel(fresh) + ': ' + this.tripStepWords(fresh, step) + '.', now);
+    });
+    return {
+      trip: this.tripView(fresh, { crew: !!this.user.crew }),
+      confirmation: { id, step, at: when.at },
+      message: chainWords(trip.direction, step, places) + ' ' + this.tripHm(when.ms) + '.',
+    };
   },
   // The driver this signed-in person is (a CREW sign-in), or null.
   /** @param {string} userId */
@@ -1160,14 +1335,15 @@ export const tripMethods = {
     const lines = this.tripLines(trip),
       want = this.tripInputLines(input, new Map(lines.map((/** @type {any} */ l) => [l.product, l.asked])));
     if (!want.size) return null;
-    const have = new Map();
-    for (const c of this.tripContainersAt(trip.site))
+    const have = new Map(),
+      pickup = trip.fromSite ?? trip.site;
+    for (const c of this.tripContainersAt(pickup))
       for (const l of this.repo.lines(c.id)) if (want.has(l.product_id)) add(have, l.product_id, l.quantity);
     const rows = cached(
       this.db,
       "SELECT step,lines,occurred_at FROM trip_confirmation WHERE company_id=? AND site_id=? AND step IN ('DELIVERED','COLLECTED') AND occurred_at>?",
     )
-      .all(this.repo.company, trip.site, iso(ms))
+      .all(this.repo.company, pickup, iso(ms))
       .sort((/** @type {any} */ a, /** @type {any} */ b) => String(b.occurred_at).localeCompare(String(a.occurred_at)));
     for (const [p, q] of want) {
       let bal = have.get(p) ?? 0,
@@ -1179,7 +1355,7 @@ export const tripMethods = {
       }
       if (low < q)
         return (
-          this.planSiteName(trip.site) +
+          this.planSiteName(pickup) +
           ' had only ' +
           Math.max(0, low) +
           ' × ' +
@@ -1244,7 +1420,9 @@ export const tripMethods = {
         next.length
           ? 'First confirm ' +
               STEP_WORDS[
-                STEP_OF[next.find((a) => a !== 'packConfirmed' && a !== 'tripReturned') ?? next[0]]
+                STEP_OF[
+                  next.find((a) => a !== 'packConfirmed' && a !== 'tripReturned' && a !== 'tripArrived') ?? next[0]
+                ] ?? 'LOADED'
               ].toLowerCase() +
               '.'
           : 'This trip is finished.',
@@ -1256,11 +1434,13 @@ export const tripMethods = {
         tp.driver,
         'No driver is named on this truck booking. Pick one on Today: nothing leaves without a driver.',
       );
-      let site = null;
-      try {
-        site = this.repo.get(trip.site, 'site');
-      } catch {}
-      requireRule(site?.status === 'ACTIVE', (site?.name ?? 'That site') + ' was removed. Cancel this trip.');
+      for (const id of [trip.site, ...(trip.direction === 'MOVE' ? [trip.fromSite] : [])]) {
+        let site = null;
+        try {
+          site = this.repo.get(id, 'site');
+        } catch {}
+        requireRule(site?.status === 'ACTIVE', (site?.name ?? 'That site') + ' was removed. Cancel this trip.');
+      }
     }
     // Back at yard with "count later" (ADR 0010): nothing is counted now; the yard counts with returnCount, and the clock flags it
     const countLater = step === 'RETURNED' && input.countLater === true;
@@ -1369,10 +1549,14 @@ export const tripMethods = {
           step === 'LOADED' || step === 'COLLECTED' || step === 'PACKED'
             ? l.asked
             : step === 'DELIVERED'
-              ? l.loaded
+              ? trip.direction === 'MOVE'
+                ? l.collected
+                : l.loaded
               : trip.direction === 'BACK'
                 ? l.collected
-                : l.loaded - l.delivered,
+                : trip.direction === 'MOVE'
+                  ? l.collected - l.delivered
+                  : l.loaded - l.delivered,
         ]),
       );
     let said = oneTap;
@@ -1447,6 +1631,13 @@ export const tripMethods = {
     const s = trip.steps[step];
     if (!s) return '';
     const t = now ? this.tripWhenWords(Date.parse(s.at), now) : this.tripHm(Date.parse(s.at));
+    if (ARRIVAL_STEPS.includes(step))
+      return (
+        chainWords(trip.direction, step, this.tripPlaces(trip)) +
+        ' ' +
+        t +
+        (s.kind === 'ON_BEHALF' ? ' (recorded by ' + s.byName + ')' : ' (' + s.byName + ')')
+      );
     if (step === 'DELIVERED')
       return (
         (trip.state === 'DELIVERED_SHORT' ? 'Delivered short ' : 'Delivered ') + t + ' · received by ' + s.receivedBy
@@ -1470,7 +1661,7 @@ export const tripMethods = {
     if (step === 'PACKED')
       return this.tripInputLines(input, new Map(lines.map((/** @type {any} */ l) => [l.product, l.asked])));
     if (step === 'LOADED' || step === 'COLLECTED') {
-      const from = step === 'LOADED' ? trip.yard : trip.site,
+      const from = step === 'LOADED' ? trip.yard : (trip.fromSite ?? trip.site),
         want = this.tripInputLines(
           input,
           new Map(lines.map((/** @type {any} */ l) => [l.product, l.packed ?? l.asked])), // a packed count is what goes, unless changed
@@ -1809,8 +2000,8 @@ export const tripMethods = {
       if (truck)
         Object.assign(truck, {
           status: 'IN_TRANSIT',
-          at: trip.site,
-          destination: trip.yard,
+          at: trip.fromSite ?? trip.site,
+          destination: trip.direction === 'MOVE' ? trip.site : trip.yard,
           liveTrip: trip.id,
           leftAt: when.at,
         });
@@ -1845,10 +2036,14 @@ export const tripMethods = {
       field === 'loaded' || field === 'collected'
         ? l.requested
         : field === 'delivered'
-          ? l.loaded
+          ? o.direction === 'MOVE'
+            ? l.collected
+            : l.loaded
           : o.direction === 'BACK'
             ? l.collected
-            : l.loaded - l.delivered;
+            : o.direction === 'MOVE'
+              ? l.collected - l.delivered
+              : l.loaded - l.delivered;
     for (const [p, q] of done) {
       let left = q;
       const has = orders.filter((/** @type {any} */ o) => o.lines.some((/** @type {any} */ l) => l.product === p));
@@ -1885,6 +2080,9 @@ export const tripMethods = {
         x.stage = 'ON_THE_WAY';
         x.status = 'ACTIVE';
       }
+      // a gear list's task (ADR 0011 section 11.2): the yard's pack and the load are the task's own marks too
+      if (it.gear && ['PACKED', 'LOADED', 'COLLECTED'].includes(step) && typeof this.taskListSync === 'function')
+        this.taskListSync(it.id, step === 'COLLECTED' ? 'LOADED' : step, now, trip.steps?.[step] ?? null);
       if (step === 'RETURNED' && trip.undelivered) {
         x.stage = 'WAITING';
         x.problem = UNDELIVERED_WORDS + '. Tap Send again on its trip, or cancel this list.';
@@ -1937,7 +2135,7 @@ export const tripMethods = {
           unconfirmedAt: null,
           why: null,
         });
-      else if (last && last[0] !== 'PACKED') {
+      else if (last && last[0] !== 'PACKED' && last[0] !== 'ARRIVED_PICKUP') {
         // packed is still in the yard: the booking stays planned (it can still move with the day); a load leaving makes it under way
         x.status = 'ACTIVE';
         x.stage = 'ON';
@@ -1965,16 +2163,17 @@ export const tripMethods = {
             : 'Not confirmed: nobody recorded the collection';
       else if (trip.state === 'LOADED' || trip.state === 'COLLECTED') {
         const since = Date.parse(trip.steps[trip.state]?.at),
-          mins = this.tripMinutes(trip.site);
+          mins = this.tripMinutes(trip.site),
+          toSite = trip.state === 'LOADED' || trip.direction === 'MOVE'; // a move heads for site B after collecting at A
         if (now > since + mins * 60000 + LATE_MS)
           words =
             'Not confirmed: left ' +
-            (trip.state === 'LOADED' ? 'the yard ' : this.planSiteName(trip.site) + ' ') +
+            (trip.state === 'LOADED' ? 'the yard ' : this.planSiteName(trip.fromSite ?? trip.site) + ' ') +
             this.tripHm(since) +
             ', usually ~' +
             mins +
             ' min. ' +
-            (trip.state === 'LOADED' ? 'Delivered?' : 'Back at yard?');
+            (toSite ? 'Delivered?' : 'Back at yard?');
       } else if (trip.state === 'DELIVERED_SHORT' && over) {
         const n = [...this.tripOnTruck(trip).values()].reduce((s, x) => s + x, 0);
         words = 'Not confirmed: ' + plural(n, 'piece') + ' still on the truck';
@@ -2067,20 +2266,20 @@ export const tripMethods = {
         late: false,
       };
       if (t?.state === 'LOADED' || t?.state === 'COLLECTED') {
-        const out = t.state === 'LOADED',
+        const out = t.state === 'LOADED' || t.direction === 'MOVE',
           mins = this.tripMinutes(t.site),
           since = Date.parse(t.steps[t.state].at);
         row = {
           ...row,
           state: out ? 'TO_SITE' : 'TO_YARD',
           place: null,
-          from: out ? t.yard : t.site,
+          from: t.state === 'LOADED' ? t.yard : (t.fromSite ?? t.site),
           to: out ? t.site : t.yard,
           since: t.steps[t.state].at,
           trip: t.id,
           words:
             'Left ' +
-            (out ? '' : this.planSiteName(t.site) + ' ') +
+            (t.state === 'LOADED' ? '' : this.planSiteName(t.fromSite ?? t.site) + ' ') +
             this.tripHm(since) +
             ' · usually ~' +
             mins +

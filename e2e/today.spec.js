@@ -37,7 +37,9 @@ test('the installed app opens on Today: a month calendar, the day under it on a 
   await firstYard(page);
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
   await page.goto('/?view=TODAY');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   await expect(page).toHaveURL(/\/\?view=TODAY$/); // kept while Today is open, so 'Add to Home screen' from here opens on Today
   await expect(page.locator('.office-bar .ob-title')).toHaveText('Today');
   await expect(page.locator('.gm-tile[data-view="TODAY"]')).toHaveClass(/current/);
@@ -87,7 +89,9 @@ test('a truck, a materials list and workers booked on a coming day; the driver s
   await sw.click();
   await expect(sw).toContainText('Off');
   await page.goto('/?view=TODAY');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   const day = await page.evaluate(() => {
     const t = document.querySelector('.tdh-cell.today').dataset.tdhDay,
       [y, m] = t.split('-').map(Number),
@@ -117,16 +121,17 @@ test('a truck, a materials list and workers booked on a coming day; the driver s
   await page.locator(`.tdh-cell[data-tdh-day="${day}"]`).click(); // the chosen day is remembered in this tab
   await expect(page.locator('.tdh-item.tone-truck')).toContainText('Dave said yes');
   await expect(page.locator(`.tdh-cell[data-tdh-day="${day}"] .tdh-flag`)).toHaveCount(0);
-  // the materials list: picked in the parts window, on Dave's truck
-  await page.getByRole('button', { name: /^\+ Materials/ }).click();
+  // the gear list (ADR 0011): picked in the parts window, from the yard to Bondi, on Dave's truck that day
+  await page.getByRole('button', { name: /^\+ Gear list/ }).click();
   await page.locator('[data-tdh-pick]').click();
   await page.locator(`.tdh-layer [data-pp-slot="${part.id}"]`).click();
   await page.locator('.tdh-layer [data-pp-done]').click();
   await expect(page.locator('.tdh-layer')).toHaveCount(0);
-  await expect(page.locator('[data-tdh-form="MATERIALS"] select[name=truckPlan]')).toContainText('Dave');
-  await page.locator('[data-tdh-form="MATERIALS"] .tdh-go').click();
-  await expect(cell.locator('.tdh-chip.tone-mat')).toContainText('List → Bondi');
-  await expect(page.locator('.tdh-item.tone-mat')).toContainText('packs it on the day');
+  await expect(page.locator('[data-tdh-form="GEAR"] select[name=driver]')).toContainText('Dave');
+  await page.locator('[data-tdh-form="GEAR"] .tdh-go').click();
+  await expect(cell.locator('.tdh-chip.tone-mat')).toContainText('Bondi gear');
+  await expect(page.locator('.tdh-item.tone-mat')).toContainText('the yard → Bondi');
+  await expect(page.locator('.tdh-item.tone-mat .gl-step')).toHaveCount(5);
   // workers: two, to Bondi; each is asked the day before and must say yes
   await page.getByRole('button', { name: /^\+ Workers/ }).click();
   await page.locator('[data-tdh-form="WORKERS"] .tdh-go').click();

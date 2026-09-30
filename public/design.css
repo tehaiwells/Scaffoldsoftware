@@ -32025,3 +32025,225 @@ body.tdh-sheet-open {
     grid-column: auto;
   }
 }
+/* ---------- gear lists (ADR 0011): the chain of dots, the form's From / To and workers, the week on the Gear list page ---------- */
+.lt-dot.dot-todo {
+  background: #fff;
+  box-shadow: 0 0 0 1px #c9c3b1;
+}
+.lt-dot.dot-arrived {
+  background: #d5e6a3;
+  box-shadow: 0 0 0 1px #8fae4c;
+}
+.lt-dot.dot-atsite {
+  background: #f3c98a;
+  box-shadow: 0 0 0 1px #c98b3a;
+}
+.gl-chain-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 4px 0 2px;
+}
+.gl-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.gl-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #6b7a70;
+}
+.gl-step.done {
+  color: #16382c;
+  font-weight: 700;
+}
+.gl-step small {
+  font-weight: 500;
+  color: #6b7a70;
+}
+.gl-chain-wrap.is-small .gl-step-w,
+.gl-chain-wrap.is-small small {
+  display: none;
+}
+.gl-chain-wrap.is-small .gl-chain {
+  gap: 4px;
+}
+.gl-route b,
+.gl-truck b {
+  color: #16382c;
+}
+.gl-truck .tdh-pill {
+  margin-left: 4px;
+}
+.gl-truck small {
+  color: #6b7a70;
+  font-weight: 500;
+}
+.gl-arrow {
+  font-weight: 600;
+  color: #3d5446;
+}
+.gl-task {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.gl-task li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gl-task b small {
+  font-weight: 700;
+  color: #6b7a70;
+}
+.gl-ticks {
+  display: inline-flex;
+  gap: 4px;
+}
+.gl-tick {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid #c9c3b1;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 900;
+  color: #fff;
+  background: #fff;
+}
+.gl-tick.on {
+  background: #2f7d4a;
+  border-color: #2f7d4a;
+}
+.page-today .gl-place .lt-segs {
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+.page-today .gl-place select {
+  margin-top: 4px;
+}
+.gl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gl-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #eef2e8;
+  padding: 2px;
+}
+.gl-chip.on {
+  background: #16382c;
+}
+.gl-chip-name,
+.gl-pri {
+  min-height: 34px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  color: #3d5446;
+  padding: 0 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: none;
+}
+.gl-chip.on .gl-chip-name {
+  color: #fff;
+}
+.gl-pri {
+  color: #c9d8c2;
+  padding: 0 8px;
+}
+.gl-pri.on {
+  background: #a9e03c;
+  color: #16382c;
+}
+.gl-page .tdh-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.gl-page .tdh-go.gl-new {
+  min-height: 42px;
+  padding: 0 16px;
+}
+.gl-week {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gl-week-open {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #e6e0cf;
+  background: #fbfaf5;
+  color: #16382c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+}
+.gl-week-row.done .gl-week-open {
+  opacity: 0.7;
+}
+.gl-week-row.red .gl-week-open {
+  border-color: #e7a89b;
+}
+.gl-week-when,
+.gl-week-t {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.gl-week-when b {
+  font-size: 14px;
+}
+.gl-week-when small,
+.gl-week-t small {
+  font-size: 12.5px;
+  color: #6b7a70;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gl-week-t b {
+  font-size: 14.5px;
+}
+.lo-trips.lo-one {
+  margin-top: 6px;
+}
+@media (max-width: 600px) {
+  .gl-week-open {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .gl-week-open .gl-chain-wrap {
+    grid-column: 1 / -1;
+  }
+}

@@ -67,6 +67,13 @@ export function chipOf(e) {
         : (e.truckName ?? 'Truck') + (e.driverName ? ' · ' + e.driverName : ''),
     };
   }
+  // a gear list (ADR 0011): its name, its time and an arrow by direction ('Bondi gear · 7:00 am → Bondi', 'A → B', '← Bondi')
+  if (e.type === 'MATERIALS' && e.gear)
+    return {
+      kind: 'MATERIALS',
+      ...CHIP_KINDS.MATERIALS,
+      label: (e.name ?? 'Gear') + (e.timeWords ? ' · ' + e.timeWords : '') + (e.arrow ? ' ' + e.arrow : ''),
+    };
   if (e.type === 'MATERIALS')
     return { kind: 'MATERIALS', ...CHIP_KINDS.MATERIALS, label: 'List → ' + (e.siteName ?? 'site') };
   if (e.type === 'WORKERS')

@@ -19,14 +19,16 @@ export const PHONE_TAP_OPS = ['messageAnswer', 'messageSeen', 'crewSignOn', 'pla
 /** Everything /api/crew/commands/<action> accepts (server.js): the trip confirmations, the yard's packs and counts, and the taps. */
 export const CREW_PHONE_OPS = new Set([...TRIP_CONFIRM_OPS, ...PACK_OPS, ...PHONE_TAP_OPS]);
 /** A trip's one state dot on the lanes: derived from the records, never from a timer. */
-export const DOTS = ['DRAFT', 'BOOKED', 'ASKED', 'YES', 'PACKED', 'LOADED', 'DELIVERED', 'BACK'];
+export const DOTS = ['DRAFT', 'BOOKED', 'ASKED', 'YES', 'ARRIVED', 'PACKED', 'LOADED', 'AT_SITE', 'DELIVERED', 'BACK'];
 export const DOT_WORDS = {
   DRAFT: 'Draft',
   BOOKED: 'Booked',
   ASKED: 'Asked',
   YES: 'Yes',
+  ARRIVED: 'At yard', // the driver's arrival at the pickup (ADR 0011), a light step before Packed / Loaded
   PACKED: 'Packed',
   LOADED: 'Loaded',
+  AT_SITE: 'At site', // arrived at the drop, before Delivered
   DELIVERED: 'Delivered',
   BACK: 'Back',
 };
@@ -85,9 +87,17 @@ export const dispatchMethods = {
         requireRule(tp.status !== 'DRAFT', this.planWhat(tp) + "'s booking is still a draft. Send it first.");
         requireRule(PLAN_OPEN.includes(tp.status) && tp.day === it.day, 'Choose a truck booked that day.');
       }
+      // a gear list's draft keeps its direction (ADR 0011): a move holds at site A, a bring-back at the site
       const made = this.orderMake(
-        'OUT',
-        { site: site.id, lines: it.lines, neededOn: it.day, time: it.time, note: it.note },
+        it.direction ?? 'OUT',
+        {
+          site: site.id,
+          fromSite: it.fromSite ?? null,
+          lines: it.lines,
+          neededOn: it.day,
+          time: it.time,
+          note: it.note,
+        },
         { source: 'today', planItem: it.id },
       );
       this.planEdit(it.id, (/** @type {any} */ x) => {
@@ -384,8 +394,9 @@ export const dispatchMethods = {
     const s = trip.state;
     if (s === 'RETURNED') return 'BACK';
     if (s === 'DELIVERED' || s === 'DELIVERED_SHORT') return 'DELIVERED';
-    if (s === 'LOADED' || s === 'COLLECTED') return 'LOADED';
+    if (s === 'LOADED' || s === 'COLLECTED') return trip.steps?.ARRIVED_DROP ? 'AT_SITE' : 'LOADED';
     if (s === 'PACKED') return 'PACKED';
+    if (trip.steps?.ARRIVED_PICKUP) return 'ARRIVED';
     const a = booking ? this.planAnswerOf(this.planMsg(booking.message), this.planNow()) : 'NOT_SENT';
     return a === 'YES' ? 'YES' : a === 'WAITING' || a === 'NO_ANSWER' || a === 'NO' ? 'ASKED' : 'BOOKED';
   },

@@ -124,7 +124,13 @@ export const todayMethods = {
                 ? m.seenAt
                   ? 'Got it'
                   : 'Please pack this list'
-                : 'Can you make it?';
+                : !m.needsAnswer
+                  ? m.seenAt
+                    ? 'Got it'
+                    : "Today's run"
+                  : m.subject === 'READY'
+                    ? 'Ready for tomorrow?'
+                    : 'Can you make it?';
     return {
       id: m.id,
       item: m.item,
@@ -145,7 +151,7 @@ export const todayMethods = {
       via: m.answer?.via ?? null,
       needsAnswer: !!m.needsAnswer,
       canAnswer: open && !!m.needsAnswer && now < this.planAt(m.day, m.time),
-      canSee: m.subject === 'PACK' && open && !m.seenAt,
+      canSee: !m.needsAnswer && open && !m.seenAt,
       seen: !!m.seenAt,
       sentAt: m.sentAt,
       answeredAt: m.answeredAt,
@@ -386,6 +392,33 @@ export const todayMethods = {
       if (it.status === 'CANCELLED') words = 'Cancelled';
       if (missed) words = "Didn't go";
       if (it.status === 'DONE' && it.leftOver) words = 'Part delivered';
+      // a gear list (ADR 0011): its name, from -> to, the chain of dots, the truck and driver, the day-before ask, its task
+      if (it.gear && typeof this.gearItemFields === 'function') {
+        const g = this.gearItemFields(it, ctx);
+        Object.assign(v, g);
+        if (g.chainWords && open && !(this.live() && it.stage === 'PACKED')) words = g.chainWords; // a real yard's Packed keeps its count
+        // from a site (site -> yard, site -> site): nothing is packed at the yard, the truck fetches it; the yard's low-stock line does not apply
+        if (it.direction && it.direction !== 'OUT') {
+          v.low = [];
+          v.lowWords = null;
+          warn = false;
+          if (open && it.stage === 'WAITING' && !g.chainWords)
+            words =
+              (g.truckItem ? g.truckItem.truckName : 'The truck') +
+              ' goes to ' +
+              g.from.name +
+              ' at ' +
+              timeWords(it.time);
+        }
+        if (!g.truckItem && open && !g.chainWords) {
+          words = 'Needs a truck';
+          red = true;
+        }
+        if (it.stage === 'ON_THE_WAY' && !g.chainWords) words = 'On the way to ' + g.from.name;
+        if (it.status === 'DONE' && it.direction === 'BACK' && !it.leftOver) words = 'Back at yard';
+        if (g.readyAsk && g.readyAsk.answer === 'WAITING') needsAnswer = true;
+        if (g.readyAsk && ['NO', 'NO_ANSWER'].includes(g.readyAsk.answer) && open) red = true;
+      }
     } else if (it.type === 'WORKERS') {
       const sendAt = iso(this.planAt(addDays(it.day, -1), SEND_BEFORE));
       const rows = it.people.map((p) => ({

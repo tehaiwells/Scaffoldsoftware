@@ -118,7 +118,7 @@ test('Loaded & left moves exact pieces yard -> truck (a part split into a bundle
   assert.equal(tp.type, 'TRUCK', 'a truck booking on Today');
   assert.equal(tp.driver, f.team.Dave.id);
   assert.equal(f.msgs(tp.id)[0]?.status, 'SENT', 'Dave is asked, as for any truck booking');
-  assert.deepEqual(trip.next, ['packConfirmed', 'tripLoaded']);
+  assert.deepEqual(trip.next, ['packConfirmed', 'tripLoaded', 'tripArrived']); // the arrival: an optional gate (ADR 0011)
   // nothing has moved: booking is not driving
   assert.deepEqual(where(f, f.product.id), { yard: f.per * 3, site: 0, truck: 0 });
   assert.throws(
@@ -206,7 +206,7 @@ test('a whole stillage moves as it is and goes back to its own spot at the yard;
   assert.equal(back.label, 'B-1', 'bring-backs are numbered on their own');
   assert.equal(back.lines[0].held, f.per * 2);
   const run = f.cmd('tripBook', { orders: [back.id], truck: f.truck.id }).trip;
-  assert.deepEqual(run.next, ['tripCollected']);
+  assert.deepEqual(run.next, ['tripCollected', 'tripArrived']);
   f.clock(D0, '13:00');
   f.cmd('tripCollected', { trip: run.id });
   assert.deepEqual(where(f, f.product.id), { yard: f.per, site: 0, truck: f.per * 2 });
@@ -361,7 +361,7 @@ test("the driver's phone: PERSON for their own trip, never another driver's; the
     [mine.id],
   );
   assert.equal(list.driver.name, 'Dave');
-  assert.deepEqual(list.trips[0].next, ['tripLoaded'], 'the phone is offered its confirmations only');
+  assert.deepEqual(list.trips[0].next, ['tripLoaded', 'tripArrived'], 'the phone is offered its confirmations only');
   // another driver's trip: not found, whatever they try
   for (const a of ['tripLoaded', 'tripDelivered', 'tripCollected', 'tripReturned'])
     assert.throws(

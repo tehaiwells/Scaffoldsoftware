@@ -14,6 +14,7 @@ import { zoneParts, zoneAt, DEFAULT_ZONE } from './zonetime.js';
 import { addDays, dayLabel, weekdayOf, mondayOf } from './schedule.js';
 import { DAY_START, SEND_BEFORE, DAY_END, timeWords } from './plantime.js';
 import { paperState } from './paperwork.js';
+import { MESSAGE_KINDS, messageKindOf } from './plan.js';
 /** @typedef {import('../repository.js').StoredObject} StoredObject */
 const OPEN = ['PLANNED', 'ACTIVE'],
   REMIND_MS = 2 * 3600000,
@@ -70,6 +71,13 @@ export const clockMethods = {
   clockDeliverDue(now) {
     for (const m of this.planRows(DUE_MSGS)) {
       if (Date.parse(m.sendAt) > now) continue;
+      // a message about a rostered day or a task (ADR 0011): its own kind says whether it may still go
+      if (messageKindOf(m) !== 'planItem') {
+        const hook = MESSAGE_KINDS.get(messageKindOf(m));
+        if (!hook || !hook.isOpen(this, m)) this.planCallOff(m.id, 'The plan changed', now);
+        else this.planDeliver(m, { id: null, day: m.day, time: m.time, site: m.site }, now);
+        continue;
+      }
       let it = null;
       try {
         it = this.repo.get(m.item, 'planItem');
@@ -110,6 +118,7 @@ export const clockMethods = {
           } catch {}
         }
       }
+      this.planPartFive(now); // the roster's fortnight fill, then the day-before and day-of asks for rostered days, gear lists and tasks (ADR 0011)
       this.clockRemind(now);
       this.clockPaperwork(now, today);
       this.clockTrips(now); // trips that should have been confirmed by now are flagged "Not confirmed" (trips.js), never moved on
@@ -194,6 +203,7 @@ export const clockMethods = {
     if (!it.driver && it.needsDriver) problem = 'Needs a driver. Pick one.';
     if (!it.truck && !it.hire)
       problem = (it.truckGone ? it.truckGone + ' was removed. ' : '') + 'Cancel it and book another truck.';
+    if (!problem && it.readyNo?.words) problem = it.readyNo.words; // the driver said no to a gear list's day-before ask (gear.js)
     if (it.status === 'PLANNED' && this.clockBegun(it, now) && today >= it.day) it.status = 'ACTIVE';
     if (over) {
       const why =
@@ -323,7 +333,9 @@ export const clockMethods = {
     }
     if (it.status === 'PLANNED' && it.stage !== 'WAITING') it.status = 'ACTIVE';
     it.problem =
-      it.stage === 'PACKING' && !it.packer ? 'Nobody was asked to pack it: add a yardsman to the team.' : null;
+      it.stage === 'PACKING' && !it.packer
+        ? 'Nobody was asked to pack it: add a yardsman to the team.'
+        : (it.readyNo?.words ?? null); // the driver said no to a gear list's day-before ask (gear.js)
   },
   // What the records say at the end of a truck day that is not done: a trip on the road, or nothing recorded (trips.js confirms).
   /** @param {any} it */

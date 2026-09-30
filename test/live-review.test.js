@@ -128,7 +128,11 @@ test('a load the site would not take comes back: Back at yard straight from Load
   const f = liveFixture(t);
   const { o, trip } = booked(f, 5);
   f.cmd('tripLoaded', { trip: trip.id });
-  assert.deepEqual(f.sim.tripView(f.sim.repo.get(trip.id, 'trip')).next, ['tripDelivered', 'tripReturned']);
+  assert.deepEqual(f.sim.tripView(f.sim.repo.get(trip.id, 'trip')).next, [
+    'tripDelivered',
+    'tripReturned',
+    'tripArrived',
+  ]);
   const back = f.cmd('tripReturned', { trip: trip.id });
   assert.equal(back.trip.state, 'RETURNED');
   assert.equal(back.trip.stateWords, 'Came back, not delivered');
