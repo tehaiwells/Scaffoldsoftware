@@ -21583,7 +21583,7 @@ const tdhTaken = (day) => tdhP()?.taken?.[day] ?? { trucks: [], drivers: [], peo
 function tdFetch(force = false) {
   if (typeof document === 'undefined' || !api) return;
   if (tdFetching) {
-    if (force) tdAgain = true;
+    if (force || tdAsk.month !== tdhMonth()) tdAgain = true; // a month turned while a fetch was out is asked for next
     return;
   }
   const month = tdhMonth(),
@@ -21601,21 +21601,27 @@ function tdFetch(force = false) {
     return;
   tdFetching = true;
   tdAsk = { month, rev, day, at: Date.now() };
-  Promise.all([api('plan?month=' + month), api('today')])
+  const ask = () => Promise.all([api('plan?month=' + month), api('today')]);
+  ask()
+    .then(([plan, today]) => {
+      // The Practice yard's demo drivers and first names are added before the page shows its first data: a booking form never
+      // opens without a driver to pick (a redraw waits while a form field has focus, so a driver who came later would not show).
+      if ((plan?.team?.needsStart || plan?.team?.needsNames) && plan.canPlan && !tdStarted) {
+        tdStarted = true;
+        return (plan.team.needsStart ? command('teamStart', {}) : Promise.resolve())
+          .then(() => (plan.team.needsNames ? command('teamNames', {}) : null))
+          .then(() => {
+            refresh(false).catch(() => {});
+            return ask();
+          })
+          .catch(() => [plan, today]);
+      }
+      return [plan, today];
+    })
     .then(([plan, today]) => {
       tdData = { plan, today };
       tdFetchedAt = Date.now();
       tdErr = null;
-      if ((plan?.team?.needsStart || plan?.team?.needsNames) && plan.canPlan && !tdStarted) {
-        tdStarted = true;
-        (plan.team.needsStart ? command('teamStart', {}) : Promise.resolve())
-          .then(() => (plan.team.needsNames ? command('teamNames', {}) : null))
-          .then(() => {
-            tdFetch(true);
-            refresh(false).catch(() => {});
-          })
-          .catch(() => {});
-      }
     })
     .catch((e) => {
       if (e?.status === 401) {

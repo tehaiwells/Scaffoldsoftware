@@ -86,6 +86,11 @@ test('a truck, a materials list and workers booked on a coming day; the driver s
   await expect(sw).toContainText('On');
   await sw.click();
   await expect(sw).toContainText('Off');
+  // the first-time set-up (two demo drivers) answers slowly, as on a slow runner: the booking form must not open before they are in
+  await page.route('**/api/commands/teamStart', async (route) => {
+    await new Promise((r) => setTimeout(r, 2500));
+    await route.continue();
+  });
   await page.goto('/?view=TODAY');
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
   const day = await page.evaluate(() => {
