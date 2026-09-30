@@ -12,6 +12,8 @@ import { AppError } from './service.js';
 // passphrase alone opens a copy even if this PC is gone. Without the passphrase nobody can read the copies, including us.
 // A copy: MAGIC, 4-byte header length, JSON header (also authenticated), the database encrypted with AES-256-GCM under a random key
 // (wrapped with RSA-OAEP-SHA256), then the 16-byte GCM tag.
+// What this does not do: prove who made a copy. The public key (kept in plain next to the live database) is enough to make a well-formed copy
+// that the passphrase opens, so a copy is only as trustworthy as the folder it was kept in (KNOWN_LIMITATIONS.md).
 const MAGIC=Buffer.from('SCAFFOLD-YARD-ENCRYPTED-BACKUP\n'),TAG=16,MAXMEM=512*1024*1024;
 export const KEY_COST={N:2**17,r:8,p:1};
 export const MIN_PASSPHRASE=12;
@@ -80,6 +82,8 @@ export function findBackups({directory,name='scaffold',offsiteFolder=null}){
   return list.sort((a,b)=>b.at-a.at);
 }
 // Restores one backup into a temporary folder, runs a full integrity check, compares row counts with the live database and logs one line.
+// Not logged: a drill that stopped before restoring anything because the passphrase was missing or wrong (that says nothing about the backups,
+// and Account > Backups would show "did not pass" for it).
 // file: a given backup; otherwise the newest plain backup (encrypted:true = the newest encrypted copy, which needs the passphrase).
 export async function restoreDrill({databasePath,directory,name='scaffold',offsiteFolder=null,file=null,encrypted=false,passphrase=async()=>null,now=()=>new Date()}){
   const started=Date.now(),entry={at:now().toISOString(),ok:false,file:null,encrypted:false};let work=null;
@@ -89,7 +93,8 @@ export async function restoreDrill({databasePath,directory,name='scaffold',offsi
     if(!pick)throw new Error(encrypted?'No encrypted copy found'+(offsiteFolder?` in ${offsiteFolder}`:' (no encrypted-copy folder is set up)'):`No backup found in ${directory}`);
     entry.file=pick.file;entry.encrypted=pick.encrypted;
     work=mkdtempSync(join(tmpdir(),'scaffold-restore-drill-'));const restored=join(work,'restored.sqlite');
-    if(pick.encrypted){const pass=await passphrase();if(!pass)throw new Error('The encrypted copy needs its passphrase');writeFileSync(restored,decryptBackup(pick.file,pass));}
+    if(pick.encrypted){const pass=await passphrase();if(!pass){entry.noPassphrase=true;throw new Error('The encrypted copy needs its passphrase');}
+      try{writeFileSync(restored,decryptBackup(pick.file,pass));}catch(error){if(/passphrase is not right/.test(error.message))entry.noPassphrase=true;throw error;}}
     else copyFileSync(pick.file,restored);
     const db=new DatabaseSync(restored,{readOnly:true});
     try{entry.integrity=db.prepare('PRAGMA integrity_check').all().map(r=>Object.values(r)[0]).join('; ');entry.rows=counts(db);}catch(error){entry.integrity=error.message;}finally{db.close();}
@@ -103,6 +108,7 @@ export async function restoreDrill({databasePath,directory,name='scaffold',offsi
   }catch(error){entry.error=error.message;}
   finally{if(work)try{rmSync(work,{recursive:true,force:true});}catch{}}
   entry.ms=Date.now()-started;
+  if(entry.noPassphrase){entry.notLogged=true;return entry;}
   try{mkdirSync(directory,{recursive:true});appendFileSync(join(directory,DRILL_LOG),JSON.stringify(entry)+'\n');}catch(error){entry.logError=error.message;}
   return entry;
 }

@@ -30,11 +30,15 @@ export function hostAllowed(host,{lan=false,hostname=osHostname(),addresses=lan?
 // Where the server listens (audit D5): this PC only, unless the administrator switched on Wi-Fi sharing in Account (read at start). HOST, if set, wins.
 export const listenHost=({env=process.env,lanSharing=false}={})=>env.HOST||(lanSharing?'0.0.0.0':'127.0.0.1');
 const loopbackHost=host=>['127.0.0.1','localhost','::1'].includes(host);
+// Is the request from this PC itself? (the socket's address, which a browser page cannot change). Changes to the whole server are made only there:
+// a passphrase or a folder is never sent over the Wi-Fi, and a phone that has the administrator's session cannot switch sharing on or copy the server away.
+export const fromThisPC=address=>typeof address==='string'&&(/^127\./.test(address)||address==='::1'||/^::ffff:127\./i.test(address));
+const atThisPC=req=>{if(!fromThisPC(req.socket.remoteAddress))throw new AppError(403,'Do this on the computer that runs Scaffold Yard.');};
 // The address in an invitation link: the page's own address, or this PC's Wi-Fi address when the owner is at the PC and phones can reach it.
 function inviteOrigin(req,lan){const proto=req.socket.encrypted?'https':'http';let url;try{url=new URL(proto+'://'+req.headers.host);}catch{return proto+'://'+req.headers.host;}
   if(lan&&LOOPBACK.has(url.hostname)){const ip=localAddresses().find(a=>IPV4.test(a));if(ip)return `${proto}://${ip}${url.port?':'+url.port:''}`;}return url.origin;}
 const inviteLink=(req,lan,made)=>({id:made.id,link:`${inviteOrigin(req,lan)}/#invite=${made.token}`,expiresAt:made.expiresAt});
-const serverSettings=(service,lan)=>({...service.serverSettings(),lanActive:lan,addresses:lan?localAddresses().filter(a=>IPV4.test(a)):[]});
+const serverSettings=(service,lan,req)=>({...service.serverSettings(),lanActive:lan,addresses:lan?localAddresses().filter(a=>IPV4.test(a)):[],atThisPC:fromThisPC(req.socket.remoteAddress)});
 
 export const createApp=(db,options={})=>createServer(createHandler(db,options));
 export function createHandler(db,{backups=null,lan=false}={}) {
@@ -104,11 +108,11 @@ export function createHandler(db,{backups=null,lan=false}={}) {
       else if(req.method==='POST'&&path==='/api/boundary-preview') send(200,simulation.boundaryPreview(body));
       else if(req.method==='POST'&&path.startsWith('/api/commands/')) send(200,simulation.execute(path.slice('/api/commands/'.length),body,req.headers['idempotency-key']));
       // A backup copies the whole server, so file paths and "Back up now" are for the server administrator only (audit D6). Another company's owner is told when the last copy was made.
-      else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups){send(200,{configured:false});return;}const status=backups.status();if(!service.isAdmin(user)){send(200,{configured:true,serverManaged:true,lastBackup:status.lastBackup&&{at:status.lastBackup.at}});return;}send(200,status);}
-      else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),file:result.file});}
-      // The encrypted copy and the restore test act on the whole server too: administrator only.
-      else if(path==='/api/backup-offsite'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');if(body.off===true)backups.clearOffsite();else await backups.setOffsite({folder:body.folder,passphrase:body.passphrase});send(200,backups.status());}// the encrypted copy (src/protect.js)
-      else if(path==='/api/restore-drill'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const drill=await backups.drill();send(200,{...backups.status(),drill:{ok:drill.ok,at:drill.at,error:drill.error??null}});}
+      else if(path==='/api/backups'&&req.method==='GET') {service.require(user,'company.manage');if(!backups){send(200,{configured:false});return;}const status=backups.status();if(!service.isAdmin(user)){send(200,{configured:true,serverManaged:true,lastBackup:status.lastBackup&&{at:status.lastBackup.at}});return;}send(200,{...status,atThisPC:fromThisPC(req.socket.remoteAddress)});}
+      else if(path==='/api/backup-now'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);atThisPC(req);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const result=await backups.backupNow();if(result.busy)throw new AppError(429,result.error);if(!result.ok)throw new AppError(500,`The backup failed: ${result.error}`);send(200,{...backups.status(),atThisPC:true,file:result.file});}
+      // The encrypted copy and the restore test act on the whole server too: administrator only, at this PC.
+      else if(path==='/api/backup-offsite'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);atThisPC(req);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');if(body.off===true)backups.clearOffsite();else await backups.setOffsite({folder:body.folder,passphrase:body.passphrase});send(200,{...backups.status(),atThisPC:true});}// the encrypted copy (src/protect.js)
+      else if(path==='/api/restore-drill'&&req.method==='POST') {service.require(user,'company.manage');service.requireAdmin(user);atThisPC(req);if(!backups)throw new AppError(404,'Automatic backups are not set up for this server.');const drill=await backups.drill();send(200,{...backups.status(),atThisPC:true,drill:{ok:drill.ok,at:drill.at,error:drill.error??null}});}
       else if(path==='/api/company-details'||path==='/api/company-logo') await bdRoute(req,res,simulation,path,body,send);
       else if(req.method==='POST'&&path==='/api/logout') {service.logout(token);cookie('');send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/company') {service.updateCompany(user,body);send(200,{ok:true});}
@@ -118,9 +122,9 @@ export function createHandler(db,{backups=null,lan=false}={}) {
       else if(req.method==='POST'&&path==='/api/invitations/cancel') {service.cancelInvitation(user,body);send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/members/remove') {service.removeMember(user,body);send(200,{ok:true});}
       else if(req.method==='POST'&&path==='/api/switch-company') {service.switchCompany(user,body.companyId,token);send(200,{ok:true});}
-      // Settings of the whole server, for the administrator only: new companies may sign up; phones on this Wi-Fi may open it (read at the next start).
-      else if(path==='/api/server-settings'&&req.method==='GET') {service.requireAdmin(user);send(200,serverSettings(service,lan));}
-      else if(path==='/api/server-settings'&&req.method==='POST') {service.requireAdmin(user);service.saveServerSettings(user,body);send(200,serverSettings(service,lan));}
+      // Settings of the whole server, for the administrator only (changed at this PC): new companies may sign up; phones on this Wi-Fi may open it (read at the next start).
+      else if(path==='/api/server-settings'&&req.method==='GET') {service.requireAdmin(user);send(200,serverSettings(service,lan,req));}
+      else if(path==='/api/server-settings'&&req.method==='POST') {service.requireAdmin(user);atThisPC(req);service.saveServerSettings(user,body);send(200,serverSettings(service,lan,req));}
       else throw new AppError(404,'Not found.');
     } catch(error) {if(!(error instanceof AppError)) console.error(error);send(error.status??500,{error:error instanceof AppError?error.message:'Something went wrong. Please try again.'});}
   };
@@ -130,7 +134,7 @@ function lanSharingSetting(path){try{if(!existsSync(path))return false;const pee
 // Is a Scaffold Yard server already answering on this port?
 const answersHealth=port=>new Promise(done=>{const r=httpGet({host:'127.0.0.1',port,path:'/health',timeout:2000},res=>{let s='';res.on('data',c=>s+=c);res.on('end',()=>{try{const j=JSON.parse(s);done(j.status==='ok'&&'mode' in j);}catch{done(false);}});});r.on('timeout',()=>r.destroy());r.on('error',()=>done(false));});
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  const refuse=message=>{console.error(`Scaffold Yard did NOT start: ${message}.`);process.exit(1);};
+  const refuse=message=>{console.error(`Scaffold Yard did NOT start: ${String(message).replace(/\.+$/,'')}.`);process.exit(1);};
   // The port first (audit D12): a second start, or another program on the port, stops here before the database, the engine or the backups are touched.
   const port=Number(process.env.PORT??3000),host=listenHost({env:process.env,lanSharing:lanSharingSetting(resolveDatabasePath())});
   let handler=null;
@@ -151,7 +155,9 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
     if(!['new','env','default'].includes(status)&&!existsSync(databasePath))refuse(`the database ${databasePath} disappeared while starting; start again`);
     // A start-up migration first saves a checked copy of the database as it was into the backup folder (src/database.js); if it cannot, nothing is changed.
     db=openDatabase(databasePath,{backupDirectory:backupDirectory(),backupName:backupName({databasePath})});console.log(`Database: ${databasePath}`);
-    stop=startScheduler(db);prepared.release();
+    // A server closed hard a moment ago still holds the movement engine for up to 5 s: wait that out rather than refuse (a quick restart after closing the window).
+    for(let i=0;!stop;i++){try{stop=startScheduler(db);}catch(error){if(!/Another movement engine/.test(error.message))throw error;if(i>=16)throw new Error('Scaffold Yard is already running for this database, or is still closing. Wait a minute, then open it again');await new Promise(r=>setTimeout(r,500));}}
+    prepared.release();
     backups=createBackups({databasePath,directory:backupDirectory(),name:backupName({databasePath})});backups.start();
   }catch(error){refuse(error.message);}
   const lan=!loopbackHost(host);handler=createHandler(db,{backups,lan});

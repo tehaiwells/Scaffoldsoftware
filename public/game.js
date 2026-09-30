@@ -58,7 +58,7 @@ const sortKey=(a,b)=>GA_ROW_ORDER.indexOf(gaKind(a.p))-GA_ROW_ORDER.indexOf(gaKi
 // ---------------------------------------------------------------- the skeleton
 // Honest labels: this company is the Practice yard. The crew, trucks and deliveries on the board are simulated, so the top bar always says so,
 // quietly (no banner). A real-records mode is a later piece of work; until then every company is a Practice yard.
-const PRACTICE_CHIP='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice yard<span class="gm-practice-more"> &middot; simulated</span></span>';
+const PRACTICE_CHIP='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice<span class="gm-practice-yard"> yard</span><span class="gm-practice-more"> &middot; simulated</span></span>';
 export function gmShell(ctx){resetFor(ctx);G.ctx=ctx;const s=ctx.state,company=esc(ctx.account?.company?.name??'Your company');
  const top='<header class="gm-top"><div class="gm-brand"><span class="gm-mark" aria-hidden="true">'+gaImg(GA_BUTTONS.stock(),'gm-mark-img')+'</span><b>'+company+'</b>'+PRACTICE_CHIP+'</div>'
   +'<div class="gm-top-right"><button type="button" class="gm-office-btn" data-gm-office aria-haspopup="dialog" aria-expanded="false">'+gaImg(GA_BUTTONS.office(),'gm-office-img')+'<span>Office</span></button></div></header>';
@@ -382,13 +382,16 @@ function ppSlot(x){const p=x.p,q=PP.picks.get(p.id)??0,tag=gaLenTag(p),label=p.n
  return '<button type="button" class="gm-slot'+(x.count||q?'':' dim')+(q?' picked':'')+(PP.sel===p.id?' sel':'')+'" data-pp-slot="'+esc(p.id)+'" aria-label="'+esc(label)+'" aria-pressed="'+(!!q)+'">'+gaItem(p)+(tag?'<i class="gm-len">'+esc(tag)+'</i>':'')+corner+'</button>';}
 function ppAmount(){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return '<div class="gm-amt pp-amt pp-amt-empty"><p class="gm-empty-line">Tap a part, then how many.</p></div>';
  const q=PP.picks.get(p.id)??0,have=ppFree(ppHave().get(p.id)),per=ppPer(p),n=q?Math.ceil(q/per):0,asked=PP.asked?.id===p.id&&PP.asked.q<q?PP.asked.q:0;
- const words=q?(asked?'You asked for '+num(asked)+'. They come in stillages of '+num(per)+', so '+num(q)+' will go.':num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages'))+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
+ // "will go" only when the yard has the whole stillages now; otherwise the typed number stays and the words say how it packs (never "will go" next to "0 free")
+ const packs=q&&q%per!==0&&q>have?' They come in stillages of '+num(per)+'; the crew sends whole stillages when it is packed.':'';
+ const words=q?(asked?'You asked for '+num(asked)+'. They come in stillages of '+num(per)+', so '+num(q)+' will go.':(packs?num(q)+' pieces.'+packs:num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages')))+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
  return '<div class="gm-amt pp-amt"><div class="gm-amt-top">'+gaItem(p,'gm-amt-pic')+'<div class="gm-amt-name"><b>'+esc(p.name)+'</b><small data-pp-words>'+words+'</small></div>'+(q?'<button type="button" class="gm-chip" data-pp-unpick>Remove</button>':'')+'</div>'
   +'<div class="pp-amt-row"><button type="button" class="gm-step" data-pp-step="-1" aria-label="One stillage less">&minus;</button><input type="number" class="gm-num" data-pp-num min="0" max="100000" step="1" value="'+q+'" inputmode="numeric" aria-label="How many '+esc(p.name)+'"><button type="button" class="gm-step" data-pp-step="1" aria-label="One stillage more">+</button></div>'
   +'<p class="pp-per">+ and &minus; add or take away one stillage ('+num(per)+' pieces). A number you type goes up to whole stillages, as on the yard board.</p></div>';}
 // A typed amount goes up to whole stillages at once, as the board's amount box does (the crew packs whole stillages: game-pick.js), and the
-// words say so: "You asked for 30. They come in stillages of 145, so 145 will go."
-function ppType(id,value){const p=ppAll().find(x=>x.id===id);const q=Math.max(0,Math.min(100000,Math.floor(Number(value)||0))),per=p?ppPer(p):0,snap=per>0&&q>0?Math.ceil(q/per)*per:q;
+// words say so: "You asked for 30. They come in stillages of 145, so 145 will go." Only when the yard has those whole stillages free now:
+// with less (or none) the typed number is kept, so a list is never inflated to stock the yard does not have (30 became 414 in an empty yard).
+function ppType(id,value){const p=ppAll().find(x=>x.id===id);const q=Math.max(0,Math.min(100000,Math.floor(Number(value)||0))),per=p?ppPer(p):0,up=per>0&&q>0?Math.ceil(q/per)*per:q,snap=up<=ppFree(ppHave().get(id))?up:q;
  ppSet(id,snap);PP.asked=snap>q&&q>0?{id,q}:null;}
 function ppHTML(){const {sys,list}=ppList(),tabs=ppTabs(list),here=PP.tab==='all'||!tabs?list:list.filter(x=>gaTab(x.p)===PP.tab),picks=[...PP.picks].filter(([,q])=>q>0),ps=new Map(ppAll().map(p=>[p.id,p]));
  const sorted=[...here].sort((a,b)=>GA_TABS.findIndex(t=>t.id===gaTab(a.p))-GA_TABS.findIndex(t=>t.id===gaTab(b.p))||sortKey(a,b));

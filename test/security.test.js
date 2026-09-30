@@ -110,7 +110,7 @@ test('F1 (fc-eng/probe.log): a membership needs the invitee\'s own acceptance, t
   const token=tokenOf(invite.json.link);assert.match(token,/^[0-9a-f]{64}$/);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM invitations WHERE token_hash=?').get(token).n,0,'only a hash of the link is stored');
   const info=(await req('POST','/api/invitation',{body:{token}})).json;assert.equal(info.company,'Yard a');assert.deepEqual(info.roles,['OWNER']);assert.equal(info.email,'b@example.test');
-  assert.equal((await req('POST','/api/accept-invite',{body:{token,name:'B',password:'the-wrong-password'}})).status,401);
+  assert.equal((await req('POST','/api/accept-invite',{body:{token,name:'B',password:'the-wrong-password'}})).status,400);
   assert.deepEqual(await names(b),['Yard b']);
   const accepted=await req('POST','/api/accept-invite',{body:{token,name:'B',password:pw}});assert.equal(accepted.status,200);
   const bInA=cookieOf(accepted);assert.equal((await req('GET','/api/me',{cookie:bInA})).json.company.name,'Yard a','signed in to the company that invited them');
@@ -140,12 +140,17 @@ test('F1 (fc-eng/probe.log): a membership needs the invitee\'s own acceptance, t
   assert.equal((await req('POST','/api/members/remove',{cookie:sam,body:{userId:bId}})).status,403,'a supervisor cannot');
   assert.equal((await req('POST','/api/members/remove',{cookie:a,body:{userId:samId}})).status,200);
   assert.equal((await req('GET','/api/me',{cookie:sam})).status,401,'their session in that company ends at once');
-  assert.equal((await req('POST','/api/login',{body:{email:'sam@example.test',password:'sams-own-password'}})).status,401,'with no company left they cannot sign in');
+  const gone2=await req('POST','/api/login',{body:{email:'sam@example.test',password:'sams-own-password'}});
+  assert.deepEqual([gone2.status,gone2.json.error],[403,'You are no longer in any company here. Ask an owner to invite you again.'],'with no company left they cannot sign in, and are told why (not "password is incorrect")');
   assert.equal(db.prepare('SELECT COUNT(*) n FROM audit_events').get().n,audits+1,'history is kept; the removal is recorded');
   assert.equal((await req('POST','/api/members/remove',{cookie:a,body:{userId:aId}})).status,409,'not yourself');
-  assert.equal((await req('POST','/api/members/remove',{cookie:bInA,body:{userId:aId}})).status,200,'B (an owner of A by acceptance) may remove another owner');
+  // A runs this server (the first company): while Yard a is A's only company, nobody can remove A from it (the server would have nobody to run it).
+  const locked=await req('POST','/api/members/remove',{cookie:bInA,body:{userId:aId}});assert.equal(locked.status,409);assert.match(locked.json.error,/runs Scaffold Yard on this computer/);
+  assert.equal((await req('GET','/api/me',{cookie:a})).status,200,'A is still in');
+  const aToB=await req('POST','/api/memberships',{cookie:b,body:{email:'a@example.test',roles:['SUPERVISOR']}});assert.equal((await req('POST','/api/accept-invite',{body:{token:tokenOf(aToB.json.link),password:pw}})).status,200,'an existing sign-in says yes with just the password');
+  assert.equal((await req('POST','/api/members/remove',{cookie:bInA,body:{userId:aId}})).status,200,'B (an owner of A by acceptance) may remove another owner who has another company');
   assert.equal((await req('GET','/api/me',{cookie:a})).status,401);
-  const a2=cookieOf(await req('POST','/api/login',{body:{email:'a@example.test',password:pw}}));assert.equal(a2,undefined,'A has no company left either');
+  const a2=cookieOf(await req('POST','/api/login',{body:{email:'a@example.test',password:pw}}));assert.equal((await req('GET','/api/me',{cookie:a2})).json.company.name,'Yard b','A signs in to the company A still has');
   assert.equal((await req('POST','/api/members/remove',{cookie:bInA,body:{userId:bId}})).status,409,'never yourself, so an owner can never remove the last owner');
   assert.deepEqual(await names(b),['Yard a','Yard b'],'removing A did not touch B');
   // Someone removed can be invited back and says yes again.
@@ -187,14 +192,92 @@ test('D6: SCAFFOLD_ADMIN_EMAIL names the administrator instead', t=>{
   assert.equal(s.isAdmin(first),false);assert.equal(s.isAdmin(later),true);
 });
 
-test('migration 006: on an existing server everyone who created a company so far keeps the administrator\'s rights',t=>{
-  const db=openDatabase(':memory:');t.after(()=>db.close());const s=new Service(db);const bot=s.authenticate(s.register(company('bot'))),owner=s.authenticate(s.register(company('owner')));
-  s.addUser(owner,{name:'Sup',email:'sup@example.test',password:pw,roles:['SUPERVISOR']});
-  db.exec('DELETE FROM server_admins');// as before 006 ran
-  const line=readFileSync(new URL('../src/migrations/006_invitations.sql',import.meta.url),'utf8').split('\n').find(l=>l.startsWith('INSERT OR IGNORE INTO server_admins'));db.exec(line);
-  assert.equal(s.isAdmin(bot),true);assert.equal(s.isAdmin(owner),true,'the owner on his own PC keeps Backups');
-  assert.equal(s.isAdmin(s.authenticate(s.login({email:'sup@example.test',password:pw}))),false);
+// A database as it was before migration 006 (schema 5): made now, then everything 006 added dropped again.
+function beforeSix(dir,people){const path=join(dir,'v5.sqlite');const db=openDatabase(path,{backupDirectory:null});people(new Service(db),db);
+  db.exec('DROP TABLE invitations;DROP TABLE server_settings;DROP TABLE server_admins;ALTER TABLE memberships DROP COLUMN removed_at;DELETE FROM schema_migrations WHERE version=6');db.close();return path;}
+test('migration 006: exactly one administrator, whoever created the first company; strangers who signed up later (or the F2 rebinding account) get nothing',t=>{
+  const tick=(()=>{let n=0;return ()=>{const at=new Date(Date.parse('2026-09-01T00:00:00Z')+(n++)*60000).toISOString();return at;};})();
+  const path=beforeSix(temp(),(s,db)=>{
+    for(const k of ['owner','later','rebind2']){s.register(company(k));db.prepare("UPDATE audit_events SET created_at=? WHERE action='company.created' AND actor_id=(SELECT id FROM users WHERE email=?)").run(tick(),k+'@example.test');}
+    const owner=s.authenticate(s.login({email:'owner@example.test',password:pw}));s.addUser(owner,{name:'Sup',email:'sup@example.test',password:pw,roles:['SUPERVISOR']});});
+  const db=openDatabase(path,{backupDirectory:null});t.after(()=>db.close());const s=new Service(db);const who=e=>s.authenticate(s.login({email:e,password:pw}));
+  assert.deepEqual(db.prepare('SELECT u.email FROM server_admins a JOIN users u ON u.id=a.user_id').all().map(r=>r.email),['owner@example.test'],'every company creator became an administrator before the fix');
+  assert.equal(s.isAdmin(who('owner@example.test')),true,'the owner on his own PC keeps Backups');
+  for(const e of ['later@example.test','rebind2@example.test','sup@example.test'])assert.equal(s.isAdmin(who(e)),false,e);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM pragma_table_info('memberships') WHERE name='removed_at'").get().n,1);
+  assert.deepEqual(s.serverSettings(),{openRegistration:false,lanSharing:false,lanNotice:true},'a server already in use says once that phones stopped at the update');
+  s.saveServerSettings(who('owner@example.test'),{lanSharing:false});assert.equal(s.serverSettings().lanNotice,false,'saving the settings answers it');
+});
+test('migration 006 with no "company created" record: the first owner of the oldest company; a new server has no administrator and no notice until the first sign-up',t=>{
+  const path=beforeSix(temp(),(s,db)=>{s.register(company('first'));s.register(company('second'));db.exec("DELETE FROM audit_events WHERE action='company.created'");db.prepare("UPDATE companies SET created_at='2020-01-01T00:00:00Z' WHERE name='Yard first'").run();});
+  const db=openDatabase(path,{backupDirectory:null});t.after(()=>db.close());
+  assert.deepEqual(db.prepare('SELECT u.email FROM server_admins a JOIN users u ON u.id=a.user_id').all().map(r=>r.email),['first@example.test']);
+  const fresh=openDatabase(':memory:');t.after(()=>fresh.close());assert.equal(fresh.prepare('SELECT COUNT(*) n FROM server_admins').get().n,0);assert.deepEqual(new Service(fresh).serverSettings(),{openRegistration:false,lanSharing:false,lanNotice:false});
+});
+test('removing a member cancels their open invitations, so a removed owner cannot let themselves back in (secrev probe.log)',async t=>{
+  const db=openDatabase(':memory:');t.after(()=>db.close());const {req}=await serve(t,db);
+  const a=cookieOf(await req('POST','/api/register',{body:company('a')}));
+  // Carol joins as a co-owner; Alice (not the server administrator here: a second company is hers too) invites her own email as OWNER, and a manager Mia invites a supervisor
+  const carolIn=await req('POST','/api/users',{cookie:a,body:{name:'Carol',email:'carol@example.test',roles:['OWNER']}});const carol=cookieOf(await req('POST','/api/accept-invite',{body:{token:tokenOf(carolIn.json.link),name:'Carol',password:pw}}));
+  const aliceIn=await req('POST','/api/users',{cookie:a,body:{name:'Alice',email:'alice@example.test',roles:['OWNER']}});const alice=cookieOf(await req('POST','/api/accept-invite',{body:{token:tokenOf(aliceIn.json.link),name:'Alice',password:pw}}));
+  const miaIn=await req('POST','/api/users',{cookie:a,body:{name:'Mia',email:'mia@example.test',roles:['GENERAL_MANAGER']}});const mia=cookieOf(await req('POST','/api/accept-invite',{body:{token:tokenOf(miaIn.json.link),name:'Mia',password:pw}}));
+  const self=await req('POST','/api/invitations',{cookie:alice,body:{email:'alice@example.test',roles:['OWNER']}});assert.equal(self.status,201);
+  const bySomeoneElse=await req('POST','/api/invitations',{cookie:carol,body:{email:'alice@example.test',roles:['SUPERVISOR']}});
+  const miaSup=await req('POST','/api/invitations',{cookie:mia,body:{email:'mias-mate@example.test',roles:['SUPERVISOR']}});
+  const ids=(await req('GET','/api/me',{cookie:carol})).json.users,idOf=e=>ids.find(u=>u.email===e).id;
+  assert.equal((await req('POST','/api/members/remove',{cookie:carol,body:{userId:idOf('alice@example.test')}})).status,200);
+  for(const [label,made] of [['her own OWNER link',self],['a link to her email from someone else',bySomeoneElse]]){
+    assert.equal((await req('POST','/api/accept-invite',{body:{token:tokenOf(made.json.link),password:pw}})).status,404,label+' (200 and OWNER again before the fix)');}
+  assert.equal((await req('POST','/api/login',{body:{email:'alice@example.test',password:pw}})).status,403,'Alice stays out');
+  // A removed manager's outstanding invitations stop working; even one left open (made before this fix) is refused, because the inviter is no longer a member.
+  db.prepare('UPDATE invitations SET cancelled_at=NULL').run();
+  assert.equal((await req('POST','/api/members/remove',{cookie:carol,body:{userId:idOf('mia@example.test')}})).status,200);
+  db.prepare('UPDATE invitations SET cancelled_at=NULL WHERE email=?').run('mias-mate@example.test');
+  assert.equal((await req('POST','/api/invitation',{body:{token:tokenOf(miaSup.json.link)}})).status,404);
+  assert.equal((await req('POST','/api/accept-invite',{body:{token:tokenOf(miaSup.json.link),name:'Mate',password:pw}})).status,404);
+  assert.equal((await req('POST','/api/accept-invite',{body:{token:tokenOf(self.json.link),password:pw}})).status,404,'the inviter was removed');
+});
+test('D3: accepting an invitation answers the same for an email that already signs in and one that does not (secrev probe.log)',async t=>{
+  const db=openDatabase(':memory:');t.after(()=>db.close());const {req}=await serve(t,db);
+  const a=cookieOf(await req('POST','/api/register',{body:company('a')}));openRegistration(t);await req('POST','/api/register',{body:company('b')});delete process.env.SCAFFOLD_OPEN_REGISTRATION;
+  const known=await req('POST','/api/invitations',{cookie:a,body:{email:'b@example.test',roles:['SUPERVISOR']}}),ghost=await req('POST','/api/invitations',{cookie:a,body:{email:'ghost@example.test',roles:['SUPERVISOR']}});
+  const answer=async(made,body)=>{const r=await req('POST','/api/accept-invite',{body:{token:tokenOf(made.json.link),...body}});return [r.status,r.json.error];};
+  for(const body of [{password:'x'},{password:'a-wrong-but-long-password'},{name:'',password:'a-wrong-but-long-password'},{name:'Someone',password:'short'}]){
+    assert.deepEqual(await answer(known,body),await answer(ghost,body),JSON.stringify(body)+' ([401,"That password does not match"] vs [400,"Name is required"] before the fix)');}
+  assert.equal((await answer(known,{password:'x'}))[0],400);
+  assert.equal((await answer(ghost,{name:'Ghost',password:pw}))[0],200,'a new person with a name and a good password joins');
+  assert.equal((await answer(known,{password:pw}))[0],200,'the known person with their own password joins (no name needed)');
+});
+test('SCAFFOLD_ADMIN_EMAIL naming an email with no account yet: nobody can claim it by invitation or sign-up (secrev adminemail.mjs)',async t=>{
+  const db=openDatabase(':memory:');t.after(()=>db.close());const {req}=await serve(t,db);
+  const was=process.env.SCAFFOLD_ADMIN_EMAIL;process.env.SCAFFOLD_ADMIN_EMAIL='Boss@Example.test';t.after(()=>{if(was===undefined)delete process.env.SCAFFOLD_ADMIN_EMAIL;else process.env.SCAFFOLD_ADMIN_EMAIL=was;});
+  const tenant=cookieOf(await req('POST','/api/register',{body:company('t')}));assert.equal((await req('GET','/api/me',{cookie:tenant})).json.admin,false);
+  const inv=await req('POST','/api/invitations',{cookie:tenant,body:{email:'boss@example.test',roles:['SUPERVISOR']}});
+  assert.equal(inv.status,403,'the takeover link was 201, then accepted, then admin:true before the fix');assert.match(inv.json.error,/kept for the person who runs this server/);
+  openRegistration(t);assert.equal((await req('POST','/api/register',{body:{...company('x'),email:'boss@example.test'}})).status,403,'nor by sign-up');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM users WHERE email='boss@example.test'").get().n,0);
+  // On a new server the named person makes their account first, and is the administrator.
+  const fresh=openDatabase(':memory:');t.after(()=>fresh.close());const s=new Service(fresh);const boss=s.authenticate(s.register({...company('boss'),email:'boss@example.test'}));assert.equal(s.isAdmin(boss),true);
+  const other=s.authenticate(s.register(company('other')));assert.equal(s.isAdmin(other),false);
+  assert.throws(()=>s.removeMember(other,{userId:boss.id}),{status:404},'another company cannot touch them anyway');
+});
+test('server-wide changes (Wi-Fi sharing, sign-up, the encrypted copy, Back up now, the restore test) are made at this PC only, never from a phone',async t=>{
+  const {fromThisPC}=await import('../src/server.js');
+  for(const a of ['127.0.0.1','127.0.0.5','::1','::ffff:127.0.0.1'])assert.equal(fromThisPC(a),true,a);
+  for(const a of ['192.168.1.20','::ffff:192.168.1.20','fe80::1','10.0.0.2',undefined,''])assert.equal(fromThisPC(a),false,String(a));
+  const lanIp=(await import('node:os')).networkInterfaces();const ip=Object.values(lanIp).flat().find(i=>i&&!i.internal&&i.family==='IPv4')?.address;
+  if(!ip){t.skip('no Wi-Fi/LAN address on this machine');return;}
+  const dir=temp(),path=join(dir,'live.sqlite'),db=openDatabase(path);t.after(()=>db.close());const s=new Service(db),token=s.register(company('a'));
+  const backups=createBackups({databasePath:path,directory:join(dir,'b'),log:()=>{}});
+  const server=createApp(db,{backups,lan:true});await new Promise(r=>server.listen(0,ip,r));t.after(()=>new Promise(r=>server.close(r)));const port=server.address().port;
+  const call=(method,p,body)=>new Promise((resolve,reject)=>{const data=body?JSON.stringify(body):null,h={host:ip+':'+port,cookie:'session='+token};if(data){h['content-type']='application/json';h['content-length']=Buffer.byteLength(data);}
+    const r=http.request({host:ip,port,path:p,method,headers:h},res=>{let x='';res.on('data',c=>x+=c);res.on('end',()=>resolve({status:res.statusCode,json:JSON.parse(x)}));});r.on('error',reject);if(data)r.write(data);r.end();});
+  assert.equal((await call('GET','/api/me')).json.admin,true,'the administrator, on a phone');
+  const settings=await call('GET','/api/server-settings');assert.equal(settings.status,200);assert.equal(settings.json.atThisPC,false);
+  assert.equal((await call('GET','/api/backups')).json.atThisPC,false);
+  for(const [p,body] of [['/api/server-settings',{lanSharing:true,openRegistration:true}],['/api/backup-offsite',{folder:dir,passphrase:'correct horse battery staple'}],['/api/backup-now',{}],['/api/restore-drill',{}]]){
+    const r=await call('POST',p,body);assert.deepEqual([r.status,r.json.error],[403,'Do this on the computer that runs Scaffold Yard.'],p);}
+  assert.deepEqual(s.serverSettings(),{openRegistration:false,lanSharing:false,lanNotice:false},'nothing changed');
 });
 
 // ---- D12: the port is claimed before the database, the engine or the backups are touched ----
@@ -228,6 +311,21 @@ test('D5 + D12: a normal start listens on 127.0.0.1 only and answers only when r
   assert.ok(!/other devices|Wi-Fi/.test(run.out()),run.out());
   const health=await fetch(`http://127.0.0.1:${port}/health`);assert.equal(health.status,200);
   run.child.kill();await run.exited;
+});
+// od-restart.mjs: a server closed hard leaves the movement engine held for up to 5 s, and a quick restart used to stop at once ("Another movement engine is running..").
+const heldEngine=(path,ms)=>{const db=openDatabase(path,{backupDirectory:null});db.prepare('INSERT INTO engine_lease VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at').run('closed-hard',Date.now()+ms);db.close();};
+test('a restart right after a hard close waits for the engine to be let go, then starts',async t=>{
+  const dir=temp(),port=await freePort(),path=join(dir,'x.sqlite');heldEngine(path,3000);
+  const run=start(t,{PORT:String(port),DATABASE_PATH:path,BACKUP_DIR:join(dir,'b')});
+  assert.ok(await run.until(/Scaffold Yard: http:\/\/127\.0\.0\.1:\d+/,20000),run.out());assert.ok(!/did NOT start/.test(run.out()),run.out());
+  run.child.kill();await run.exited;
+});
+test('an engine still held after the wait: a plain message, one full stop, exit 1',async t=>{
+  const dir=temp(),port=await freePort(),path=join(dir,'x.sqlite');heldEngine(path,600000);
+  const run=start(t,{PORT:String(port),DATABASE_PATH:path,BACKUP_DIR:join(dir,'b')});
+  const code=await Promise.race([run.exited,new Promise(r=>setTimeout(()=>r('still running'),30000))]);
+  assert.equal(code,1,run.out());assert.match(run.out(),/Scaffold Yard did NOT start: Scaffold Yard is already running for this database, or is still closing\. Wait a minute, then open it again\.\r?\n/);
+  assert.ok(!/\.\.\s*$/m.test(run.out()),'no double full stop: '+run.out());
 });
 
 test('the sign-in throttle counts failures only (probe: 12 correct sign-ins gave 429 from the 7th)',async t=>{

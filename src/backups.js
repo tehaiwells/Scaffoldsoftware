@@ -1,12 +1,18 @@
 import { DatabaseSync, backup } from 'node:sqlite';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { stamp } from './relocate.js';
 import { AppError } from './service.js';
 import { createBackupKey, encryptBackup, ENCRYPTED_SUFFIX, offsiteSettingsPath, readDrillLog, restoreDrill } from './protect.js';
 
 // Automatic backups: <name>-YYYY-MM-DD.sqlite, one per day. "Back up now" writes <name>-YYYY-MM-DDTHH-MM-SS-manual.sqlite; the 10 newest of those are kept.
 // <name> is "scaffold" for the app's own database and names any other (DATABASE_PATH) database uniquely (backupName in paths.js), so databases sharing a folder never mix.
+// Is child the same folder as parent, or inside it? Windows folder names ignore letter case (E:\Backups is e:\backups).
+const win=process.platform==='win32',fold=p=>win?resolve(p).toLowerCase():resolve(p);
+export const sameOrInside=(parent,child)=>{const rel=relative(fold(parent),fold(child));return rel===''||(!rel.startsWith('..')&&!isAbsolute(rel));};
+// A folder for the encrypted copy: a full path on a drive of this PC (E:\ or C:\...). Never a network share (\\server\share): even looking at one
+// makes Windows sign in to that server, and a share is not "a drive you keep somewhere else" anyway.
+export const localFolderPath=folder=>{const f=typeof folder==='string'?folder.trim():'';if(!f||f.length>400||/^[\\/]{2}/.test(f))return null;return (win?/^[A-Za-z]:[\\/]/.test(f):isAbsolute(f))?f:null;};
 const DAY=86400000,escapeRe=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const patterns=name=>{const n=escapeRe(name);return {daily:new RegExp(`^${n}-(\\d{4})-(\\d{2})-(\\d{2})\\.sqlite$`),manual:new RegExp(`^${n}-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-manual\\.sqlite$`),partial:new RegExp(`^${n}-\\d{4}-\\d{2}-\\d{2}(T\\d{2}-\\d{2}-\\d{2}-manual)?\\.sqlite\\.partial(-wal|-shm|-journal)?$`)};};
 const localDate=(date=new Date())=>{const p=n=>String(n).padStart(2,'0');return `${date.getFullYear()}-${p(date.getMonth()+1)}-${p(date.getDate())}`;};
@@ -40,7 +46,7 @@ export function createBackups({databasePath,directory,name='scaffold',log=consol
   const copyEncrypted=(file,settings=readSettings())=>{
     if(!settings)return null;const when=now();
     try{
-      let ok=false;try{ok=statSync(settings.folder).isDirectory();}catch{}
+      let ok=false;if(localFolderPath(settings.folder))try{ok=statSync(settings.folder).isDirectory();}catch{}
       if(!ok)throw new Error(`the folder ${settings.folder} is not there (is the USB drive plugged in?). The next backup will try again`);
       const dest=join(settings.folder,basename(file)+ENCRYPTED_SUFFIX);encryptBackup(file,dest,settings.key);
       const names=readdirSync(settings.folder).filter(n=>n.endsWith(ENCRYPTED_SUFFIX)).map(n=>n.slice(0,-ENCRYPTED_SUFFIX.length));
@@ -92,10 +98,13 @@ export function createBackups({databasePath,directory,name='scaffold',log=consol
     },
     // Turns the encrypted copy on (a folder that exists, a passphrase that is never stored) and copies the newest backup there at once.
     async setOffsite({folder,passphrase}={}){
-      if(typeof folder!=='string'||!folder.trim()||!isAbsolute(folder.trim()))throw new AppError(400,'Type the full folder path, for example E:\\ for a USB drive.');
-      folder=resolve(folder.trim());let ok=false;try{ok=statSync(folder).isDirectory();}catch{}
+      if(typeof folder==='string'&&/^[\\/]{2}/.test(folder.trim()))throw new AppError(400,'Choose a folder on a drive of this computer, such as a USB drive (E:\\), not a network share.');
+      if(!localFolderPath(folder))throw new AppError(400,'Type the full folder path, for example E:\\ for a USB drive.');
+      folder=resolve(folder.trim());
+      // checked before the folder is looked at: the normal backup folder (or one inside it) and the live database's own folder are not "somewhere else"
+      if(sameOrInside(directory,folder)||fold(folder)===fold(dirname(databasePath)))throw new AppError(400,'Choose a different place from the normal backup folder and the live database, such as a USB drive.');
+      let ok=false;try{ok=statSync(folder).isDirectory();}catch{}
       if(!ok)throw new AppError(400,'That folder was not found. Plug in the drive (or make the folder) and try again.');
-      if(folder===directory)throw new AppError(400,'Choose a different place from the normal backup folder.');
       const probe=join(folder,`.scaffold-yard-write-test-${process.pid}`);try{writeFileSync(probe,'ok');rmSync(probe);}catch{throw new AppError(400,'Scaffold Yard cannot write to that folder.');}
       const key=createBackupKey(passphrase,keyCost),settings={folder,key,since:now().toISOString()};
       const partial=settingsPath+'.partial';mkdirSync(resolve(settingsPath,'..'),{recursive:true});writeFileSync(partial,JSON.stringify(settings,null,1),{mode:0o600});renameSync(partial,settingsPath);

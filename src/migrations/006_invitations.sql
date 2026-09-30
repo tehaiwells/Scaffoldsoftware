@@ -7,7 +7,11 @@ CREATE INDEX IF NOT EXISTS invitations_company ON invitations(company_id,created
 -- Settings of this server (not of one company), e.g. open_registration and lan_sharing ('1' = on). Only the server administrator changes them.
 CREATE TABLE IF NOT EXISTS server_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 -- The server administrator: sees file paths and backs up the whole server. On a new server it is whoever creates the first company.
--- Every server that exists today is one PC run by one person, so everyone who has created a company on it so far stays able to do what they could.
+-- On an existing server it is exactly one person: whoever created the first company (never every company creator: before this update anyone on the
+-- network could sign up, and none of them may inherit the server). No such record: the first owner of the oldest company.
 CREATE TABLE IF NOT EXISTS server_admins(user_id TEXT PRIMARY KEY REFERENCES users(id),since TEXT NOT NULL);
-INSERT OR IGNORE INTO server_admins SELECT actor_id,MIN(created_at) FROM audit_events WHERE action='company.created' AND actor_id IN (SELECT id FROM users) GROUP BY actor_id;
+INSERT INTO server_admins SELECT actor_id,created_at FROM audit_events WHERE action='company.created' AND actor_id IN (SELECT id FROM users) ORDER BY created_at,rowid LIMIT 1;
+INSERT INTO server_admins SELECT ur.user_id,c.created_at FROM companies c JOIN user_roles ur ON ur.company_id=c.id AND ur.role='OWNER' JOIN users u ON u.id=ur.user_id WHERE NOT EXISTS (SELECT 1 FROM server_admins) ORDER BY c.created_at,c.rowid,u.rowid LIMIT 1;
+-- Before this update the desktop launcher let phones on the Wi-Fi open Scaffold Yard; now that is a switch, off. A server already in use says so once on Account.
+INSERT INTO server_settings SELECT 'lan_notice','1' WHERE EXISTS (SELECT 1 FROM users);
 INSERT INTO schema_migrations VALUES(6);

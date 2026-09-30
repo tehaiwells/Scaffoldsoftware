@@ -65,7 +65,7 @@ test('the Today card and form: "Last reviewed" for a SWMS (today by default, no 
   const m=await import('../public/operations.js'),T=m.__test,td=m.tdTest;td.reset();T.setState(f.sim.snapshot(),acct(f));T.setView('TODAY');
   const today=f.sim.todayView();td.setData(f.sim.planMonth(D0.slice(0,7)),today);td.select(D0);td.toggle('paper-all');let html=td.view();const card=html.slice(html.indexOf('id="tdh-paper"'));
   assert.ok(card.includes('<span class="tdh-pill wait">Review overdue: last reviewed 13 Sep 2025</span>'),'amber, not the red of an expired paper');
-  assert.match(card,/data-tdh-mini="paper:[^"|]+\|renew">Reviewed<\/button>/);assert.match(card,/data-tdh-mini="paper:[^"|]+\|renew">Renew<\/button>/,'the JHSA is still renewed');
+  assert.match(card,/data-tdh-mini="paper:[^"|]+\|renew">Mark reviewed<\/button>/,'an action, not a status');assert.match(card,/data-tdh-mini="paper:[^"|]+\|renew">Renew<\/button>/,'the JHSA is still renewed');
   assert.ok(card.includes('A SWMS is flagged for review 12 months after its last review.'),'the owner sees the period');assert.ok(card.includes('No SWMS on file for Parramatta'));
   const swms=today.paperwork.items.find(i=>i.type==='SWMS');td.mini('paper:'+swms.id,'renew');html=td.view();
   assert.ok(html.includes('<span>Reviewed on</span><input type="date" name="reviewedOn" value="'+D0+'" max="'+D0+'" required>'));assert.ok(html.includes('Save the review date'));

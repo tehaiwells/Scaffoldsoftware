@@ -85,6 +85,12 @@ test('with an encrypted copy folder set, every backup is also copied there encry
   const st=b.status().offsite;assert.equal(st.lastCopy.ok,false);assert.match(st.lastCopy.error,/folder .* is not there/);
   await assert.rejects(b.setOffsite({folder:join(dir,'nowhere'),passphrase:PASS}),/That folder was not found/);
   await assert.rejects(b.setOffsite({folder:'relative\\path',passphrase:PASS}),/full folder path/);
+  // "somewhere else" means somewhere else: not the backup folder in other letters or a folder inside it, not the live database's folder, never a network share
+  // (secrev case.mjs: the backup folder in other letter case was accepted, and the encrypted copies landed next to the plain ones)
+  mkdirSync(join(backups,'inside'),{recursive:true});
+  const other=process.platform==='win32'?backups.toUpperCase():backups;
+  for(const folder of [other,join(backups,'inside'),backups+'\\',dir])await assert.rejects(b.setOffsite({folder,passphrase:PASS}),/different place from the normal backup folder and the live database/,folder);
+  for(const folder of ['\\\\attacker\\share','//attacker/share'])await assert.rejects(b.setOffsite({folder,passphrase:PASS}),/not a network share/,folder);
   b.clearOffsite();assert.equal(b.status().offsite.configured,false);assert.equal(existsSync(join(dir,'offsite-backup.json')),false);
   db.close();
 });
@@ -124,12 +130,14 @@ test('restore drill: restores the newest backup into a temporary folder, checks 
   r=drill({...env,SCAFFOLD_BACKUP_PASSPHRASE:PASS},['--encrypted']);assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/encrypted copy/);
   last=readDrillLog(backups);assert.equal(last.encrypted,true);assert.equal(last.ok,true);
   r=drill({...env,SCAFFOLD_BACKUP_PASSPHRASE:'not the passphrase'},['--encrypted']);assert.equal(r.status,1);assert.match(r.stdout+r.stderr,/passphrase is not right/);
-  last=readDrillLog(backups);assert.equal(last.ok,false);assert.match(last.error,/passphrase/);
+  assert.match(r.stdout,/not logged as a drill/);assert.ok(!/\.\.\r?$/m.test(r.stdout),'one full stop: '+r.stdout);
+  last=readDrillLog(backups);assert.equal(last.ok,true,'a wrong passphrase restored nothing, so Account keeps showing the last real test (it showed "did not pass" before)');
+  r=drill(env,['--encrypted']);assert.equal(r.status,1);assert.match(r.stdout,/needs its passphrase/);assert.equal(readDrillLog(backups).ok,true,'nor a missing one');
   // A damaged plain backup fails the drill.
   const newest=readdirSync(backups).filter(n=>n.endsWith('.sqlite')).sort().at(-1),file=join(backups,newest),bytes=readFileSync(file);bytes.fill(0x55,4096,bytes.length);writeFileSync(file,bytes);
   r=drill(env,['--file='+file]);assert.equal(r.status,1);assert.match(r.stdout+r.stderr,/Restore drill FAILED/);
   assert.equal(readDrillLog(backups).ok,false);
-  assert.equal(readFileSync(join(backups,'restore-drill.log'),'utf8').trim().split('\n').length,5,'one line per drill, the one that found nothing too');
+  assert.equal(readFileSync(join(backups,'restore-drill.log'),'utf8').trim().split('\n').length,4,'one line per drill that restored something or found nothing to restore; none for a missing or wrong passphrase');
 });
 
 test('Account "Test the newest backup" runs the drill on the server and the card shows when it last passed; an encrypted copy is unlocked by npm run decrypt-backup',async t=>{
@@ -144,7 +152,8 @@ test('Account "Test the newest backup" runs the drill on the server and the card
   r=await call('backup-offsite',{folder:usb,passphrase:PASS});assert.equal(r.body.offsite.lastCopy.ok,true,'the newest backup is copied at once');
   const copy=r.body.offsite.lastCopy.file,out=join(dir,'unlocked.sqlite');
   const run=pass=>spawnSync(process.execPath,['scripts/decrypt-backup.js',copy,out],{cwd:root,encoding:'utf8',env:{...process.env,SCAFFOLD_BACKUP_PASSPHRASE:pass}});
-  let d=run('not the passphrase at all');assert.equal(d.status,1);assert.match(d.stderr,/passphrase is not right/);assert.equal(existsSync(out),false);
+  let d=run('');assert.equal(d.status,1);assert.match(d.stderr,/needs its passphrase/,'nobody at a keyboard and none given');assert.equal(existsSync(out),false);
+  d=run('not the passphrase at all');assert.equal(d.status,1);assert.match(d.stderr,/passphrase is not right/);assert.equal(existsSync(out),false);
   d=run(PASS);assert.equal(d.status,0,d.stderr);assert.equal(companies(out),1);
   d=run(PASS);assert.equal(d.status,1,'never overwrites');
 });

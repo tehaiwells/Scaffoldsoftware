@@ -7,7 +7,7 @@ SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migr
 | companies / users | Company identity and global normalized login identity; salted password hash |
 | memberships | Composite company/user key; one identity may join several companies; removed_at marks someone removed (the row stays for the audit history) |
 | invitations | One-time invitation: company, email, roles, inviter, SHA-256 of the link token, expiry (7 days), accepted/cancelled |
-| server_settings / server_admins | Server-wide switches (open_registration, lan_sharing) and the server administrator(s) |
+| server_settings / server_admins | Server-wide switches (open_registration, lan_sharing; lan_notice until the first save after the update) and the one server administrator |
 | roles / permissions / role_permissions | Shared policy definitions |
 | user_roles | Roles scoped through a membership foreign key |
 | sessions | Token digest, user, active company and expiry |

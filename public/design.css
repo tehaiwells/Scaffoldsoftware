@@ -123,6 +123,7 @@ main:has(>.acct){max-width:1280px;margin:30px auto 56px}
 .invite-copy{display:flex;gap:8px}.invite-copy input{flex:1;min-width:0;font-size:12px}
 .server-switch{display:flex;gap:12px;align-items:flex-start;margin:12px 0 0;padding:12px 14px;border:1px solid #e3e9da;border-radius:12px;background:#fafcf6;cursor:pointer;font-weight:600;color:#2c4a36}.server-switch input{flex:none;width:18px;min-height:18px;margin-top:2px;accent-color:#2f6b47}.server-switch span{display:grid;gap:3px}.server-switch small{font-size:12px;font-weight:400;color:#7b8575;line-height:1.45}
 /* Fold-out form cards inside a card */
+.server-more{margin-top:12px}.server-more .server-switch{margin-top:4px;background:#fff}.server-since{margin:0 0 4px}
 .acct-fold{margin-top:14px;border:1px solid #e3e9da;border-radius:14px;background:#fafcf6;padding:4px 16px}
 .acct-fold>summary{min-height:48px;cursor:pointer;flex-wrap:wrap;row-gap:0}
 .acct-fold>summary .fold-title{font-size:13.5px;font-weight:700;color:#1f3d2c}

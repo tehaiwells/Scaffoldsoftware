@@ -171,7 +171,8 @@ export const todayMethods={
     const paperwork={...this.paperworkView(today,sites,{ops:ctx.ops,owner:ctx.perms.includes('company.manage'),planned,gearAt}),canAdd:ctx.perms.includes('requests.create')};
     // ---- 3. who's in today ----
     const roster={atYard:[],onSite:[],driving:[],waiting:[],notBooked:[],tomorrow:{notAnswered:0,cantMake:0,words:null}},booked=new Set();
-    for(const i of todays){if(i.type==='WORKERS')for(const p of i.people){const m=ctx.msgs.get(p.message),a=answerOf(p.message),n=label(p.person),sn=ctx.sites.get(i.site)?.name??'the site';booked.add(p.person);
+    for(const i of todays){if(i.status==='MISSED')continue;// it didn't go: shown once, under the bookings to sort
+      if(i.type==='WORKERS')for(const p of i.people){const m=ctx.msgs.get(p.message),a=answerOf(p.message),n=label(p.person),sn=ctx.sites.get(i.site)?.name??'the site';booked.add(p.person);
         const later=!p.moved&&now<atLocal(i.day,i.time);
         if(p.moved||a==='YES')roster.onSite.push({id:p.person,name:n,site:i.site,siteName:sn,time:i.time,timeWords:timeWords(i.time),answer:a,here:!!p.moved&&!p.homeAt,wentHome:!!p.homeAt,coming:later,words:later?'Going to '+sn+' at '+timeWords(i.time):n+' · '+sn+' from '+timeWords(i.time)});
         if(['WAITING','NO_ANSWER','NO'].includes(a)&&!p.moved)roster.waiting.push({id:p.person,name:n,item:i.id,answer:a,reason:m?.answer?.reason??null,words:a==='NO'?"Can't make it"+(m?.answer?.reason?': '+m.answer.reason:''):a==='WAITING'?"Hasn't answered yet":'No answer',what:sn+' at '+timeWords(i.time)});}
@@ -215,7 +216,7 @@ export const todayMethods={
           footnote:"Ex GST unless marked. The app doesn't record payments yet or send invoices, so this is what's built up, not what's been paid."};}}
     // ---- head sentence ----
     const waiting=roster.waiting.length,nToday=timeline.length,nTomorrow=seen.filter(i=>i.day===tomorrow&&PLAN_OPEN.includes(i.status)).length+runs.filter(r=>r.day===tomorrow&&r.open).length,no=roster.tomorrow.cantMake;
-    const sentence=(nToday?plural(nToday,'thing')+' today':'Nothing planned today.')+(waiting?' · '+plural(waiting,"person hasn't","people haven't")+' answered':'')+(no?(nToday?' · ':' ')+'Tomorrow: '+plural(no,"person can't","people can't")+' make it':!nToday&&nTomorrow?' Tomorrow: '+plural(nTomorrow,'thing')+'.':'')+(missed.length?' · '+plural(missed.length,'booking')+" didn't go":'');
+    const sentence=(nToday?plural(nToday,'thing')+' today':'Nothing planned today.')+(waiting?' · '+plural(waiting,"person hasn't","people haven't")+' answered':'')+(no?(nToday?' · ':' ')+'Tomorrow: '+plural(no,"person can't","people can't")+' make it':!nToday&&nTomorrow?' Tomorrow: '+plural(nTomorrow,'thing')+'.':'')+(missed.length?' · '+plural(missed.length,'booking needs','bookings need')+' sorting':'');
     return {today,todayLabel:dayLabel(today),yesterday,tomorrow,now:iso(now),paused:!!cfg?.paused,timeZone:ctx.cal.timeZone,rev:planRevision(this.db,this.repo.company),summary:{sentence,today:nToday,waiting,tomorrow:nTomorrow,cantMakeTomorrow:no,missed:missed.length},
       sites:siteRows,paperwork,roster,yesterdayDone,beginToday,business};},
   // result.plan in /api/state: the plan revision and today's counts (the Today page refetches when rev changes).

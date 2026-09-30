@@ -18,11 +18,12 @@ function board(t){
 
 test('the board: a small permanent "Practice yard · simulated" chip in the top bar, before and after the yard is set up (no banner)',t=>{
   const f=board(t);__gm.reset();let html=__gm.shell(f.ctx());
-  const chip='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice yard<span class="gm-practice-more"> &middot; simulated</span></span>';
+  const chip='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice<span class="gm-practice-yard"> yard</span><span class="gm-practice-more"> &middot; simulated</span></span>';
   assert.ok(html.includes(chip),'on the first-run screen');
   f.cmd('gameStart',{size:'M'});html=__gm.shell(f.ctx());assert.ok(html.includes(chip),'on the board');assert.equal(html.split('class="gm-practice"').length-1,1,'once');
   assert.ok(!/simulation-banner/.test(html),'still no banner');
   const css=readFileSync(new URL('../public/game.css',import.meta.url),'utf8');assert.match(css,/\.gm-practice\{/);assert.match(css,/\.gm-practice-more\{display:none\}/,'a phone says just Practice yard');
+  assert.match(css,/@media \(max-width:480px\)\{\.gm-practice-yard\{display:none\}\}/,'a narrow phone says just Practice, so a long company name keeps its room');
 });
 
 test('the board hint while trucks move says the crew and trucks are simulated; no "Sit back and watch. The crew does it all."',t=>{
