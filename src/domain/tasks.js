@@ -48,6 +48,9 @@ const plural = (n, one, many = one + 's') => n + ' ' + (n === 1 ? one : many);
 /** @type {(names:string[])=>string} */
 const listWords = (names) =>
   names.length < 2 ? (names[0] ?? '') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+/** " Kev rostered for Thu 2 Oct too." ('' when nobody was). @type {(names:string[],day:string)=>string} */
+const rosteredWords = (names, day) =>
+  names.length ? ' ' + listWords(names) + ' rostered for ' + dayLabel(day) + ' too.' : '';
 /** @type {(v:unknown)=>string} */
 const nameOf = (v) => {
   requireRule(
@@ -139,6 +142,19 @@ export const taskMethods = {
     if (same) throw new AppError(409, w.name + ' already has a P' + priority + ' that day: ' + same.name + '.');
     requireRule(mine.length < TASK_MAX_PER_DAY, w.name + ' already has three tasks that day.');
   },
+  // A worker on a task should be on the roster that day (decision 4). One who said they can't work is refused; one not rostered is
+  // rostered in the same tap (where the task is) when input.roster is true (the forms offer it, ticked); the reply says so. Returns
+  // their name when rostered here, else null.
+  /** @param {any} w @param {string} day @param {string|null} site @param {any} input */
+  taskRosterCheck(w, day, site, input) {
+    if (typeof this.rosterOf !== 'function') return null;
+    const row = this.rosterOf(w.id, day);
+    if (row?.status === 'DENIED') throw new AppError(409, w.name + " can't work on " + dayLabel(day) + '.');
+    if (row && row.status !== 'REMOVED') return null;
+    if (input?.roster !== true || day < this.planToday(this.planNow())) return null;
+    this.rosterPick({ person: w.id, days: [day], ...(site ? { where: site } : {}) });
+    return w.name;
+  },
   /** @param {string|null} forPerson */
   taskWho(forPerson) {
     const who = this.dispatchWho(forPerson);
@@ -200,11 +216,14 @@ export const taskMethods = {
       const had = this.taskForList(it.id);
       if (had && had.status === 'OPEN') {
         // one task per list: a second call adds workers to it
-        const names = [];
+        const names = [],
+          rostered = [];
         for (const x of workers) {
           const w = this.taskWorker(x?.person);
           if (had.workers.some((/** @type {any} */ r) => r.person === w.id)) continue;
           this.taskClash(w, had.day, this.taskPriorityOf(x.priority), had.id);
+          const r = this.taskRosterCheck(w, had.day, site, input);
+          if (r) rostered.push(r);
           had.workers.push(this.taskWorkerRow(w.id, x.priority));
           names.push(w.name);
         }
@@ -213,7 +232,8 @@ export const taskMethods = {
         bumpRevision(this.db, this.repo.company, 'plan');
         return {
           task: this.taskView(this.repo.get(had.id, 'workTask')),
-          message: names.length ? listWords(names) + ' added.' : 'Already on it.',
+          rostered,
+          message: (names.length ? listWords(names) + ' added.' : 'Already on it.') + rosteredWords(rostered, day),
         };
       }
     } else {
@@ -228,7 +248,8 @@ export const taskMethods = {
       }
     }
     const rows = [],
-      seen = new Set();
+      seen = new Set(),
+      rostered = [];
     for (const x of workers) {
       const w = this.taskWorker(x?.person);
       requireRule(!seen.has(w.id), w.name + ' is on this twice.');
@@ -236,6 +257,8 @@ export const taskMethods = {
       if (!ops) requireRule(this.teamHome(w) === site, w.name + ' is not at your site.');
       const priority = this.taskPriorityOf(x?.priority);
       this.taskClash(w, day, priority, null);
+      const r = this.taskRosterCheck(w, day, site, input);
+      if (r) rostered.push(r);
       rows.push(this.taskWorkerRow(w.id, priority));
     }
     // stored as `type` (a stored object's `kind` is 'workTask'); the views say `kind`
@@ -264,6 +287,7 @@ export const taskMethods = {
     const fresh = this.repo.get(t.id, 'workTask');
     return {
       task: this.taskView(fresh),
+      rostered,
       message:
         name +
         ' on ' +
@@ -272,7 +296,8 @@ export const taskMethods = {
         ': ' +
         listWords(rows.map((r) => this.planName(r.person))) +
         (rows.length === 1 ? ' is' : ' are') +
-        ' on it.',
+        ' on it.' +
+        rosteredWords(rostered, day),
     };
   },
   // A plain task's name, time, site or note (a gear list's follow its list).
@@ -322,12 +347,16 @@ export const taskMethods = {
     requireRule(t.status === 'OPEN', 'This task is ' + String(t.status).toLowerCase() + '.');
     requireRule(!t.workers.some((/** @type {any} */ r) => r.person === w.id), w.name + ' is already on it.');
     this.taskClash(w, t.day, priority, t.id);
+    const rostered = this.taskRosterCheck(w, t.day, t.site ?? null, input);
     t.workers.push(this.taskWorkerRow(w.id, priority));
     this.taskLog(t, w.name + ' added (P' + priority + ').', now);
     this.repo.save(t);
     this.taskAsks(now);
     bumpRevision(this.db, this.repo.company, 'plan');
-    return { task: this.taskView(this.repo.get(t.id, 'workTask')), message: w.name + ' is on it.' };
+    return {
+      task: this.taskView(this.repo.get(t.id, 'workTask')),
+      message: w.name + ' is on it.' + rosteredWords(rostered ? [rostered] : [], t.day),
+    };
   },
   // Off a task: refused once they have tapped a step (force: true from the office overrides).
   taskUnassign(/** @type {any} */ input) {
@@ -347,9 +376,27 @@ export const taskMethods = {
   },
   /** @param {any} t @param {any} row @param {string} why @param {number} now */
   taskDrop(t, row, why, now) {
-    if (row.message) this.planCallOff(row.message, 'Taken off the task', now);
+    this.taskCallOffMsgs(t, row, 'Taken off the task', now);
     t.workers = t.workers.filter((/** @type {any} */ r) => r !== row);
     this.taskLog(t, this.planName(row.person) + ' off: ' + why + '.', now);
+  },
+  /** The other open tasks of a person that day (not this one): a shared ask or notice is theirs too. @param {string} person @param {string} day @param {string} except */
+  taskOthers(person, day, except) {
+    return this.taskDayRows(day).filter(
+      (t) => t.status === 'OPEN' && t.id !== except && t.workers.some((/** @type {any} */ r) => r.person === person),
+    );
+  },
+  // A worker's day-before ask and day-of notice are one message for every task of theirs that day (taskAsks). Off one task, they are
+  // called off only when no other open task of theirs that day still needs them; otherwise only this task lets go of them.
+  /** @param {any} t @param {any} row @param {string} why @param {number} now */
+  taskCallOffMsgs(t, row, why, now) {
+    const others = this.taskOthers(row.person, t.day, t.id);
+    if (!others.length) {
+      if (row.message) this.planCallOff(row.message, why, now);
+      if (row.notice) this.planCallOff(row.notice, why, now);
+    }
+    row.message = null;
+    row.notice = null;
   },
   taskCancel(/** @type {any} */ input) {
     const t = this.taskFor(input?.id),
@@ -369,10 +416,7 @@ export const taskMethods = {
   },
   /** @param {any} t @param {string} status @param {string} why @param {number} now */
   taskClose(t, status, why, now) {
-    for (const r of t.workers) {
-      if (r.message) this.planCallOff(r.message, why, now);
-      if (r.notice) this.planCallOff(r.notice, why, now);
-    }
+    for (const r of t.workers) this.taskCallOffMsgs(t, r, why, now);
     t.status = status;
     t.cancelledAt = iso(now);
     t.cancelReason = why;
@@ -393,6 +437,7 @@ export const taskMethods = {
     const it = this.taskList(t);
     requireRule(!it || it.status !== 'CANCELLED', 'The list was cancelled.');
     const { row, mark } = this.taskTapper(t, input.for ?? null);
+    this.taskInOrder(t, row, mark, input);
     if (step === 'RECEIVED') {
       this.taskNotYet(row.steps.RECEIVED, 'Got the list');
       row.steps.RECEIVED = mark;
@@ -420,6 +465,17 @@ export const taskMethods = {
       task: this.taskView(this.repo.get(t.id, 'workTask')),
       message: step === 'LOADED' ? 'Truck loaded. Done.' : TASK_STEP_WORDS[step] + '.',
     };
+  },
+  // P1 before P2 before P3 (decision 5): a phone's tap on a task waits until the worker's part of every lower-priority task that day is done.
+  // The office (ON_BEHALF) may tick in any order: it records what it was told.
+  /** @param {any} t @param {any} row @param {any} mark @param {any} input */
+  taskInOrder(t, row, mark, input) {
+    if (mark.kind !== 'PERSON' || input?.force === true) return;
+    const first = this.taskOthers(row.person, t.day, t.id)
+      .map((x) => [x, x.workers.find((/** @type {any} */ r) => r.person === row.person)])
+      .filter(([x, r]) => r.priority < row.priority && this.taskNext(x, r))
+      .sort((a, b) => a[1].priority - b[1].priority)[0];
+    if (first) throw new AppError(409, 'Finish P' + first[1].priority + ' first: ' + first[0].name + '.');
   },
   /** @param {any} mark @param {string} words */
   taskNotYet(mark, words) {
@@ -475,7 +531,8 @@ export const taskMethods = {
     t.doneAt = iso(now);
     t.flag = null;
     this.taskLog(t, words, now);
-    for (const r of t.workers) this.taskCloseMsg(r.notice, now);
+    // the day-of notice is one for every task of theirs that day: closed only when this was the last one open
+    for (const r of t.workers) if (!this.taskOthers(r.person, t.day, t.id).length) this.taskCloseMsg(r.notice, now);
   },
   /** A notice that no longer needs a Got it. @param {string|null} id @param {number} now */
   taskCloseMsg(id, now) {
@@ -493,16 +550,28 @@ export const taskMethods = {
     requireRule(t.status === 'OPEN', 'This task is already ' + String(t.status).toLowerCase() + '.');
     requireRule(t.day <= today, 'Not today yet.');
     const note = noteOf(input.note);
+    let packed = '';
     if (t.type === 'LIST') {
       requireRule(!phone, 'Tap the steps: Got the list, Packed and ready, Truck loaded.');
       const forPerson = typeof input.for === 'string' ? input.for : (t.workers[0]?.person ?? null),
         mark = this.taskWho(forPerson);
       for (const r of t.workers) r.steps.RECEIVED ??= mark;
+      const it = this.taskList(t),
+        packNow = !t.steps.PACKED;
       t.steps.PACKED ??= mark;
       t.steps.LOADED ??= mark;
       this.taskFinish(t, { ...mark, note }, now, 'Phoned in as done (' + mark.byName + ').');
+      // a real yard: the list's trip hears the pack too (as a phone's Packed and ready would), so the card and the lanes agree
+      if (packNow && this.live() && it?.order) {
+        this.repo.save(t);
+        this.taskPackTrip(t, it, input, now);
+        const fresh = this.repo.get(t.id, 'workTask');
+        packed = fresh.log.at(-1)?.text?.startsWith('Pack recorded') ? ' ' + fresh.log.at(-1).text : '';
+        Object.assign(t, fresh);
+      }
     } else if (phone || (typeof input.for === 'string' && input.for)) {
       const { row, mark } = this.taskTapper(t, input.for ?? null);
+      this.taskInOrder(t, row, mark, input);
       this.taskNotYet(row.steps.DONE, 'Done');
       row.steps.DONE = { ...mark, note };
       this.taskLog(t, this.planName(row.person) + ' done.', now);
@@ -518,7 +587,7 @@ export const taskMethods = {
     bumpRevision(this.db, this.repo.company, 'plan');
     return {
       task: this.taskView(this.repo.get(t.id, 'workTask')),
-      message: t.status === 'DONE' ? t.name + ' is done.' : 'Done. Waiting for the others on it.',
+      message: (t.status === 'DONE' ? t.name + ' is done.' : 'Done. Waiting for the others on it.') + packed,
     };
   },
   /** @param {any} t @param {string} text @param {number} now */
@@ -533,13 +602,17 @@ export const taskMethods = {
     const t = this.taskForList(planItemId);
     if (!t || t.status !== 'OPEN') return null;
     const m = mark ?? { at: iso(now), by: null, byName: 'The yard', kind: 'ENGINE', onBehalfOf: null };
-    if (step === 'RECEIVED') for (const r of t.workers) r.steps.RECEIVED ??= m;
-    else if (step === 'PACKED') {
-      for (const r of t.workers) r.steps.RECEIVED ??= m;
+    // the Practice yard's crew (ENGINE, SIMULATED) stands in for every worker; a person's mark (a driver's Loaded, the office's Packed on
+    // the trip) is theirs alone: each worker's own Got the list stays empty until they tap it, so Task progress shows who never did
+    const crew = m.kind === 'ENGINE' || m.kind === 'SIMULATED';
+    if (step === 'RECEIVED') {
+      if (crew) for (const r of t.workers) r.steps.RECEIVED ??= m;
+    } else if (step === 'PACKED') {
+      if (crew) for (const r of t.workers) r.steps.RECEIVED ??= m;
       t.steps.PACKED ??= m;
       this.taskLog(t, 'Packed (' + m.byName + ').', now);
     } else if (step === 'LOADED') {
-      for (const r of t.workers) r.steps.RECEIVED ??= m;
+      if (crew) for (const r of t.workers) r.steps.RECEIVED ??= m;
       t.steps.PACKED ??= m;
       t.steps.LOADED ??= m;
       this.taskFinish(t, m, now, 'Truck loaded (' + m.byName + ').');
@@ -547,14 +620,10 @@ export const taskMethods = {
     else if (step === 'MOVED') {
       const it = this.taskList(t);
       if (it) {
+        const was = t.day;
         for (const r of t.workers) {
-          if (r.message) this.planCallOff(r.message, 'The list moved to ' + dayLabel(it.day), now);
-          r.message = null;
+          if (it.day !== t.day) this.taskCallOffMsgs(t, r, 'The list moved to ' + dayLabel(it.day), now);
           r.notAsked = null;
-          if (r.notice && it.day !== t.day) {
-            this.planCallOff(r.notice, 'The list moved', now);
-            r.notice = null;
-          }
         }
         t.day = it.day;
         t.time = it.time;
@@ -562,11 +631,36 @@ export const taskMethods = {
         t.name = this.taskListName(it);
         t.flag = null;
         this.taskLog(t, 'Follows the list: ' + dayLabel(it.day) + ' at ' + timeWords(it.time) + '.', now);
+        if (it.day !== was) this.taskMovedFit(t, now);
       }
     }
     this.repo.save(t);
     bumpRevision(this.db, this.repo.company, 'plan');
     return t;
+  },
+  // A task that followed its list to another day keeps the one-per-priority rule there: a worker who already has that priority moves to
+  // the next free one (said in the log and a notification); one with three tasks that day is taken off, for the office to sort.
+  /** @param {any} t @param {number} now */
+  taskMovedFit(t, now) {
+    for (const r of [...t.workers]) {
+      const mine = this.taskOthers(r.person, t.day, t.id),
+        used = new Set(mine.map((x) => x.workers.find((/** @type {any} */ w) => w.person === r.person)?.priority)),
+        name = this.planName(r.person);
+      if (!used.has(r.priority)) continue;
+      const free = [1, 2, 3].find((p) => !used.has(p));
+      if (free) {
+        this.taskLog(t, name + ': P' + r.priority + ' was taken on ' + dayLabel(t.day) + ', now P' + free + '.', now);
+        this.notify('Priority changed', name + ' is P' + free + ' on ' + t.name + ' ' + dayLabel(t.day) + '.', t.site);
+        r.priority = free;
+      } else {
+        this.taskDrop(t, r, 'already has three tasks on ' + dayLabel(t.day), now);
+        this.notify(
+          'Needs someone',
+          t.name + ' ' + dayLabel(t.day) + ': ' + name + ' already has three tasks.',
+          t.site,
+        );
+      }
+    }
   },
   // Someone left the team: off every open task from today where they had not started; their asks called off. A task left with nobody stays open.
   /** @param {string} id @param {number} now */
@@ -629,22 +723,35 @@ export const taskMethods = {
           continue;
         }
         const first = rows.sort((a, b) => a[1].priority - b[1].priority)[0][0];
-        const id = crewSend(this, {
-          kind: 'task',
-          id: first.id,
+        // a task added after the ask went out joins the ask the worker already has for that day (its words list every task of theirs
+        // now); a fresh ask goes only when there is none still standing (answered no, or called off)
+        const open = this.taskOpenAsk(
           person,
-          subject: 'TASK_READY',
           day,
-          time: first.time ?? DEFAULT_TIME,
-          site: this.taskSiteOf(first),
-          needsAnswer: true,
-          now,
-        });
+          rows.map(([t]) => t.id),
+        );
+        const id =
+          open?.id ??
+          crewSend(this, {
+            kind: 'task',
+            id: first.id,
+            person,
+            subject: 'TASK_READY',
+            day,
+            time: first.time ?? DEFAULT_TIME,
+            site: this.taskSiteOf(first),
+            needsAnswer: true,
+            now,
+          });
         for (const [t, r] of rows) {
           r.message = id;
           this.repo.save(t);
         }
-        if (id) sent++;
+        if (open && open.status === 'SENT') {
+          open.text = TASK_HOOKS.text(this, open);
+          this.repo.save(open);
+        }
+        if (id && !open) sent++;
       }
       // the day-of notice (TASK_DAY) once the day has begun
       if (day === today && begun) {
@@ -680,6 +787,16 @@ export const taskMethods = {
     this.taskFlags(now, today);
     if (!this.live()) this.taskSimDone(now, today);
     return sent;
+  },
+  /** A worker's TASK_READY for a day that still stands (SENT or answered yes), from their other tasks that day; null when none. @param {string} person @param {string} day @param {string[]} except */
+  taskOpenAsk(person, day, except) {
+    for (const t of this.taskDayRows(day)) {
+      if (t.status !== 'OPEN' || except.includes(t.id)) continue;
+      const r = t.workers.find((/** @type {any} */ x) => x.person === person);
+      const m = r?.message ? this.planMsg(r.message) : null;
+      if (m && m.subject === 'TASK_READY' && ['SENT', 'YES'].includes(m.status) && !m.closedAt) return m;
+    }
+    return null;
   },
   /** The site of a task for a message (null at the yard). @param {any} t */
   taskSiteOf(t) {
@@ -730,6 +847,12 @@ export const taskMethods = {
     const a = this.planAnswerOf(m, now);
     return a === 'NOT_SENT' ? null : a;
   },
+  /** A worker's roster status that day (ROSTERED, CONFIRMED, DENIED), or null when not rostered. @param {string} person @param {string} day */
+  taskRosterOf(person, day) {
+    if (typeof this.rosterOf !== 'function') return null;
+    const r = this.rosterOf(person, day);
+    return r && r.status !== 'REMOVED' ? r.status : null;
+  },
   /** The next step this worker taps, or null when their part is done. @param {any} t @param {any} r */
   taskNext(t, r) {
     if (t.status !== 'OPEN') return null;
@@ -761,7 +884,8 @@ export const taskMethods = {
               DONE: t.done ?? null,
             }
           : { DONE: r.steps.DONE ?? null };
-      const next = this.taskNext(t, r);
+      const next = this.taskNext(t, r),
+        ros = this.taskRosterOf(r.person, t.day);
       return {
         person: r.person,
         name: this.planName(r.person),
@@ -770,6 +894,8 @@ export const taskMethods = {
         next,
         nextWords: next ? TASK_STEP_WORDS[next] : null,
         done: !next,
+        rostered: ros,
+        cantWork: ros === 'DENIED',
         answer: this.taskAnswer(r, now),
         reason: r.message ? (this.planMsg(r.message)?.answer?.reason ?? null) : null,
         message: r.message ?? null,
@@ -891,7 +1017,15 @@ export const taskMethods = {
           ]
         : [],
       team: team
-        .map((w) => ({ id: w.id, name: w.name, role: this.roleOf(w, kinds) }))
+        .map((w) => {
+          const r = roster.get(w.id);
+          return {
+            id: w.id,
+            name: w.name,
+            role: this.roleOf(w, kinds),
+            rostered: r && r.status !== 'REMOVED' ? r.status : null,
+          };
+        })
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
       lists: ctx.ops
         ? this.planDayItems(d, 'MATERIALS')
@@ -906,18 +1040,21 @@ export const taskMethods = {
         : [],
     };
   },
-  // A person's own day for their phone: today's tasks in priority order (the first not done is "now"), and tomorrow's.
+  // A person's own day for their phone: today's tasks in priority order (the first not done is "now"), and tomorrow's. A day they said
+  // they can't work shows no tasks (the office swaps them; Task progress says so).
   /** @param {string} person @param {string} today */
   taskMyDay(person, today) {
     const mine = (/** @type {string} */ day) =>
-      this.taskDayRows(day)
-        .filter((t) => t.status !== 'CANCELLED' && t.workers.some((/** @type {any} */ r) => r.person === person))
-        .map((t) => {
-          const v = this.taskView(t),
-            me = v.workers.find((x) => x.person === person);
-          return { ...v, mine: me, priority: me.priority, now: false };
-        })
-        .sort((a, b) => a.priority - b.priority);
+      this.taskRosterOf(person, day) === 'DENIED'
+        ? []
+        : this.taskDayRows(day)
+            .filter((t) => t.status !== 'CANCELLED' && t.workers.some((/** @type {any} */ r) => r.person === person))
+            .map((t) => {
+              const v = this.taskView(t),
+                me = v.workers.find((x) => x.person === person);
+              return { ...v, mine: me, priority: me.priority, now: false };
+            })
+            .sort((a, b) => a.priority - b.priority);
     const tasks = mine(today),
       first = tasks.find((t) => !t.mine.done);
     if (first) first.now = true;

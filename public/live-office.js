@@ -445,14 +445,40 @@ export function loTripOne(id, day, ops = true) {
   return t ? '<div class="lo-trips lo-one">' + loTripHTML(t, { ops, day: d.day }) + '</div>' : '';
 }
 /** A day's trips for one truck booking (Today) or one truck (the truck page). */
-export function loTripsFor({ day = null, truckPlan = null, truck = null, ops = true, empty = '' } = {}) {
+export function loTripsFor({
+  day = null,
+  truckPlan = null,
+  truck = null,
+  ops = true,
+  empty = '',
+  linkGear = false,
+} = {}) {
   const d = loDay(day);
   if (!d) return '<p class="lo-quiet">Loading trips…</p>';
   // a truck's page: the day's trips and its next ones (booked for a later day); Today: the booking's trips that day
   const all = truck ? [...d.trips, ...(d.upcoming ?? []).filter((u) => !d.trips.some((t) => t.id === u.id))] : d.trips;
   const list = all.filter((t) => (!truckPlan || t.truckPlan === truckPlan) && (!truck || t.truck === truck));
   if (!list.length) return empty ? '<p class="lo-quiet">' + esc(empty) + '</p>' : '';
-  return '<div class="lo-trips">' + list.map((t) => loTripHTML(t, { ops, day: d.day })).join('') + '</div>';
+  // a gear list's trip (ADR 0011) is drawn once, on the list's card with its chain: here it is one line that goes there
+  const one = (t) =>
+    linkGear && t.list
+      ? '<p class="lo-gear-line"><span class="lo-dot tone-' +
+        (TONE[t.state] ?? 'booked') +
+        '" aria-hidden="true"></span><b>' +
+        esc(
+          t.label + ' · ' + (t.time ? loTimeWords(t.time) : '') + (t.direction === 'BACK' ? ' ← ' : ' → ') + t.siteName,
+        ) +
+        '</b> · ' +
+        esc(t.stateWords) +
+        ' · <button type="button" class="tdh-link" data-tdh-goto="' +
+        esc(t.list.id) +
+        '" data-tdh-day="' +
+        esc(t.list.day ?? d.day ?? '') +
+        '">' +
+        esc(t.list.name) +
+        '</button></p>'
+      : loTripHTML(t, { ops, day: d.day });
+  return '<div class="lo-trips">' + list.map(one).join('') + '</div>';
 }
 // ---------------------------------------------------------------- orders waiting for a truck, and booking one
 /** @param {any} o */

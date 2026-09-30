@@ -223,6 +223,8 @@ export const todayMethods = {
       const t = it.truck ? ctx.trucks.get(it.truck) : null,
         ht = it.hire?.truck ? ctx.trucks.get(it.hire.truck) : null,
         d = it.driver ? who(it.driver, it.message) : null;
+      // booked by a gear list: the driver's one ask (READY) goes the day before at 3 pm, so "not asked yet" says when
+      if (d && !it.message && it.viaGear && this.gearAsksDriver?.(it)) d.askAt = 'DAY_BEFORE';
       Object.assign(v, {
         truck: it.truck ?? null,
         truckName: t?.name ?? (it.hire ? (ht?.name ?? 'Hire truck') : (it.truckGone ?? null)),
@@ -396,6 +398,13 @@ export const todayMethods = {
       if (it.gear && typeof this.gearItemFields === 'function') {
         const g = this.gearItemFields(it, ctx);
         Object.assign(v, g);
+        // the workers on its task pack it: "Kev and Sam pack it on the day"
+        const crew = (g.task?.status === 'OPEN' ? g.task.workers : []).map((w) => w.name);
+        if (crew.length && open && it.stage === 'WAITING' && (it.direction ?? 'OUT') === 'OUT')
+          words =
+            (crew.length < 2 ? crew[0] : crew.slice(0, -1).join(', ') + ' and ' + crew.at(-1)) +
+            (crew.length === 1 ? ' packs it ' : ' pack it ') +
+            (it.pack === 'DAY_BEFORE' ? 'the day before' : 'on the day');
         if (g.chainWords && open && !(this.live() && it.stage === 'PACKED')) words = g.chainWords; // a real yard's Packed keeps its count
         // from a site (site -> yard, site -> site): nothing is packed at the yard, the truck fetches it; the yard's low-stock line does not apply
         if (it.direction && it.direction !== 'OUT') {
@@ -645,8 +654,10 @@ export const todayMethods = {
         return v;
       })
       .sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
-    // the workers' tasks on these days (tasks.js, part 5): chips on the calendar and the day's task list under its bookings
-    const tasks = typeof this.taskCalendar === 'function' ? this.taskCalendar(from, to, ctx) : [];
+    // the workers' tasks on these days (tasks.js, part 5): chips on the calendar and the day's task list under its bookings; who is
+    // rostered each day (roster.js), so the gear form can say who is not
+    const tasks = typeof this.taskCalendar === 'function' ? this.taskCalendar(from, to, ctx) : [],
+      roster = ctx.ops && typeof this.rosterRange === 'function' ? this.rosterRange(from, to) : [];
     const runsAll = this.planRuns(ctx),
       runs = runsAll.filter((x) => x.day >= from && x.day <= to),
       overdue = runsAll.filter((x) => x.open && x.day < ctx.today);
@@ -707,6 +718,7 @@ export const todayMethods = {
       grid,
       items,
       tasks,
+      roster,
       runs,
       overdue,
       delivered,

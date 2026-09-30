@@ -407,10 +407,12 @@ const sending = (v) => (v.offline ? 'saved, sends when there is signal' : 'sendi
 export function askCard(a, v) {
   const w = waitingFor(v.pending, 'messageAnswer', a.id) ?? waitingFor(v.pending, 'messageSeen', a.id),
     open = v.open?.ask === a.id,
+    changing = v.open?.change === a.id, // "Change my answer": the two buttons again, while the day is still ahead
     when = esc(a.dayLabel + ' ' + (a.timeWords ?? '')),
     where = a.siteName ? esc(a.siteName) : '',
     notice = a.subject === 'TASK_DAY' && !a.needsAnswer,
-    done = !!w || !!a.answeredAt || a.seen || (notice ? !!a.seen : !a.canAnswer && !a.canSee);
+    done = !changing && (!!w || !!a.answeredAt || a.seen || (notice ? !!a.seen : !a.canAnswer && !a.canSee)),
+    canChange = !w && !!a.answeredAt && a.canAnswer && a.needsAnswer && !!v.me?.today && a.day > v.me.today;
   const said = w
     ? w.action === 'messageSeen'
       ? 'Got it'
@@ -461,7 +463,8 @@ export function askCard(a, v) {
           esc(a.id) +
           '">' +
           (a.subject === 'ROSTER' ? 'Deny' : 'Can’t make it') +
-          '</button></div>';
+          '</button></div>' +
+          (changing ? '<button type="button" class="cr-link" data-cr-cancel>Never mind</button>' : '');
   return (
     '<article class="cr-card cr-askcard' +
     (done ? ' is-done' : '') +
@@ -497,7 +500,10 @@ export function askCard(a, v) {
         '">' +
         esc(said) +
         (w ? ' · ' + sending(v) : '') +
-        '</p>'
+        '</p>' +
+        (canChange
+          ? '<button type="button" class="cr-link" data-cr-change="' + esc(a.id) + '">Change my answer</button>'
+          : '')
       : '') +
     (a.directions && !done
       ? '<p class="cr-contact"><a href="' + esc(a.directions) + '" rel="noopener">Directions</a></p>'
@@ -937,8 +943,10 @@ export function crewPage(v) {
       : '';
   // the roster (tomorrow's Confirm / Deny, today's line) and the day's tasks in priority order first, then everyone's own asks (an
   // unanswered one is the thing to do), then the yard hand's and leading hand's work, then a driver's trips
+  // an answered day-before ask (Your tasks tomorrow) has done its job once its day has begun: the day's tasks say what is on
   const isOpenAsk = (a) =>
-    a.canAnswer || a.canSee || (a.subject === 'TASK_DAY' && !a.seen && !a.answeredAt && a.status === 'SENT');
+    (a.canAnswer || a.canSee || (a.subject === 'TASK_DAY' && !a.seen && !a.answeredAt && a.status === 'SENT')) &&
+    !(a.subject === 'TASK_READY' && a.answeredAt && me.today && a.day <= me.today);
   const asks = (me.asks ?? [])
     .filter((a) => !OWN_CARD.has(a.subject))
     .slice()
@@ -947,7 +955,8 @@ export function crewPage(v) {
   const section = (title, cards) => (cards.length ? '<h2 class="cr-day">' + title + '</h2>' + cards.join('') : '');
   const my = me.myDay,
     nowTask = (my?.tasks ?? []).find((t) => t.now),
-    laterTasks = (my?.tasks ?? []).filter((t) => !t.now);
+    laterTasks = (my?.tasks ?? []).filter((t) => !t.now && !t.mine?.done),
+    doneTasks = (my?.tasks ?? []).filter((t) => !t.now && t.mine?.done);
   const roster =
     own
       .filter((a) => a.subject === 'ROSTER')
@@ -964,6 +973,9 @@ export function crewPage(v) {
     (nowTask ? '<h2 class="cr-day">Now</h2>' + taskDayCard(nowTask, v, { now: true }) : '') +
     (laterTasks.length
       ? '<h2 class="cr-day">Next</h2>' + laterTasks.map((t) => taskDayCard(t, v, { quiet: !!nowTask })).join('')
+      : '') +
+    (doneTasks.length
+      ? '<h2 class="cr-day">Done</h2>' + doneTasks.map((t) => taskDayCard(t, v, { quiet: true })).join('')
       : '') +
     (my?.tomorrow?.length || own.some((a) => a.subject === 'TASK_READY')
       ? '<h2 class="cr-day">Tomorrow</h2>' +
@@ -1167,6 +1179,13 @@ function boot() {
     if (b.dataset.crArrive) return tapNow('tripArrived', { trip: b.dataset.crArrive, words: b.dataset.words });
     if (b.dataset.crYes) return tapNow('messageAnswer', { id: b.dataset.crYes, yes: true });
     if (b.dataset.crSeen) return tapNow('messageSeen', { id: b.dataset.crSeen });
+    if (b.dataset.crChange) {
+      V.open = { change: b.dataset.crChange };
+      V.reason = '';
+      V.formError = null;
+      draw();
+      return;
+    }
     if (b.dataset.crNo) {
       V.open = { ask: b.dataset.crNo };
       V.reason = '';

@@ -163,3 +163,32 @@ with one big button for the next step, Next, Tomorrow; one key per tap as before
   ('P2 Sweep the racks · Kev'), a gear list's task rides on the list's chip; the day panel lists the day's tasks under its bookings, one
   line per task with each worker's ticks and a link to Task progress on that day. `test/part5-merged.test.js` walks the whole story in
   both yards.
+
+## After the review (the owner's and the adversarial findings on the merged tree)
+
+- **One ask per person per day.** A worker's TASK_READY and TASK_DAY are one message for every task of theirs that day: off one task
+  (cancelled, unassigned, moved) they are called off only when no other open task that day still needs them (`taskCallOffMsgs`); a task
+  added after 3 pm joins the ask already standing (`taskOpenAsk`, its words refreshed while unanswered) and a fresh one goes only after a
+  no. The driver of a truck booked by a gear list gets the list's READY at 3 pm the day before and nothing else: the booking is made
+  `viaGear` (the list's id), plan.js and clock.js send no DRIVE while an open gear list is on it and the day has not begun
+  (`gearAsksDriver`), the READY becomes the booking's own `message` (one answer on the card), an unanswered DRIVE on a linked booking
+  gives way to it, and a driver changed before 3 pm is told he gets a message then. A list made after 6 am on its day asks as any booking
+  does and is never flagged "not asked in time".
+- **The roster and the tasks agree.** A pattern that stopped fills again (`rosterFill` takes back a REMOVED day it left; a day the
+  office cleared by hand stays off). A place or time change on an asked day calls the ask off and asks afresh; a superseded ask is
+  finished. A worker who said they can't work is refused on a task that day; one not rostered is rostered in the same tap when the form
+  says so (`roster: true`, ticked by default on the gear form and + Task); Task progress, the day panel and the gear form say
+  "can't work" / "not rostered" per worker; a denied day drops their tasks from their phone and Needs you names the task ("Kev can't
+  work tomorrow: P1 Bondi gear needs someone"). A moved list keeps one task per priority on its new day (`taskMovedFit`: the next free
+  priority, or off with a notification).
+- **Marks are the person's own.** The driver's Loaded (or the office's Packed on the trip) never ticks a worker's *Got the list*; only
+  the Practice yard's crew (ENGINE / SIMULATED) stands in for everyone. A phone's tap on a later task waits for their part of the earlier
+  one (`taskInOrder`, P1 before P2; the office ticks in any order). The office's phoned-in Done on a gear-list task records the pack on
+  its trip too. The queue drops an ALREADY_DONE like an ALREADY_CONFIRMED.
+- **On screen.** The gear picker counts the place the gear comes from ("free at Bondi now") and a gear list is exact in both yards
+  (the Practice yard's crew still lifts whole stillages to fill it); a gear list's trip is drawn once (on the list's card; the truck card
+  has one line to it) and the chain's Arrived button only when no trip block carries it; the card names the packers ("Kev and Sam pack it
+  on the day"); the phone hides the Pack ask and pack card for people on the list's task, files an answered day-before ask away once the
+  day begins, lists finished tasks under Done and offers *Change my answer* while the day is ahead; a tap on an asked roster day opens a
+  choice (They said yes / They said no / Take them off); the Gear list page opens on the week's lists; the pre-start says one word per
+  person and the print shell one title. `test/part5-review.test.js` covers each.

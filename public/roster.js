@@ -20,6 +20,7 @@ const RS = {
   busy: false,
   err: null,
   taps: new Set(), // days with a command on the way (drawn as pending)
+  choice: null, // a day already asked about, tapped: the small choice (They said yes / no / Take them off) is open for it
   add: { on: false, name: '', job: 'YARD', where: '', mobile: '', email: '' },
   adding: false,
 };
@@ -281,16 +282,56 @@ export function rsGridHTML(x) {
     '</div>' +
     cells +
     '</div>' +
+    rsChoiceHTML(x, byDay.get(RS.choice)) +
     (RS.err ? '<p class="rs-err" role="alert">' + esc(RS.err) + '</p>' : '') +
     '<p class="rs-note">Tap a day to roster ' +
     esc(x.name.split(' ')[0]) +
-    ', tap again to clear. A pattern keeps 14 days ahead filled. Everyone is asked the day before at 3 pm: ✓ confirmed, ✕ can’t.</p></div>'
+    ', tap again to clear. A pattern keeps 14 days ahead filled. Everyone is asked the day before at 3 pm: ✓ confirmed, ✕ can’t. A day already asked opens a choice when tapped.</p></div>'
+  );
+}
+/** The choice under the grid for a day already asked about: They said yes / They said no / Take them off. @param {any} x @param {any} r */
+function rsChoiceHTML(x, r) {
+  if (!r || !RS.choice) return '';
+  const first = esc(x.name.split(' ')[0]),
+    b = (what, words, cls = 'secondary') =>
+      '<button type="button" class="tdh-btn ' +
+      cls +
+      '" data-rs-choice="' +
+      what +
+      '|' +
+      esc(r.day) +
+      '" data-person="' +
+      esc(x.id) +
+      '">' +
+      words +
+      '</button>';
+  return (
+    '<div class="rs-choice" role="group" aria-label="' +
+    esc(r.dayLabel) +
+    '"><p><b>' +
+    esc(r.dayLabel) +
+    '</b> · ' +
+    esc(
+      r.answer === 'YES'
+        ? first + ' confirmed'
+        : r.answer === 'NO'
+          ? first + ' can’t work'
+          : r.answer === 'NO_ANSWER'
+            ? first + ' hasn’t answered'
+            : 'Asked, waiting for ' + first,
+    ) +
+    '</p><div class="rs-choice-acts">' +
+    (r.answer !== 'YES' ? b('yes', 'They said yes', 'tdh-yes') : '') +
+    (r.answer !== 'NO' ? b('no', 'They said no') : '') +
+    b('off', 'Take them off', 'secondary tdh-quietbtn') +
+    b('close', 'Never mind', 'tdh-link') +
+    '</div></div>'
   );
 }
 // ---------------------------------------------------------------- listeners
 function onClick(e) {
   const b = e.target?.closest?.(
-    '[data-rs-open],[data-rs-day],[data-rs-pattern],[data-rs-pattern-end],[data-rs-month],[data-rs-add-open],[data-rs-add-x]',
+    '[data-rs-open],[data-rs-day],[data-rs-choice],[data-rs-pattern],[data-rs-pattern-end],[data-rs-month],[data-rs-add-open],[data-rs-add-x]',
   );
   if (!b || !RS.host || RS.host.view() !== 'WORKERS') return;
   const d = b.dataset;
@@ -308,6 +349,7 @@ function onClick(e) {
   if (d.rsOpen !== undefined) {
     RS.open = RS.open === d.rsOpen ? null : d.rsOpen;
     RS.month = null;
+    RS.choice = null;
     RS.where = null;
     RS.time = null;
     RS.host.redraw();
@@ -320,11 +362,37 @@ function onClick(e) {
     rsLoad(true);
     return;
   }
+  if (d.rsChoice !== undefined) {
+    // the small choice on a day already asked: They said yes / They said no (the office took the call) / Take them off
+    const [what, day] = d.rsChoice.split('|'),
+      r = RS.data?.days?.find((x) => x.day === day);
+    RS.choice = null;
+    if (what === 'close' || !r) {
+      RS.host.redraw();
+      return;
+    }
+    if (RS.taps.has(day)) return;
+    RS.taps.add(day);
+    RS.host.redraw();
+    run(
+      what === 'off'
+        ? RS.host.cmd('rosterClear', { person: d.person, days: [day] })
+        : RS.host.cmd('messageAnswer', { id: r.message, yes: what === 'yes', via: 'OFFICE' }),
+      () => RS.taps.delete(day),
+    );
+    return;
+  }
   if (d.rsDay !== undefined) {
     const day = d.rsDay,
       r = RS.data?.days?.find((x) => x.day === day),
       on = r && r.status !== 'REMOVED';
     if (RS.taps.has(day)) return;
+    // a day the person was already asked about (or answered): one tap opens the choice rather than silently taking them off
+    if (on && r.message && ['WAITING', 'YES', 'NO', 'NO_ANSWER'].includes(r.answer) && r.status !== 'DENIED') {
+      RS.choice = RS.choice === day ? null : day;
+      RS.host.redraw();
+      return;
+    }
     RS.taps.add(day);
     RS.host.redraw();
     run(

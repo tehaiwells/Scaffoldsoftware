@@ -169,7 +169,7 @@ export const clockMethods = {
     const driver = it.driver ? this.teamPerson(it.driver) : null,
       name = driver?.name ?? 'The driver',
       over = this.clockOver(it, now);
-    if (it.driver && !it.message && !over) {
+    if (it.driver && !it.message && !over && !this.gearAsksDriver?.(it)) {
       if (this.clockTooLate(it, now)) {
         if (!it.notAsked) {
           it.notAsked = iso(now);

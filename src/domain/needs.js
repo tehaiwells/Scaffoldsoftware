@@ -250,16 +250,40 @@ export const needsMethods = {
           item: t.id,
         });
     if (typeof this.rosterDayRows === 'function')
-      for (const r of this.rosterDayRows(tomorrow))
-        if (r.status === 'DENIED' && this.teamPerson(r.person))
-          push({
-            id: 'ROSTER_DENIED:' + r.id + ':' + (r.answeredAt ?? r.day),
-            kind: 'ROSTER_DENIED',
-            words: this.planName(r.person) + ' can’t work tomorrow. Roster someone else.',
-            action: { label: 'Open Workers', view: 'WORKERS', person: r.person, day: r.day },
-            since: r.answeredAt ?? r.day,
-            item: r.id,
-          });
+      for (const day of [today, tomorrow])
+        for (const r of this.rosterDayRows(day)) {
+          if (r.status !== 'DENIED' || !this.teamPerson(r.person)) continue;
+          const name = this.planName(r.person),
+            when = day === today ? 'today' : 'tomorrow';
+          // their tasks that day need someone else (the task keeps them until the office swaps them on Task progress)
+          const tasks =
+            typeof this.taskDayRows === 'function'
+              ? this.taskDayRows(day).filter(
+                  (/** @type {any} */ t) =>
+                    t.status === 'OPEN' && t.workers.some((/** @type {any} */ w) => w.person === r.person),
+                )
+              : [];
+          for (const t of tasks) {
+            const w = t.workers.find((/** @type {any} */ x) => x.person === r.person);
+            push({
+              id: 'TASK_CANT_WORK:' + t.id + ':' + r.person + ':' + (r.answeredAt ?? r.day),
+              kind: 'TASK_CANT_WORK',
+              words: name + ' can’t work ' + when + ': P' + w.priority + ' ' + t.name + ' needs someone.',
+              action: { label: 'Swap them', view: 'PROGRESS', day: t.day, task: t.id },
+              since: r.answeredAt ?? r.day,
+              item: t.id,
+            });
+          }
+          if (day === tomorrow && !tasks.length)
+            push({
+              id: 'ROSTER_DENIED:' + r.id + ':' + (r.answeredAt ?? r.day),
+              kind: 'ROSTER_DENIED',
+              words: name + ' can’t work tomorrow. Roster someone else.',
+              action: { label: 'Open Workers', view: 'WORKERS', person: r.person, day: r.day },
+              since: r.answeredAt ?? r.day,
+              item: r.id,
+            });
+        }
     // paperwork expired or due for review
     const months = this.paperMonths?.();
     for (const p of this.repo.all('paperwork')) {

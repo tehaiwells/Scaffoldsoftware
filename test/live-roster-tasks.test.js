@@ -193,10 +193,13 @@ test('the day-before asks go at 3 pm company time (Perth on a Sydney server), ne
   const kp = phone(f, kev);
   const a = kp.cmd('messageAnswer', { id: ask.id, yes: false, reason: 'Crook' });
   assert.deepEqual([a.rosterDay.status, a.rosterDay.reason, a.rosterDay.via], ['DENIED', 'Crook', 'PHONE']);
+  // Kevin has a task that day: Needs you names the task that needs someone (a denied day with no task says "Roster someone else")
   assert.deepEqual(
-    f.sim.needsYou().items.map((x) => x.kind),
-    ['ROSTER_DENIED'],
+    f.sim.needsYou().items.map((x) => [x.kind, x.words]),
+    [['TASK_CANT_WORK', 'Kevin can’t work tomorrow: P1 Sweep needs someone.']],
   );
+  assert.equal(f.sim.tasksView({ day: D1 }).workers[0].tasks[0].workers[0].cantWork, true);
+  assert.equal(f.sim.taskMyDay(kev.id, D0).tomorrow.length, 0, 'their phone shows no tasks for a day they can’t work');
   f.cmd('rosterPick', { person: kev.id, days: [D1] });
   const again = msgs()
     .filter((m) => m.subject === 'ROSTER')

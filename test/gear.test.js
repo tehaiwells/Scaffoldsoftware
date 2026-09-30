@@ -239,7 +239,10 @@ test('READY = no: the list and the truck booking say so; a new driver is asked a
   f.pass();
   assert.equal(f.item(tooLate.item.id).driverAsk, null);
   assert.ok(f.item(tooLate.item.id).readyNotAsked);
-  assert.ok(f.item(tooLate.item.id).log.some((l) => /Not asked in time/.test(l.text)));
+  // made this morning: no day-before ask could ever have gone, so nothing is flagged or said (the day notice goes as usual)
+  assert.ok(!f.item(tooLate.item.id).log.some((l) => /Not asked in time/.test(l.text)));
+  assert.ok(!f.sim.repo.all('notification').some((n) => n.body === "Cal wasn't asked about Bondi gear. Call them."));
+  assert.ok(f.item(tooLate.item.id).dayNotice, "today's run is still sent");
 });
 
 test('on the day the simulated crew packs and the truck drives: the chain fills, one ENGINE mark per dot, the task is told each step', (t) => {

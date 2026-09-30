@@ -102,13 +102,11 @@ test('a gear list yard -> site: one tap books it all; the driver taps each step 
   };
   const dPhone = await phoneOf(dave);
   await expect(dPhone.getByRole('heading', { name: 'My trips, Dave' })).toBeVisible({ timeout: 30000 });
-  await dPhone.getByRole('button', { name: 'I’ll be there', exact: true }).first().click(); // the truck booking's own ask
+  // the driver's one ask: the list's READY when it is for tomorrow and past 3 pm, else (a list for today) the booking's own
+  await dPhone.getByRole('button', { name: 'I’ll be there', exact: true }).first().click();
   const ready = dPhone.locator('.cr-askcard', { hasText: 'Ready for tomorrow?' });
-  if (await ready.count()) {
-    // the list is for tomorrow and it is past 3 pm: the READY ask went out at once
-    await ready.getByRole('button', { name: 'I’ll be there', exact: true }).click();
-    await expect(ready).toContainText('You said yes, see you there', { timeout: 20000 });
-  }
+  if (await ready.count()) await expect(ready).toContainText('You said yes, see you there', { timeout: 20000 });
+  await expect(dPhone.getByRole('button', { name: 'I’ll be there', exact: true })).toHaveCount(0, { timeout: 20000 });
   const tripCard = dPhone.locator('.cr-card:not(.cr-askcard)').first();
   await expect(tripCard).toContainText('To Bondi');
   await tripCard.getByRole('button', { name: 'Arrived at yard', exact: true }).click();

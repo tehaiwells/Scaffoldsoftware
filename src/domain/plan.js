@@ -604,7 +604,7 @@ export const planMethods = {
     let problem = null;
     const driver = it.driver ? this.teamPerson(it.driver) : null,
       name = driver?.name ?? 'The driver';
-    if (it.driver && !it.message && !end) {
+    if (it.driver && !it.message && !end && !this.gearAsksDriver?.(it)) {
       it.message = this.planAskPerson(it, it.driver, 'driver', 'DRIVE', now);
       if (it.message) it.stage = started ? 'ON' : 'ASKING';
     }
@@ -1638,6 +1638,8 @@ export const planMethods = {
       driver: driver?.id ?? null,
       message: null,
       needsDriver: false,
+      // booked by a gear list (gear.js, its id): the driver gets the list's one ask the day before at 3 pm (READY), never a DRIVE ask as well
+      viaGear: typeof input.viaGear === 'string' ? input.viaGear : input.viaGear === true,
     });
     this.planStep(it.id);
     const also =
@@ -2436,17 +2438,25 @@ export const planMethods = {
     if (it.type === 'TRUCK') {
       const d = this.planDriver(input.person, it.day, it.id);
       requireRule(!(this.planToday(now) > it.day || now >= this.planAt(it.day, DAY_END)), 'That day is over.');
+      const gear = !!this.gearAsksDriver?.(it); // booked by a gear list: the list asks them to be ready (gear.js), one message
       this.planEdit(it.id, (x) => {
         if (x.message) this.planCallOff(x.message, x.driver === d.id ? 'Asked again' : 'Another driver was asked', now);
         x.driver = d.id;
         x.needsDriver = false;
         x.stage = x.status === 'ACTIVE' ? 'ON' : 'ASKING';
-        x.message = this.planAskPerson(x, d.id, 'driver', 'DRIVE', now);
+        x.message = gear ? null : this.planAskPerson(x, d.id, 'driver', 'DRIVE', now);
         x.problem = null;
-        this.planLog(x, d.name + ' has been asked.', now);
+        this.planLog(x, gear ? d.name + ' is the driver.' : d.name + ' has been asked.', now);
       });
+      if (gear) this.gearAsks(now);
       this.planStep(it.id);
-      return this.planReply(it, d.name + ' has been asked.');
+      const asked = gear ? !!this.repo.get(it.id, 'planItem').message : true;
+      return this.planReply(
+        it,
+        asked
+          ? d.name + ' has been asked.'
+          : d.name + ' gets a message ' + dayLabel(addDays(it.day, -1)) + ' at 3:00 pm.',
+      );
     }
     requireRule(it.type === 'WORKERS', 'Only trucks and workers are asked.');
     const replace =

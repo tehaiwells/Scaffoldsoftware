@@ -4058,8 +4058,8 @@ export function materialsView() {
   const empty = !state.products.some((p) => !p.retired),
     html =
       '<div class="page-materials">' +
+      (isOps() ? glPagePanel() : '') + // the owner's meaning of the tile: the week's gear lists first, the catalogue under them
       mlHero() +
-      (isOps() ? glPagePanel() : '') +
       miFixPanel() +
       (empty ? miImportPanel() + componentsPanel() : componentsPanel() + miImportPanel()) +
       (liveMode() && !empty && account.permissions.includes('company.manage')
@@ -15866,7 +15866,7 @@ function prOpen(m, { auto = true } = {}) {
     document.body.append(host);
   }
   const what = m.what ?? (m.kind === 'pick' ? 'Pick list' : 'Delivery docket'),
-    title = m.title ?? (m.kind === 'pick' ? m.name : m.site.name);
+    title = m.shellTitle ?? m.title ?? (m.kind === 'pick' ? m.name : m.site.name);
   host.innerHTML =
     '<div class="pr-shell" role="dialog" aria-modal="true" aria-label="' +
     esc(what + ' · ' + title) +
@@ -22087,8 +22087,9 @@ function tdhItem(v) {
       '</span></p>';
   if (v.type === 'TRUCK') {
     if (v.driverRow) body += '<ul class="tdh-people">' + tdhPerson(v.driverRow, v, 'driver') + '</ul>';
-    // a real yard: the booking's trips, each with its docket, the steps people confirmed and the next one (the office can confirm for the driver)
-    if (liveMode() && !v.hire) body += lo()?.loTripsFor({ day: v.day, truckPlan: v.id, ops }) ?? '';
+    // a real yard: the booking's trips, each with its docket, the steps people confirmed and the next one (the office can confirm for the
+    // driver); a gear list's trip is drawn once, on the list's own card, so here it is one line that goes there
+    if (liveMode() && !v.hire) body += lo()?.loTripsFor({ day: v.day, truckPlan: v.id, ops, linkGear: true }) ?? '';
     if (v.loads?.length && !liveMode())
       body +=
         '<p class="tdh-meta">Takes: ' +
@@ -22132,8 +22133,10 @@ function tdhItem(v) {
             : v.packerName + ' packs it';
     if (v.gear) {
       // a gear list (ADR 0011): From -> To, the truck and driver, the chain of dots, the workers' ticks; the trip's own buttons in a real yard
-      body += glItemHTML(v, { ops, live: liveMode(), answerPill: tdhAnswerPill });
-      if (liveMode() && v.trip && !done) body += lo()?.loTripOne(v.trip, v.day, ops) ?? '';
+      // the trip block under the chain carries the driver's buttons (Arrived, Packed, Loaded ...), so the chain's own Arrived button is not drawn twice
+      const tripBlock = liveMode() && v.trip && !done;
+      body += glItemHTML(v, { ops, live: liveMode(), answerPill: tdhAnswerPill, arrive: !tripBlock });
+      if (tripBlock) body += lo()?.loTripOne(v.trip, v.day, ops) ?? '';
     } else {
       body +=
         '<p class="tdh-meta">' +
@@ -22341,7 +22344,7 @@ function tdhPerson(r, v, kind) {
     words = 'No answer';
   } else if (r.answer === 'NOT_SENT') {
     cls = 'off';
-    words = kind === 'worker' ? 'Message goes the day before at 3 pm' : 'Not asked yet';
+    words = kind === 'worker' || r.askAt === 'DAY_BEFORE' ? 'Message goes the day before at 3 pm' : 'Not asked yet';
   } else if (r.answer === 'CALLED_OFF') {
     cls = 'off';
     words = 'Called off';
@@ -22925,6 +22928,8 @@ function tdhForm(p, day) {
       drivers: p?.drivers ?? [],
       taken: ftaken,
       workers: (p?.team?.people ?? []).filter((x) => x.kind === 'worker' && x.active),
+      // who is rostered that day (planMonth's roster rows): a chip says "not rostered" for the others
+      rostered: new Map((p?.roster ?? []).filter((r) => r.day === fday).map((r) => [r.person, r.status])),
       dayLabel: tdhShort(fday),
       live: liveMode(),
       hire: !liveMode(),
@@ -23831,6 +23836,7 @@ async function tdSubmit() {
           truck: f.truck || null,
           driver: bd ? bd.driver : f.driver || null,
           workers: (f.workers ?? []).map((w) => ({ person: w.person, priority: w.priority })),
+          roster: f.roster !== false,
           note: f.note || null,
           ...draftOf(f),
         });
@@ -23875,7 +23881,8 @@ async function tdSubmit() {
       );
   }
 }
-function tdPick(title, lines, done) {
+// at: {id, name} where the parts come from (a gear list from a site counts that site's stock, not the yard's); exact: pieces as typed
+function tdPick(title, lines, done, { at = null, exact = liveMode() } = {}) {
   if (typeof document === 'undefined') return;
   const layer = document.createElement('div');
   layer.className = 'tdh-layer';
@@ -23897,7 +23904,8 @@ function tdPick(title, lines, done) {
   });
   gmPlanPicker(
     sheet,
-    { state, lift: tdhP()?.pickerLift ?? null, exact: liveMode() }, // a real yard's list is exact pieces (the board's rule)
+    // a real yard's list is exact pieces (the board's rule); a gear list is exact in both yards (the owner says how many of each)
+    { state, lift: tdhP()?.pickerLift ?? null, exact, at: at?.id ?? null, atName: at?.name ?? null, demo: !liveMode() },
     {
       title,
       lines,
@@ -23914,7 +23922,7 @@ function tdBindOnce() {
   tdBound = true;
   document.addEventListener('click', (e) => {
     const t = e.target?.closest?.(
-      '[data-gl-place],[data-gl-worker],[data-tdh-arrive],[data-gl-open],[data-gl-new],[data-tdh-tasks],[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-send],[data-tdh-done],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]',
+      '[data-gl-place],[data-gl-worker],[data-gl-roster],[data-tdh-arrive],[data-gl-open],[data-gl-new],[data-tdh-tasks],[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-send],[data-tdh-done],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]',
     );
     if (!t || !onPage() || t.disabled) return;
     const d = t.dataset;
@@ -23989,6 +23997,11 @@ function tdBindOnce() {
       tdRedraw();
       return;
     }
+    if (d.glRoster !== undefined && tdForm?.kind === 'GEAR') {
+      tdForm.f.roster = tdForm.f.roster === false;
+      tdRedraw();
+      return;
+    }
     if (d.tdhGoto !== undefined) {
       tdGoItem(d.tdhGoto, d.tdhDay || tdhToday());
       return;
@@ -24036,12 +24049,14 @@ function tdBindOnce() {
     }
     if (d.tdhPick !== undefined && (tdForm?.kind === 'MATERIALS' || tdForm?.kind === 'GEAR')) {
       const k = tdForm.kind,
-        site = (tdhP()?.sites ?? []).find(
-          (s) => s.id === (k === 'GEAR' ? glPlaces(tdForm.f).to.id : tdForm.f.site),
-        )?.name;
+        sites = tdhP()?.sites ?? [],
+        site = sites.find((s) => s.id === (k === 'GEAR' ? glPlaces(tdForm.f).to.id : tdForm.f.site))?.name;
+      // a gear list from a site: the picker counts what is at that site now (a move or a bring-back), never the yard's stock
+      const fromId = k === 'GEAR' ? glPlaces(tdForm.f).from : null,
+        fromSite = fromId?.kind === 'site' ? sites.find((s) => s.id === fromId.id) : null;
       tdPick(
         k === 'GEAR'
-          ? 'The gear for ' + (glDefaultName(tdForm.f, tdhP()?.sites ?? []) || 'the list')
+          ? 'The gear for ' + (glDefaultName(tdForm.f, sites) || 'the list')
           : 'Parts for ' + (site ?? 'the site'),
         tdForm.f.lines,
         (l) => {
@@ -24050,6 +24065,7 @@ function tdBindOnce() {
             tdRedraw();
           }
         },
+        k === 'GEAR' ? { at: fromSite ? { id: fromSite.id, name: fromSite.name } : null, exact: true } : {},
       );
       return;
     }

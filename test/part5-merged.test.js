@@ -98,12 +98,15 @@ test('one tap makes the list, the truck booking and the workers’ task; the cal
     month.items.some((i) => i.id === r.item.id && i.gear && i.task?.id === r.task.id),
     'the list is on the calendar with its task',
   );
-  // 3 pm the day before: READY to Dave (beside his DRIVE ask), TASK_READY to Kevin and Samuel, ROSTER to Kevin (rostered); once each
+  // 3 pm the day before: READY to Dave (his one ask: the booking made by the list sends no DRIVE), TASK_READY to Kevin and Samuel,
+  // ROSTER to Kevin (rostered); once each
+  assert.deepEqual(subjectsOf(f, f.dave.id), []);
   f.clock(D0, '15:00');
   f.pass();
   f.pass();
   f.pass();
-  assert.deepEqual(subjectsOf(f, f.dave.id), ['DRIVE', 'READY']);
+  assert.deepEqual(subjectsOf(f, f.dave.id), ['READY']);
+  assert.equal(f.item(r.item.truckPlan).message, f.item(r.item.id).driverAsk, 'the booking carries the READY');
   assert.deepEqual(subjectsOf(f, f.kev.id), ['ROSTER', 'TASK_READY']);
   assert.deepEqual(subjectsOf(f, f.sam.id), ['TASK_READY']);
   const kevAsk = f.sim.repo.all('message').find((m) => m.subject === 'TASK_READY' && m.person === f.kev.id);
@@ -226,7 +229,7 @@ test('a real yard: the list’s task follows the phones and the trip (Got the li
   f.clock(LD1, '06:30');
   for (let i = 0; i < 300; i++) f.pass();
   assert.deepEqual(records(f.db, f.company), before, 'the clock only sent messages and set flags');
-  assert.deepEqual(subjectsOf(f, f.team.Dave.id), ['DAY', 'DRIVE', 'READY']);
+  assert.deepEqual(subjectsOf(f, f.team.Dave.id), ['DAY', 'READY']);
   assert.deepEqual(
     subjectsOf(f, kev.id),
     ['PACK', 'TASK_DAY', 'TASK_READY'],

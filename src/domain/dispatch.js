@@ -658,8 +658,17 @@ export const dispatchMethods = {
     const base = this.crewTrips(),
       today = base.today,
       tomorrow = addDays(today, 1);
+    // the worker's own day: their tasks in priority order and their roster (tasks.js, roster.js; part 5)
+    const myDay =
+      phone.kind === 'worker' && typeof this.taskMyDay === 'function' ? this.taskMyDay(phone.id, today) : null;
+    // a list whose task they are on is theirs through the task's steps: its older Pack ask and pack card would say the same thing twice
+    const onTask = new Set(
+      [...(myDay?.tasks ?? []), ...(myDay?.tomorrow ?? [])].map((/** @type {any} */ t) => t.list).filter(Boolean),
+    );
     const asks = this.personMessages(phone.kind, phone.id).filter(
-      (/** @type {any} */ v) => v.canAnswer || v.canSee || v.answer === 'WAITING' || (v.answeredAt && v.day >= today),
+      (/** @type {any} */ v) =>
+        (v.canAnswer || v.canSee || v.answer === 'WAITING' || (v.answeredAt && v.day >= today)) &&
+        !(v.subject === 'PACK' && v.item && onTask.has(v.item)),
     );
     const perms = this.auth.permissions(this.user),
       yard = perms.includes('packs.confirm');
@@ -677,6 +686,7 @@ export const dispatchMethods = {
           ([tp]) => tp && !['CANCELLED', 'DRAFT'].includes(tp.status) && (tp.day === today || tp.day === tomorrow),
         )
         .map(([, t]) => this.tripView(t))
+        .filter((/** @type {any} */ v) => !(v.list && onTask.has(v.list.id)))
         .sort((a, b) => String(a.day).localeCompare(String(b.day)) || String(a.time).localeCompare(String(b.time)));
       returns = this.tripRowsBy(
         'objects_trip_state',
@@ -726,9 +736,6 @@ export const dispatchMethods = {
             canDone: day === today,
           })),
       );
-    // the worker's own day: their tasks in priority order and their roster (tasks.js, roster.js; part 5)
-    const myDay =
-      phone.kind === 'worker' && typeof this.taskMyDay === 'function' ? this.taskMyDay(phone.id, today) : null;
     const roster =
       phone.kind === 'worker' && typeof this.rosterMine === 'function' ? this.rosterMine(phone.id, today) : null;
     return {

@@ -58,12 +58,25 @@ export const psForget = () => {
  */
 export function prestartSheet(v) {
   const title = 'Pre-start · ' + v.dayLabel;
+  // one word per person: Confirmed, Can't work, Not asked, Rostered (asked, no answer yet) or Not rostered
   const workers = (v.workers ?? []).map((w) => ({
     name: w.name,
     role: w.roleWords,
     where: w.where,
     time: w.timeWords,
-    rostered: w.rosteredWords,
+    rostered: !w.rostered
+      ? 'Not rostered'
+      : w.rostered === 'CONFIRMED' || w.answer === 'YES'
+        ? 'Confirmed'
+        : w.rostered === 'DENIED' || w.answer === 'NO'
+          ? 'Can’t work'
+          : w.answer === 'NOT_ASKED'
+            ? 'Not asked'
+            : w.answer === 'NO_ANSWER'
+              ? 'No answer'
+              : w.answer === 'WAITING'
+                ? 'Asked, waiting'
+                : 'Rostered',
     answer: w.answer === 'YES' ? 'Yes' : w.answer === 'NO' ? 'Can’t' : '—',
     tasks: (w.tasks ?? []).map((t) => ({
       priority: t.priority,
@@ -88,7 +101,8 @@ export function prestartSheet(v) {
     kind: 'prestart',
     what: 'Pre-start',
     company: v.company,
-    title,
+    title, // the print shell shows `what` and this title once: "Pre-start · Fri 2 Oct"
+    shellTitle: v.dayLabel,
     day: v.day,
     dayLabel: v.dayLabel,
     printedAt: v.printedAt,
@@ -115,8 +129,6 @@ export function psSheetHTML(m) {
     esc(w.name) +
     '</h2><span>' +
     esc([w.role, w.where, w.time, w.rostered].filter(Boolean).join(' · ')) +
-    ' · Confirmed: ' +
-    esc(w.answer) +
     '</span></div>' +
     (w.tasks.length
       ? '<ol class="ps-tasks">' +
@@ -147,9 +159,13 @@ export function psSheetHTML(m) {
     '<section class="ps-driver"><div class="ps-worker-head"><h2>' +
     esc(d.name) +
     '</h2><span>' +
-    esc(d.truck + ' · ' + d.time) +
-    ' · Confirmed: ' +
-    esc(d.answer) +
+    esc(
+      d.truck +
+        ' · ' +
+        d.time +
+        ' · ' +
+        (d.answer === 'Yes' ? 'Confirmed' : d.answer === 'Can’t' ? 'Can’t drive' : 'Not confirmed'),
+    ) +
     '</span></div>' +
     (d.trips.length
       ? '<ol class="ps-tasks">' +

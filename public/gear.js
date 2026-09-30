@@ -104,7 +104,11 @@ export function glTaskHTML(task) {
           box(w.steps?.PACKED ?? task.steps?.PACKED, 'Packed and ready') +
           box(w.steps?.LOADED ?? task.steps?.LOADED, 'Truck loaded') +
           '</span>' +
-          (w.answer === 'NO' ? '<span class="tdh-pill no">Can’t make it</span>' : '') +
+          (w.cantWork
+            ? '<span class="tdh-pill no">Can’t work that day</span>'
+            : w.answer === 'NO'
+              ? '<span class="tdh-pill no">Can’t make it</span>'
+              : '') +
           '</li>',
       )
       .join('') +
@@ -115,7 +119,7 @@ export function glTaskHTML(task) {
  * The gear block of a list's card on Daily activities: From → To, the truck and driver with the driver's answer, the chain, the task.
  * @param {any} v the item view @param {{ops?:boolean,live?:boolean,answerPill?:(a:string)=>string}} [opts]
  */
-export function glItemHTML(v, { ops = false, live = false, answerPill = null } = {}) {
+export function glItemHTML(v, { ops = false, live = false, answerPill = null, arrive = true } = {}) {
   const t = v.truckItem;
   const pill = (a) => (answerPill ? answerPill(a) : a ? '<span class="tdh-pill">' + esc(a) + '</span>' : '');
   const truck = t
@@ -143,7 +147,7 @@ export function glItemHTML(v, { ops = false, live = false, answerPill = null } =
     (v.order ? ' · ' + esc(v.order) : '') +
     '</p>' +
     truck +
-    glChainHTML(v.chain, { arrival: live && ops ? v.arrival : null, ops }) +
+    glChainHTML(v.chain, { arrival: live && ops && arrive ? v.arrival : null, ops }) +
     glTaskHTML(v.task)
   );
 }
@@ -262,11 +266,15 @@ export function glFormHTML(f, ctx) {
           ),
         )
         .join('') + ctx.opt('', 'No driver named', !f.driver);
+  const rostered = ctx.rostered ?? new Map(),
+    notRostered = (f.workers ?? []).filter((x) => !rostered.get(x.person) || rostered.get(x.person) === 'REMOVED'),
+    denied = (f.workers ?? []).filter((x) => rostered.get(x.person) === 'DENIED');
   const workers = (ctx.workers ?? []).length
     ? '<div class="tdh-field tdh-wide gl-workers"><span>Workers on it (optional)</span><div class="gl-chips">' +
       ctx.workers
         .map((w) => {
-          const on = (f.workers ?? []).find((x) => x.person === w.id);
+          const on = (f.workers ?? []).find((x) => x.person === w.id),
+            ros = rostered.get(w.id);
           return (
             '<span class="gl-chip' +
             (on ? ' on' : '') +
@@ -276,6 +284,11 @@ export function glFormHTML(f, ctx) {
             !!on +
             '">' +
             esc(w.name) +
+            (ros === 'DENIED'
+              ? '<small class="gl-chip-ros no">can’t work</small>'
+              : !ros || ros === 'REMOVED'
+                ? '<small class="gl-chip-ros">not rostered</small>'
+                : '') +
             '</button>' +
             (on
               ? [1, 2, 3]
@@ -299,7 +312,21 @@ export function glFormHTML(f, ctx) {
           );
         })
         .join('') +
-      '</div></div>'
+      '</div>' +
+      // someone on it who is not rostered that day: rostered in the same tap (ticked), unless the owner says not to
+      (notRostered.length
+        ? '<label class="gl-roster"><input type="checkbox" data-gl-roster' +
+          (f.roster === false ? '' : ' checked') +
+          '> Roster ' +
+          esc(notRostered.map((x) => ctx.workers.find((w) => w.id === x.person)?.name ?? 'them').join(', ')) +
+          ' for the day too</label>'
+        : '') +
+      (denied.length
+        ? '<p class="tdh-problem">' +
+          esc(denied.map((x) => ctx.workers.find((w) => w.id === x.person)?.name ?? 'Someone').join(', ')) +
+          ' said they can’t work that day.</p>'
+        : '') +
+      '</div>'
     : '';
   const body =
     field(

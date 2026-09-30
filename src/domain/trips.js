@@ -980,6 +980,7 @@ export const tripMethods = {
           return { id, label: '?', status: null };
         }
       }),
+      list: this.tripGearList(trip),
       lines: this.tripLines(trip),
       steps: trip.steps,
       notBack: trip.notBack ?? [],
@@ -989,6 +990,18 @@ export const tripMethods = {
       resolutions: trip.resolutions ?? [],
       next,
     };
+  },
+  /** The gear list (ADR 0011) a trip carries, {id, name, day}, or null: its card on Daily activities shows the trip once. @param {any} trip */
+  tripGearList(trip) {
+    for (const id of trip.orders ?? []) {
+      try {
+        const o = this.repo.get(id, 'order');
+        if (!o.planItem) continue;
+        const it = this.repo.get(o.planItem, 'planItem');
+        if (it.gear && it.status !== 'CANCELLED') return { id: it.id, name: it.name ?? 'Gear list', day: it.day };
+      } catch {}
+    }
+    return null;
   },
   // "Loaded, not delivered yet"; "Not confirmed" once the clock has flagged it; "Back at yard, 3 not counted back" after a short count.
   /** @param {any} trip */

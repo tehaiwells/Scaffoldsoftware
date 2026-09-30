@@ -51,7 +51,11 @@ test('one tap: the list, its exact order (held), the truck booking (driver asked
   assert.equal(trip.truckPlan, it.truckPlan);
   const tp = f.item(it.truckPlan);
   assert.equal(tp.driver, f.team.Dave.id);
-  assert.equal(f.msgs(tp.id)[0].subject, 'DRIVE', 'the driver is asked to drive, as for any booking');
+  // one message to the driver: the list's READY the day before at 3 pm stands for the booking too (no DRIVE ask as well)
+  assert.equal(f.msgs(tp.id).length, 0, 'the driver gets the list’s one ask the day before at 3 pm');
+  assert.equal(tp.viaGear, it.id);
+  assert.equal(r.truckItem.driverRow.answer, 'NOT_SENT');
+  assert.equal(r.truckItem.driverRow.askAt, 'DAY_BEFORE');
   assert.equal(r.truckItem.id, tp.id);
   // the calendar: the chip with its time and arrow, the chain of empty dots, the truck and driver
   const month = f.sim.planMonth(D1.slice(0, 7)).items.find((i) => i.id === it.id);
@@ -67,7 +71,7 @@ test('one tap: the list, its exact order (held), the truck booking (driver asked
     ],
   );
   assert.equal(month.truckItem.driverName, 'Dave');
-  assert.equal(month.truckItem.driverAnswer, 'WAITING');
+  assert.equal(month.truckItem.driverAnswer, 'NOT_SENT', 'asked the day before at 3 pm');
   // GET /api/gear: the day's lists; a week from today for the Gear list page
   const g = f.sim.gearView({ day: D1 });
   assert.equal(g.lists.length, 1);
@@ -121,11 +125,19 @@ test('the driver: READY at 3 pm company time the day before (Perth on a Sydney s
   assert.equal(ready.canAnswer, true);
   assert.equal(me.trips[0].chain.length, 5);
   assert.equal(me.trips[0].arrival.words, 'Arrived at yard');
+  assert.equal(
+    f.item(it().truckPlan).message,
+    ask.id,
+    'the booking carries the READY as its own ask: one answer on the card',
+  );
+  assert.equal(f.msgs(it().truckPlan).length, 0, 'no DRIVE ask beside it');
   dave.cmd('messageAnswer', { id: ask.id, yes: true });
   const answered = f.sim.repo.get(ask.id, 'message');
   assert.equal(answered.status, 'YES');
   assert.equal(answered.answer.via, 'PHONE');
   assert.equal(f.sim.planItemView(it()).readyAsk.answer, 'YES');
+  f.pass(); // the booking hears the yes once ("Dave said yes.")
+  assert.equal(f.sim.planItemView(f.item(it().truckPlan)).driverRow.answer, 'YES');
   // 10,000 passes over the night: nothing answers, packs, loads or moves (the LIVE invariant); the DAY notice goes at 6 am
   const before = records(f.db, f.company);
   const start = zoneAt(D0, '15:01', 'Australia/Perth');

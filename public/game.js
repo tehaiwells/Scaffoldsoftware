@@ -2295,7 +2295,9 @@ const ppLift = () => (PP.ctx?.lift > 0 ? PP.ctx.lift : 1500000);
 const ppExact = () => !!PP.ctx?.exact;
 const ppPer = (p) => (ppExact() ? 1 : gpPerStillage(p, ppLift()));
 const ppAll = () => products(PP.ctx?.state).filter((p) => gpPerStillage(p, ppLift()) > 0);
-const ppHave = () => rowsAt(PP.ctx?.state, yardOf(PP.ctx?.state)?.id);
+// where the parts come from: the yard, or (a gear list from a site: a move or a bring-back) that site's stock (ctx.at)
+const ppHave = () => rowsAt(PP.ctx?.state, PP.ctx?.at ?? yardOf(PP.ctx?.state)?.id);
+const ppAtWords = () => 'free ' + (PP.ctx?.at ? 'at ' + PP.ctx.atName : 'in the yard') + ' now';
 function ppList() {
   const all = ppAll(),
     have = ppHave(),
@@ -2349,7 +2351,8 @@ function ppSlot(x) {
       p.name +
       ': ' +
       num(x.count) +
-      ' free in the yard now' +
+      ' ' +
+      ppAtWords() +
       (q ? ', ' + num(q) + ' on the list' + (q > x.count ? ', more than is free' : '') : '');
   const corner =
     (x.count ? '<b class="gm-n">' + gpCount(x.count) + '</b>' : '') +
@@ -2388,16 +2391,19 @@ function ppAmount() {
       : '';
   const words = q
     ? (ppExact()
-        ? num(q) + (q === 1 ? ' piece' : ' pieces') + ' &middot; exactly what you type goes'
+        ? num(q) +
+          (q === 1 ? ' piece' : ' pieces') +
+          ' &middot; exactly what you type goes on the list' +
+          (PP.ctx?.demo && !PP.ctx?.at ? ' (the Practice yard’s crew lifts whole stillages)' : '')
         : asked
           ? 'You asked for ' + num(asked) + '. They come in stillages of ' + num(per) + ', so ' + num(q) + ' will go.'
           : packs
             ? num(q) + ' pieces.' + packs
             : num(q) + ' pieces &middot; about ' + n + ' ' + (n === 1 ? 'stillage' : 'stillages')) +
       (q > have
-        ? ' &middot; <span class="pp-over">more than you have: ' + num(have) + ' free in the yard now</span>'
+        ? ' &middot; <span class="pp-over">more than you have: ' + num(have) + ' ' + ppAtWords() + '</span>'
         : '')
-    : num(have) + ' free in the yard now';
+    : num(have) + ' ' + ppAtWords();
   const unit = ppExact() ? 'piece' : 'stillage';
   return (
     '<div class="gm-amt pp-amt"><div class="gm-amt-top">' +
@@ -2419,7 +2425,9 @@ function ppAmount() {
     unit +
     ' more">+</button></div>' +
     (ppExact()
-      ? '<p class="pp-per">+ and &minus; add or take away one piece. The number you type is what the yard packs, as on the board.</p></div>'
+      ? '<p class="pp-per">+ and &minus; add or take away one piece. The number you type is what goes on the list' +
+        (PP.ctx?.demo ? '; the Practice yard’s crew lifts whole stillages to fill it.' : ', as on the board.') +
+        '</p></div>'
       : '<p class="pp-per">+ and &minus; add or take away one stillage (' +
         num(per) +
         ' pieces). A number you type goes up to whole stillages, as on the yard board.</p></div>')
@@ -2495,7 +2503,9 @@ function ppHTML() {
   return (
     '<div class="pp-win" data-pp><div class="gm-win-head pp-head"><div><h2>' +
     esc(PP.opts?.title ?? 'Pick the parts') +
-    '</h2><p>Tap a part, then how many. The corner number is what is free in the yard now.</p></div><button type="button" class="gm-x" data-pp-cancel aria-label="Close">&times;</button></div>' +
+    '</h2><p>Tap a part, then how many. The corner number is what is ' +
+    ppAtWords() +
+    '.</p></div><button type="button" class="gm-x" data-pp-cancel aria-label="Close">&times;</button></div>' +
     sysbar +
     tabs +
     '<div class="pp-grid-wrap"><div class="pp-grid" role="list">' +

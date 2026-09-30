@@ -33094,3 +33094,70 @@ body.tdh-sheet-open {
   color: #3d5446;
   margin-left: 6px;
 }
+/* Part 5 review: the roster grid's choice on an asked day, the gear form's roster tags, a gear list's trip as one line on the truck card, a task a worker can't work */
+.rs-choice {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f4f7ef;
+  border: 1px solid #d9e3cf;
+}
+.rs-choice p {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  color: #3d5446;
+}
+.rs-choice-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.gl-chip-ros {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7a8f7f;
+}
+.gl-chip.on .gl-chip-ros {
+  color: #c9d8c2;
+}
+.gl-chip-ros.no,
+.gl-chip.on .gl-chip-ros.no {
+  color: #e0563b;
+}
+.gl-roster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #3d5446;
+}
+.gl-roster input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+.lo-gear-line {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: #3d5446;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.lo-gear-line .lo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9fb3a5;
+  display: inline-block;
+}
+.tp-task.is-cant {
+  border-color: #e9b4a6;
+  background: #fbf1ee;
+}

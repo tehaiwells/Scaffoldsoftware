@@ -199,6 +199,8 @@ const ROSTER_ONE =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='rosterDay' AND json_extract(data,'$.person')=? AND json_extract(data,'$.day')=? ORDER BY rowid LIMIT 1";
 const ROSTER_DAY =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='rosterDay' AND json_extract(data,'$.day')=? ORDER BY rowid";
+const ROSTER_ALL_RANGE =
+  "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='rosterDay' AND json_extract(data,'$.day') BETWEEN ? AND ? ORDER BY json_extract(data,'$.day'), rowid";
 const ROSTER_AHEAD_OF =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='rosterDay' AND json_extract(data,'$.person')=? AND json_extract(data,'$.day')>? ORDER BY json_extract(data,'$.day'), rowid";
 const PATTERNS_OPEN =
@@ -260,6 +262,12 @@ export const rosterMethods = {
   rosterDayRows(day) {
     return this.planRows(ROSTER_DAY, day);
   },
+  /** Everyone's days between two days (the calendar's grid): {person, day, status} for each rostered day. @param {string} from @param {string} to */
+  rosterRange(from, to) {
+    return this.planRows(ROSTER_ALL_RANGE, from, to)
+      .filter((r) => r.status !== 'REMOVED')
+      .map((r) => ({ person: r.person, day: r.day, status: r.status }));
+  },
   /** @param {string} person */
   rosterPatternOf(person) {
     return this.planRows(PATTERN_OF, person)[0] ?? null;
@@ -284,11 +292,20 @@ export const rosterMethods = {
       requireRule(day <= addDays(cal.today, ROSTER_MAX_DAYS), 'Choose a day within the next year.');
       const row = this.rosterOf(w.id, day);
       if (row && ['ROSTERED', 'CONFIRMED'].includes(row.status)) {
-        // already on: the place or time may change (a fresh ask goes out if one was answered for the old details)
+        // already on: the place or time may change; an ask already sent was about the old details, so it is called off and a fresh one
+        // goes out (at once after 3 pm, else at 3 pm), and the day is ROSTERED again until they answer
         let changed = false;
         if (where && row.where !== where) ((row.where = where), (changed = true));
         if (time && row.time !== time) ((row.time = time), (changed = true));
-        if (changed) this.repo.save(row);
+        if (!changed) continue;
+        if (row.message) {
+          this.planCallOff(row.message, 'The place or time changed', now);
+          row.message = null;
+          row.status = 'ROSTERED';
+          row.answeredAt = null;
+          row.answer = null;
+        }
+        this.repo.save(row);
         continue;
       }
       if (row) {
@@ -426,7 +443,8 @@ export const rosterMethods = {
     };
   },
   // ---------- the clock's duties (LIVE clockPass and DEMO planPass both call these) ----------
-  // Fill one pattern's window: today+1 … today+14, its weekdays, where no row exists yet (a removed day blocks re-fill). Returns how many.
+  // Fill one pattern's window: today+1 … today+14, its weekdays, where no row exists yet. A day the office cleared by hand, or that was
+  // answered, blocks re-fill; a day an earlier pattern left when it stopped is the new pattern's again. Returns how many.
   /** @param {any} pattern @param {string} today @param {string} by @param {number} now */
   rosterFill(pattern, today, by, now) {
     let n = 0;
@@ -435,7 +453,26 @@ export const rosterMethods = {
         wd = weekdayOf(day);
       if (wd > (pattern.type === 'MON_SAT' ? 5 : 4)) continue;
       if (pattern.until && day > pattern.until) continue;
-      if (this.rosterOf(pattern.person, day)) continue;
+      const had = this.rosterOf(pattern.person, day);
+      if (had) {
+        if (had.status !== 'REMOVED' || had.removedWhy !== 'pattern ended') continue;
+        Object.assign(had, {
+          source: 'PATTERN',
+          status: 'ROSTERED',
+          where: pattern.where,
+          time: pattern.time,
+          message: null,
+          notAsked: null,
+          answeredAt: null,
+          answer: null,
+          removedAt: null,
+          removedWhy: null,
+          createdBy: by,
+        });
+        this.repo.save(had);
+        n++;
+        continue;
+      }
       this.repo.add('rosterDay', {
         person: pattern.person,
         day,
@@ -672,7 +709,8 @@ export const ROSTER_HOOKS = {
   /** @param {any} sim @param {any} m */
   isOpen(sim, m) {
     const r = ROSTER_HOOKS.row(sim, m);
-    return !!r && r.status !== 'REMOVED' && r.day >= sim.planToday(sim.planNow());
+    // a superseded ask (the place or time changed, a fresh ask went out) is finished: the newest ask is the one to answer
+    return !!r && r.status !== 'REMOVED' && r.day >= sim.planToday(sim.planNow()) && (!r.message || r.message === m.id);
   },
   /** @param {any} sim @param {any} m */
   deadline(sim, m) {

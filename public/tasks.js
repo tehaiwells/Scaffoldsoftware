@@ -167,6 +167,7 @@ export function tpTaskHTML(t, w, v) {
     (done ? ' is-done' : '') +
     (cancelled ? ' is-off' : '') +
     (t.flag ? ' is-flag' : '') +
+    (w.cantWork && !done ? ' is-cant' : '') +
     '" data-tp-task="' +
     esc(t.id) +
     '"><div class="tp-task-main"><span class="tp-big' +
@@ -187,8 +188,8 @@ export function tpTaskHTML(t, w, v) {
       ? '<small class="tp-lines">' + t.lines.map((l) => l.quantity + ' × ' + esc(l.name)).join(', ') + '</small>'
       : '') +
     '</div>' +
-    (ans && ans[0] === 'no' && !done
-      ? pill('no', ans[1]) +
+    (((ans && ans[0] === 'no') || w.cantWork) && !done
+      ? pill('no', w.cantWork ? 'Can’t work that day' : ans[1]) +
         (v.canPlan
           ? '<button type="button" class="tdh-link" data-tp-swap="' +
             esc(t.id) +
@@ -286,12 +287,23 @@ export function tpFormHTML(v) {
           (f.people[p.id] ? ' class="on"' : '') +
           '><span class="tp-who-name">' +
           esc(p.name) +
+          (p.rostered === 'DENIED'
+            ? '<small class="gl-chip-ros no">can’t work</small>'
+            : p.rostered
+              ? ''
+              : '<small class="gl-chip-ros">not rostered</small>') +
           '</span><span class="tp-chips">' +
           [1, 2, 3].map((n) => chip(p, n)).join('') +
           '</span></li>',
       )
       .join('') +
-    '</ul></div>' +
+    '</ul>' +
+    ((v.team ?? []).some((p) => f.people[p.id] && !p.rostered)
+      ? '<label class="gl-roster"><input type="checkbox" name="roster"' +
+        (f.roster === false ? '' : ' checked') +
+        '> Roster them for the day too</label>'
+      : '') +
+    '</div>' +
     '<div class="tp-form-row"><label class="tm-f"><span>Time</span><select name="time"><option value="">Any time</option>' +
     PLAN_TIMES.map(
       (t) => '<option value="' + t + '"' + (t === f.time ? ' selected' : '') + '>' + planTimeWords(t) + '</option>',
@@ -472,7 +484,7 @@ function onClick(e) {
 function onInput(e) {
   const t = e.target;
   if (!TP.form || !t?.closest?.('[data-tp-form]') || !t.name) return;
-  TP.form[t.name] = t.value;
+  TP.form[t.name] = t.type === 'checkbox' ? t.checked : t.value;
 }
 async function onSubmit(e) {
   const f = e.target;
@@ -497,6 +509,7 @@ async function onSubmit(e) {
       site: v.site || null,
       note: v.note || null,
       workers,
+      roster: v.roster === 'on',
     });
     TP.host.notify(r.message);
     TP.form = null;

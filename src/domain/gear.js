@@ -87,10 +87,9 @@ export const gearMethods = {
     const draft = input.draft === true;
     if (draft) requireRule(this.live(), 'Drafts are for your real yard.');
     this.planWhen('MATERIALS', day, time, now);
-    // the truck and driver: an existing booking of that truck that day is linked (never booked twice); else it is booked now, driver asked
-    const tp = this.gearTruck(input, day, time, draft);
     const site = direction === 'BACK' ? from : to; // the item's site: where it goes, or (a bring-back) where it comes from, as before
     const note = this.gearNote(input.note);
+    // the list first, then its truck: a booking made here names the list (viaGear), so the driver gets the list's one ask the day before
     const it = this.repo.add('planItem', {
       type: 'MATERIALS',
       day,
@@ -112,7 +111,7 @@ export const gearMethods = {
       lines,
       pack: 'SAME_DAY',
       packDay: day,
-      truckPlan: tp?.id ?? null,
+      truckPlan: null,
       packer: null,
       packMessage: null,
       held: [],
@@ -129,6 +128,12 @@ export const gearMethods = {
       driverAsk: null,
       dayNotice: null,
     });
+    // the truck and driver: an existing booking of that truck that day is linked (never booked twice); else it is booked now
+    const tp = this.gearTruck(input, day, time, draft, it.id);
+    if (tp)
+      this.planEdit(it.id, (/** @type {any} */ x) => {
+        x.truckPlan = tp.id;
+      });
     if (direction === 'OUT') {
       const who = this.planPacker(it);
       if (who)
@@ -150,9 +155,19 @@ export const gearMethods = {
       held = ' ' + made.order.label + ': ' + made.heldWords;
     }
     // the workers on it: a task, when the tasks module is there (CREW's part; ADR 0011 §11.4)
-    let task = null;
-    if (Array.isArray(input.workers) && input.workers.length && typeof this.taskCreate === 'function')
-      task = this.taskCreate({ day, kind: 'LIST', list: it.id, workers: input.workers })?.task ?? null;
+    let task = null,
+      rostered = [];
+    if (Array.isArray(input.workers) && input.workers.length && typeof this.taskCreate === 'function') {
+      const made = this.taskCreate({
+        day,
+        kind: 'LIST',
+        list: it.id,
+        workers: input.workers,
+        roster: input.roster === true,
+      });
+      task = made?.task ?? null;
+      rostered = made?.rostered ?? [];
+    }
     this.planStep(it.id);
     const fresh = this.repo.get(it.id, 'planItem'),
       tpv = tp ? this.repo.get(tp.id, 'planItem') : null,
@@ -172,6 +187,7 @@ export const gearMethods = {
             ' booked.'
           : 'No truck yet.') +
         (names.length ? ' ' + listWords(names) + (names.length === 1 ? ' is' : ' are') + ' on it.' : '') +
+        (rostered.length ? ' ' + listWords(rostered) + ' rostered for ' + dayLabel(day) + ' too.' : '') +
         held;
     return {
       item: this.planItemView(fresh),
@@ -200,8 +216,8 @@ export const gearMethods = {
   },
   // The truck booking for a list: input.truck is a fleet truck id, 'HIRE:BIG' / 'HIRE:SMALL' (the Practice yard only), or nothing.
   // A booking of that truck that day is linked (a different driver named is refused in the booking's own words); else planTruck makes it.
-  /** @param {any} input @param {string} day @param {string} time @param {boolean} draft */
-  gearTruck(input, day, listTime, draft) {
+  /** @param {any} input @param {string} day @param {string} listTime @param {boolean} draft @param {string|null} [listId] the list a new booking is made for */
+  gearTruck(input, day, listTime, draft, listId = null) {
     const truck = input.truck === undefined || input.truck === null || input.truck === '' ? null : input.truck,
       driver = input.driver === undefined || input.driver === null || input.driver === '' ? null : input.driver;
     if (!truck) return null;
@@ -235,9 +251,34 @@ export const gearMethods = {
       return this.repo.get(same.id, 'planItem');
     }
     return this.repo.get(
-      this.planTruck({ day, time, truck: t.id, driver, ...(draft ? { draft: true } : {}) }).item.id,
+      this.planTruck({
+        day,
+        time,
+        truck: t.id,
+        driver,
+        viaGear: listId ?? true,
+        ...(draft ? { draft: true } : {}),
+      }).item.id,
       'planItem',
     );
+  },
+  // A truck booking made by a gear list asks its driver once: the list's READY the day before at 3 pm (gearAskItem), which the booking
+  // then carries as its own message; plan.js and clock.js send no DRIVE ask while an open gear list is on it (viaGear names the list it
+  // was made for, so this holds from the moment the booking is made, before the list points at it).
+  /** @param {any} tp the TRUCK booking */
+  gearAsksDriver(tp) {
+    if (!tp?.viaGear || tp.type !== 'TRUCK') return false;
+    // once its day has begun no READY can go (a list made that morning): the booking asks its driver as any booking does
+    if (this.planNow() >= this.planAt(tp.day, DAY_START)) return false;
+    const open = (/** @type {any} */ x) => x?.gear && ['PLANNED', 'ACTIVE', 'DRAFT'].includes(x.status);
+    if (this.planDayItems(tp.day, 'MATERIALS').some((x) => open(x) && x.truckPlan === tp.id)) return true;
+    if (typeof tp.viaGear !== 'string') return false;
+    try {
+      const it = this.repo.get(tp.viaGear, 'planItem');
+      return open(it) && (it.truckPlan === tp.id || !it.truckPlan);
+    } catch {
+      return false;
+    }
   },
   // Change a list: its name, and (through planMove, the same rules in both yards) its lines, day, time or truck. A truck change books or links
   // the truck booking as when the list was made. Cancel is planCancel, as for any item.
@@ -364,15 +405,31 @@ export const gearMethods = {
     if (!it.driverAsk && !it.readyNotAsked && now >= sendAt && !over) {
       if (begun) {
         it.readyNotAsked = iso(now);
-        this.planLog(it, 'Not asked in time: ' + name + " wasn't asked to be ready. Call them.", now);
-        this.notify(
-          'Not asked in time',
-          name + " wasn't asked about " + (it.name ?? 'the gear') + '. Call them.',
-          it.site,
-        );
+        // a list made this morning for later today could never have been asked the day before: nothing to call about
+        if (Date.parse(it.createdAt) < this.planAt(it.day, DAY_START)) {
+          this.planLog(it, 'Not asked in time: ' + name + " wasn't asked to be ready. Call them.", now);
+          this.notify(
+            'Not asked in time',
+            name + " wasn't asked about " + (it.name ?? 'the gear') + '. Call them.',
+            it.site,
+          );
+        }
       } else {
-        it.driverAsk = this.planAskPerson(it, driver.id, 'driver', 'READY', now);
-        if (it.driverAsk) this.planLog(it, name + ' has been asked to be ready.', now);
+        // one ask to the driver for the run (decision 3): a READY already standing on the booking (another list on the same truck) is this
+        // list's too; a DRIVE ask not yet answered gives way to it; the booking carries the READY as its own message (one answer on the card)
+        const bm = tp ? this.planMsg(tp.message) : null;
+        if (bm && bm.subject === 'READY' && bm.person === driver.id && bm.status !== 'CALLED_OFF') it.driverAsk = bm.id;
+        else {
+          it.driverAsk = this.planAskPerson(it, driver.id, 'driver', 'READY', now);
+          if (it.driverAsk) this.planLog(it, name + ' has been asked to be ready.', now);
+          if (it.driverAsk && tp && (!bm || (bm.subject === 'DRIVE' && bm.status === 'SENT'))) {
+            if (bm) this.planCallOff(bm.id, 'Asked to be ready instead', now);
+            this.planEdit(tp.id, (/** @type {any} */ x) => {
+              x.message = it.driverAsk;
+              if (x.stage === 'READY') x.stage = 'ASKING';
+            });
+          }
+        }
       }
     }
     const m = this.planMsg(it.driverAsk);
