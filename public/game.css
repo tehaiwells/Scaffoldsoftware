@@ -12,6 +12,7 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 .gm-top{flex:none;height:52px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 14px 0 16px;background:var(--gm-ink);border-bottom:1px solid #0b1a13;box-shadow:0 1px 0 #ffffff10 inset}
 .gm-brand{display:flex;align-items:center;gap:10px;min-width:0}
 .gm-brand b{font-size:16px;font-weight:750;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-practice{flex:none;padding:3px 9px;border-radius:999px;border:1px solid #ffffff33;color:#ffffffc8;font-size:12px;font-weight:650;white-space:nowrap;cursor:default}
 .gm-mark{width:40px;height:32px;display:grid;place-items:center;border-radius:8px;background:#ffffff12}
 .gm-mark-img{width:36px;height:27px}
 .gm-office-btn{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 8px;border-radius:12px;border:1px solid #ffffff2e;background:#ffffff10;color:#fff;font-weight:750;font-size:14px;cursor:pointer}
@@ -83,6 +84,8 @@ body.in-game #app{padding:0;margin:0;max-width:none}
 .gm-pop{display:flex;align-items:center;gap:10px;padding:10px 16px 10px 10px;border-radius:999px;background:#fffdf5;color:#16382c;font-weight:800;font-size:15.5px;box-shadow:0 12px 30px #0006;border:2px solid #16382c;animation:gm-pop .5s cubic-bezier(.2,1.4,.4,1) both}
 .gm-pop.go{font-size:14px;font-weight:700;background:#16382c;color:#fff;border-color:#ffffff33}
 .gm-pop.warn{font-size:14px;font-weight:700;background:#fff4e2;border-color:#a3550f}
+.gm-pop-act{pointer-events:auto;flex:none;margin-left:4px;padding:7px 14px;border-radius:999px;border:0;background:#16382c;color:#fff;font:inherit;font-weight:800;cursor:pointer}
+.gm-pop-act:hover{background:#1f4d3c}.gm-pop-act:focus-visible{outline:3px solid #f5b83d;outline-offset:2px}
 .gm-pop.out{opacity:0;transform:translateY(-10px);transition:opacity .5s,transform .5s}
 .gm-tick{width:30px;height:30px;border-radius:50%;background:var(--gm-lime);color:#16382c;display:grid;place-items:center;border:2px solid #16382c}
 .gm-tick svg{width:20px;height:20px;stroke-dasharray:24;stroke-dashoffset:24;animation:gm-tickdraw .45s .2s ease forwards}
@@ -270,6 +273,8 @@ body.in-game #app{padding:0;margin:0;max-width:none}
  :root{--gm-cell:40px}
  .gm-top{height:48px;padding:0 10px 0 12px}
  .gm-brand b{font-size:15px}
+ .gm-practice{font-size:11px;padding:2px 7px}.gm-practice-more{display:none}
+ .gm-pops:has(.gm-pop-act){position:fixed;top:56px;z-index:50}
  .gm-office-btn{height:38px;padding:0 10px 0 4px}
  .gm-office-img{width:34px;height:26px}
  .gm-body{grid-template-columns:1fr;padding-bottom:calc(80px + env(safe-area-inset-bottom))}

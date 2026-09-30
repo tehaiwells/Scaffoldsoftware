@@ -138,7 +138,7 @@ function settingsHome(){
   opsCounts(!owner);
   if(state.memberships.length>1)bind('switch-company',async data=>{await api('switch-company',data);await refresh();});
   document.querySelector('#back-yard').onclick=()=>refresh();
-  const mat=document.querySelector('#acct-materials');if(mat)mat.onclick=async()=>{try{await refresh();const b=document.querySelector('.nav-button[data-view="MATERIALS"]');if(b){b.click();requestAnimationFrame(()=>document.getElementById('mi-import')?.scrollIntoView({block:'start'}));}}catch(error){notify(error.message);}};
+  const mat=document.querySelector('#acct-materials');if(mat)mat.onclick=async()=>{try{await refresh();const b=document.querySelector('.nav-button[data-view="MATERIALS"]')??document.querySelector('[data-view="MATERIALS"]');/* the board has no nav bar: its Office drawer holds the page buttons */if(b){b.click();requestAnimationFrame(()=>document.getElementById('mi-import')?.scrollIntoView({block:'start'}));}}catch(error){notify(error.message);}};
   document.querySelector('#logout').onclick=async()=>{try{stopOperations();await api('logout',{});bdClear();state=null;await signIn(false);notify('Signed out.');}catch(error){notify(error.message);}};
   if(owner)bind('company',async data=>{await api('company',data);await refresh();notify('Company settings saved.');},['systems']);
 }

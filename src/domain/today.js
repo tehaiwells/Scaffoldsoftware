@@ -13,7 +13,7 @@ import { localDay,addDays,dayLabel,daysBetween,calendarNow } from './schedule.js
 import { SEND_BEFORE,DAY_END,atLocal,timeWords,localParts } from './plantime.js';
 import { PLAN_OPEN,PLAN_FIXABLE,MSG_OPEN } from './plan.js';
 import { mobileWords,ROLE_WORDS } from './team.js';
-import { paperStatus } from './paperwork.js';
+import { paperState } from './paperwork.js';
 import { hireGst } from './hire.js';
 import { active } from './inventory.js';
 import { monthGrid,isMonth,monthAdd,monthsBetween,smsHref } from '../../public/plan-cal.js';
@@ -77,8 +77,9 @@ export const todayMethods={
       words=it.status==='DONE'?'Done':it.status==='CANCELLED'?'Cancelled':it.stage==='BOOKED'?'Messages go out '+dayLabel(addDays(it.day,-1))+' at 3:00 pm':it.stage==='ON_SITE'?here+' of '+it.count+' at '+(siteName??'the site'):yes+' of '+it.count+' said yes';}
     else if(it.type==='RESTACK'){Object.assign(v,{consolidate:it.consolidate!==false,stackEmpties:it.stackEmpties!==false,startedAt:it.startedAt??null,finishedAt:it.finishedAt??null,moved:it.moved??{pieces:0,jobs:0,stacked:0}});
       words=it.status==='DONE'?(it.startedAt?(!(it.moved?.pieces)&&!(it.moved?.stacked)?'Done: the yard was already tidy':'Done: '+plural(it.moved?.pieces??0,'piece')+' topped up, '+plural(it.moved?.stacked??0,'empty','empties')+' stacked'):'Did not run: the day passed'):it.status==='CANCELLED'?'Cancelled':it.stage==='WORKING'?'Crew is re-stacking':'Starts at '+timeWords(it.time);}
+    if(missed)words="Didn't go";
     const canCancel=ctx.ops&&fix&&!(it.type==='MATERIALS'&&['LOADING','ON_THE_WAY'].includes(it.stage));
-    const canMove=ctx.ops&&fix&&(it.type==='TRUCK'?it.status==='PLANNED'&&now<atLocal(it.day,'06:00'):it.type==='MATERIALS'?['WAITING','PACKING','PACKED','MISSED'].includes(it.stage):it.type==='WORKERS'?!it.people.some(p=>p.moved):it.stage==='WAITING');
+    const canMove=ctx.ops&&fix&&(it.type==='TRUCK'?missed||(it.status==='PLANNED'&&now<atLocal(it.day,'06:00')):it.type==='MATERIALS'?['WAITING','PACKING','PACKED','MISSED'].includes(it.stage):it.type==='WORKERS'?!it.people.some(p=>p.moved):it.stage==='WAITING');
     if(!fix)red=it.status==='DONE'&&it.type==='MATERIALS'&&((it.short??[]).length>0||(it.leftOver??0)>0);
     return Object.assign(v,{words,flags:{needsAnswer:open&&needsAnswer,red,late,done:it.status==='DONE',warn:open&&warn,missed},canMove,canCancel,canEdit:ctx.ops&&open&&it.type==='MATERIALS'&&it.stage==='WAITING',canAsk:ctx.ops&&open&&['TRUCK','WORKERS'].includes(it.type)});},
   // Yard lists, single requests and collections as calendar runs (the views the snapshot builds).
@@ -167,7 +168,7 @@ export const todayMethods={
     siteRows.sort((a,b)=>(b.today-a.today)||a.name.localeCompare(b.name,undefined,{numeric:true}));
     // ---- 2. paperwork ----
     const planned=new Set([...seen.filter(i=>PLAN_OPEN.includes(i.status)&&i.site).map(i=>i.site),...runs.filter(r=>r.open).map(r=>r.site)]),gearAt=new Set([...on].filter(([,n])=>n>0).map(([id])=>id));
-    const paperwork={...this.paperworkView(today,sites,{ops:ctx.ops,planned,gearAt}),canAdd:ctx.perms.includes('requests.create')};
+    const paperwork={...this.paperworkView(today,sites,{ops:ctx.ops,owner:ctx.perms.includes('company.manage'),planned,gearAt}),canAdd:ctx.perms.includes('requests.create')};
     // ---- 3. who's in today ----
     const roster={atYard:[],onSite:[],driving:[],waiting:[],notBooked:[],tomorrow:{notAnswered:0,cantMake:0,words:null}},booked=new Set();
     for(const i of todays){if(i.type==='WORKERS')for(const p of i.people){const m=ctx.msgs.get(p.message),a=answerOf(p.message),n=label(p.person),sn=ctx.sites.get(i.site)?.name??'the site';booked.add(p.person);
@@ -222,11 +223,11 @@ export const todayMethods={
     const items=cached(this.db,RANGE).all(this.repo.company,ctx.today,ctx.today).map(r=>this.repo.decode(r)).filter(i=>i.status!=='CANCELLED');this.planLoadMsgs(ctx,items);
     const mine=items.filter(i=>this.planVisible(i,ctx,items));let waiting=0,red=0;for(const i of mine){const v=this.planItemView(i,ctx);if(v.flags.needsAnswer)waiting++;if(v.flags.red)red++;}
     result.plan={rev:planRevision(this.db,this.repo.company),today:{items:mine.length,waiting,red}};},
-  // Alerts (alerts.js alertsView): expired paperwork (high), paperwork due within 14 days (low), and people who can't make it or haven't answered
+  // Alerts (alerts.js alertsView): expired paperwork (high), a SWMS overdue for review (medium), paperwork due within 14 days (low), and people who can't make it or haven't answered
   // for today or tomorrow (medium). Target: the Today page on that day.
-  planAlerts({operations,sites,today}){const out=[],visible=new Map(sites.filter(s=>s.status==='ACTIVE').map(s=>[s.id,s]));
-    for(const p of this.repo.all('paperwork')){if(p.archived||(p.site&&!visible.has(p.site)))continue;const st=paperStatus(p.expiresOn,today);if(st.status==='OK')continue;const sn=p.site?visible.get(p.site).name:null;
-      out.push({id:'PAPERWORK:'+p.id,kind:'PAPERWORK',severity:st.status==='EXPIRED'?'high':'low',title:p.title+(sn?' – '+sn:' – whole company'),detail:st.words+' · renew it on the Today page',target:{view:'TODAY',day:today},site:p.site??null,paperwork:p.id,daysLate:st.status==='EXPIRED'?-st.days:0});}
+  planAlerts({operations,sites,today}){const out=[],months=this.paperMonths(),visible=new Map(sites.filter(s=>s.status==='ACTIVE').map(s=>[s.id,s]));
+    for(const p of this.repo.all('paperwork')){if(p.archived||(p.site&&!visible.has(p.site)))continue;const st=paperState(p,today,months);if(st.status==='OK')continue;const sn=p.site?visible.get(p.site).name:null;
+      out.push({id:'PAPERWORK:'+p.id,kind:'PAPERWORK',severity:st.status==='EXPIRED'?(st.review?'medium':'high'):'low',title:p.title+(sn?' – '+sn:' – whole company'),detail:st.words+(st.review?' · mark it reviewed on the Today page':' · renew it on the Today page'),target:{view:'TODAY',day:today},site:p.site??null,paperwork:p.id,daysLate:st.status==='EXPIRED'?-st.days:0});}
     const now=this.planNow(),tomorrow=addDays(today,1),ctx={ops:operations,mine:new Set(visible.keys())};
     const items=cached(this.db,RANGE).all(this.repo.company,today,tomorrow).map(r=>this.repo.decode(r)).filter(i=>PLAN_OPEN.includes(i.status)&&(i.type==='WORKERS'||i.type==='TRUCK'));
     if(items.length)for(const row of cached(this.db,MSGS_FOR).all(this.repo.company,JSON.stringify(items.map(i=>i.id)))){const m=this.repo.decode(row);if(!['DRIVE','WORK'].includes(m.subject))continue;const it=items.find(i=>i.id===m.item);if(!it||!this.planVisible(it,ctx,items))continue;

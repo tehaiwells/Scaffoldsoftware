@@ -22,7 +22,7 @@ import { DEMO_NAME } from './team.js';
 import { lineList } from './game.js';
 export { planSimAnswer };
 export const PLAN_OPS=['planTruck','planMaterials','planWorkers','planRestack','planMove','planCancel','planAsk','messageAnswer','messageSeen','teamAdd','teamUpdate','teamRemove','teamStart','teamNames','planReplies'];
-export const PAPERWORK_OPS=['paperworkAdd','paperworkUpdate','paperworkRemove'];
+export const PAPERWORK_OPS=['paperworkAdd','paperworkUpdate','paperworkRemove','paperworkSettings'];
 export const PLAN_OPEN=['PLANNED','ACTIVE'],MSG_OPEN=['WAITING_TO_SEND','SENT'];
 // MISSED: a list whose day ended before it went (its stillages are let go); it waits on the calendar, red, for a new day or Cancel.
 export const PLAN_FIXABLE=[...PLAN_OPEN,'MISSED'];
@@ -109,6 +109,9 @@ export const planMethods={
     if(it.type==='TRUCK')this.planStepTruck(it,now,today);else if(it.type==='MATERIALS')this.planStepMaterials(it,now,today);else if(it.type==='WORKERS')this.planStepWorkers(it,now,today);else if(it.type==='RESTACK')this.planStepRestack(it,now,today);
     if(!PLAN_OPEN.includes(it.status))this.planCloseMsgs(it,now);});},
   planDone(it,now,text){it.status='DONE';it.doneAt=iso(now);it.problem=null;if(text)this.planLog(it,text,now);},
+  // A day that ended with nothing done (it never ran, or nobody confirmed) is never written as done: it waits on the calendar, red, like a list
+  // that didn't go, until the office picks a new day or cancels it.
+  planMissed(it,now,why){it.status='MISSED';it.missedAt=iso(now);it.why=why;it.problem="Didn't go: "+why+'. Pick a new day or cancel it.';this.planLog(it,"Didn't go: "+why+'.',now);},
   // ----- TRUCK -----
   planStepTruck(it,now,today){const end=today>it.day||(today===it.day&&now>=atLocal(it.day,DAY_END)),started=today>it.day||(today===it.day&&now>=atLocal(it.day,DAY_START));
     let problem=null;const driver=it.driver?this.teamPerson(it.driver):null,name=driver?.name??'The driver';
@@ -122,7 +125,8 @@ export const planMethods={
     if(it.hire&&!it.hire.truck&&!it.hire.goneAt&&started&&!end){const yard=this.planYard();if(yard){const big=it.hire.size!=='SMALL',names=new Set(this.repo.all('truck').filter(t=>!t.retired).map(t=>t.name));let n=1;while(names.has('Hire truck '+n))n++;
       const t=this.truck({name:'Hire truck '+n,yard:yard.id,payload:big?12500000:2000000,length:big?6000:4200,width:big?2050:1900,stackLimit:big?2:1});const f=this.repo.get(t.id,'truck');f.hired={item:it.id,day:it.day};this.repo.save(f);
       it.hire={...it.hire,truck:t.id,arrivedAt:iso(now)};this.planLog(it,t.name+' is at the yard.',now);this.notify('Hire truck',t.name+' is at the yard for today.',null);}}
-    if(end){if(it.status==='PLANNED'&&!it.hire?.truck)this.planLog(it,today>it.day&&now-atLocal(it.day,DAY_END)>3600000?'The day passed while the app was closed.':'Day done.',now);
+    if(end){if(!it.hire?.truck){const why=it.status==='PLANNED'?'the day passed while the app was closed':!it.truck&&!it.hire?(it.truckGone??'the truck')+' was removed':it.driver&&m?.status!=='YES'?name+(m?.status==='NO'?" couldn't drive":' never said yes'):!it.driver&&it.needsDriver?'no driver was picked':null;
+        if(why){this.planMissed(it,now,why);return;}}
       if(it.hire?.truck&&!it.hire.goneAt){if(!this.planHireGone(it,now)){it.status='ACTIVE';it.stage='ON';it.problem='Hire truck is still out. It goes back when it is home.';return;}}
       this.planDone(it,now);return;}
     it.problem=problem;},
@@ -233,8 +237,9 @@ export const planMethods={
   // ----- WORKERS -----
   planStepWorkers(it,now,today){const sendAt=atLocal(addDays(it.day,-1),SEND_BEFORE),start=atLocal(it.day,it.time),end=atLocal(it.day,DAY_END),siteName=this.planSiteName(it.site);
     const over=today>it.day||now>=end;
-    if(over){if(it.status==='PLANNED'){this.planDone(it,now,today>it.day&&!it.people.some(p=>p.moved)?'The day passed while the app was closed.':'Day done.');return;}
+    if(over){if(it.status==='PLANNED'){this.planMissed(it,now,'the day passed while the app was closed');return;}
       let all=true;for(const p of it.people){if(!p.moved||p.homeAt)continue;if(this.planMoveWorker(p.person,'home',it,now)){p.homeAt=iso(now);this.planLog(it,this.planName(p.person)+' went home.',now);}else all=false;}
+      if(all&&!it.people.some(p=>p.moved)){this.planMissed(it,now,!it.people.length?'nobody was free that day':it.people.some(p=>this.planMsg(p.message)?.status==='YES')?'nobody got to the site':'nobody confirmed they were coming');return;}
       if(all){this.planDone(it,now);}else it.problem='Waiting for everyone to finish before they go home.';return;}
     // the asks go out the day before at 3 pm (at once when it is booked later than that)
     if(now>=sendAt){let sent=0;for(const p of it.people){if(p.message)continue;p.message=this.planAskPerson(it,p.person,'worker','WORK',now,{quiet:true});if(p.message)sent++;}
@@ -257,7 +262,7 @@ export const planMethods={
     if(it)this.planEdit(it.id,x=>{for(const p of x.people??[])if(p.person===w.id&&p.moved&&!p.homeAt){p.homeAt=iso(now);this.planLog(x,w.name+' went home.',now);}});}},
   // ----- RESTACK -----
   planStepRestack(it,now,today){const start=atLocal(it.day,it.time),end=atLocal(it.day,DAY_END),cfg=this.repo.all('config')[0]??{};
-    if(it.stage==='WAITING'){if(today>it.day||now>=end){this.planDone(it,now,'The day passed while the app was closed.');return;}
+    if(it.stage==='WAITING'){if(today>it.day||now>=end){this.planMissed(it,now,/^Turn yard jobs on/.test(it.problem??'')?'yard jobs were switched off':'the day passed while the app was closed');return;}
       if(today===it.day&&now>=start){if(cfg.jobs===false||cfg.jobsFault){it.problem='Turn yard jobs on in the Control room so the crew can re-stack.';return;}
         it.status='ACTIVE';it.stage='WORKING';it.startedAt=iso(now);it.quietSince=null;it.problem=null;this.planLog(it,'The crew started re-stacking.',now);}else return;}
     if(it.stage!=='WORKING')return;
@@ -276,7 +281,7 @@ export const planMethods={
   planPacking(yardId){return cached(this.db,"SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='planItem' AND json_extract(data,'$.type')='MATERIALS' AND json_extract(data,'$.stage')='PACKING' AND json_extract(data,'$.status') IN ('PLANNED','ACTIVE') AND json_extract(data,'$.yard')=? ORDER BY rowid").all(this.repo.company,yardId).map(row=>this.repo.decode(row));},
   planPrune(today){const cut=addDays(today,-PRUNE_DAYS);
     for(const r of cached(this.db,"SELECT id,kind FROM objects WHERE company_id=? AND ((kind='planItem' AND json_extract(data,'$.status') IN ('DONE','CANCELLED','MISSED')) OR (kind='message' AND json_extract(data,'$.status') NOT IN ('WAITING_TO_SEND','SENT'))) AND json_extract(data,'$.day')<?").all(this.repo.company,cut))this.repo.remove(r.id,r.kind);
-    for(const r of cached(this.db,"SELECT id FROM objects WHERE company_id=? AND kind='paperwork' AND json_extract(data,'$.archived')=1 AND json_extract(data,'$.expiresOn')<?").all(this.repo.company,cut))this.repo.remove(r.id,'paperwork');},
+    for(const r of cached(this.db,"SELECT id FROM objects WHERE company_id=? AND kind='paperwork' AND json_extract(data,'$.archived')=1 AND COALESCE(json_extract(data,'$.expiresOn'),json_extract(data,'$.reviewedOn'))<?").all(this.repo.company,cut))this.repo.remove(r.id,'paperwork');},
   // ---------- hooks from the rest of the app ----------
   // A site removed, archived or being removed: its open lists and allocations are called off (a load already on a truck is left to the board,
   // which brings it home), and people borrowed there go home first.
@@ -321,12 +326,18 @@ export const planMethods={
     const tp=this.planTruckItem(input.truckPlan,day);let packer=null;if(input.packer!==undefined&&input.packer!==null&&input.packer!==''){let w=null;try{w=this.repo.get(input.packer,'resource');}catch{}requireRule(w&&w.type==='WORKER'&&w.enabled&&w.location===yard.id,'Choose someone at the yard to pack it.');packer=w;}
     const packDay=pack==='SAME_DAY'?day:(addDays(day,-1)<cal.today?cal.today:addDays(day,-1));this.planWhen('MATERIALS',day,time,now);
     // a soft check against what is free in the yard now, made before anything is packed (never an error: planning is for the future)
-    const free=this.planFree(yard),low=lines.find(l=>(free.get(l.product)??0)<l.quantity);
+    const free=this.planFree(yard),low=lines.find(l=>(free.get(l.product)??0)<l.quantity),snap=this.planSnapWords(lines,yard);
     const it=this.repo.add('planItem',{type:'MATERIALS',day,time,site:site.id,yard:yard.id,status:'PLANNED',stage:'WAITING',note:note(input.note),problem:null,log:[{at:iso(now),text:'Planned by '+this.user.name+'.'}],createdAt:iso(now),createdBy:this.user.id,updatedAt:iso(now),doneAt:null,cancelledAt:null,cancelledBy:null,cancelReason:null,
       lines,pack,packDay,truckPlan:tp?.id??null,packer:null,packMessage:null,held:[],got:{},short:[],left:[],trips:[]});
     const who=packer??this.planPacker(it);if(who)this.planEdit(it.id,x=>{x.packer=who.id;});
     this.planStep(it.id);
-    return this.planReply(it,'List for '+site.name+' on '+dayLabel(day)+' planned. '+(who?who.name:'The crew')+' packs it '+(pack==='SAME_DAY'?'on the day.':'the day before.')+(low?' Only '+(free.get(low.product)??0)+' of '+this.planName(low.product,'that part')+' in the yard now.':''));},
+    return this.planReply(it,'List for '+site.name+' on '+dayLabel(day)+' planned. '+(who?who.name:'The crew')+' packs it '+(pack==='SAME_DAY'?'on the day.':'the day before.')+(low?' Only '+(free.get(low.product)??0)+' of '+this.planName(low.product,'that part')+' in the yard now.':'')+snap);},
+  // The crew packs whole stillages (planPack, as the board's Send): what would go from the yard now for each line, said at booking when it is
+  // more than was asked. " You asked for 30 Kwikstage standard 3.0 m. They come in stillages of 145, so 145 will go." ('' when every line is exact)
+  planSnapWords(lines,yard){const {got}=gpChoose(this.gameItems([yard.id]).get(yard.id),lines),lift=this.gameLift(yard),out=[];
+    for(const l of lines){const will=got.get(l.product)??0;if(will<=l.quantity)continue;const p=this.effective(l.product),per=gpPerStillage(p,lift);
+      out.push('You asked for '+l.quantity+' '+p.name+'. '+(per>0&&will%per===0?'They come in stillages of '+per+', so ':'They go in whole stillages, so ')+will+' will go.');}
+    return out.length?' '+out.slice(0,2).join(' ')+(out.length>2?' The same for '+plural(out.length-2,'more part')+'.':''):'';},
   // Pieces of each part free in the yard now (not held, not on a move).
   planFree(yard=this.planYard()){const free=new Map();if(!yard)return free;for(const c of this.gameItems([yard.id]).get(yard.id)??[])if(!c.busy)for(const [p,q] of c.lines)free.set(p,(free.get(p)??0)+q);return free;},
   // Who is free for a WORKERS item: scaffolders and leading hands at the yard first, then spare site crew from sites with no crane work that day
@@ -379,9 +390,9 @@ export const planMethods={
     const hasLines=input.lines!==undefined&&input.lines!==null,hasTruck=input.truckPlan!==undefined;
     if(hasLines||hasTruck)requireRule(it.type==='MATERIALS'&&it.stage==='WAITING',"The list can only be changed before it's packed.");
     const yard=this.planYard(),lines=hasLines?this.planMaterialLines(input.lines,yard):null,tp=hasTruck?this.planTruckItem(input.truckPlan,day):undefined;
-    const sameLines=!lines||JSON.stringify(lines)===JSON.stringify(it.lines),sameTruck=tp===undefined||(tp?.id??null)===(it.truckPlan??null);
+    const snap=lines?this.planSnapWords(lines,yard):'',sameLines=!lines||JSON.stringify(lines)===JSON.stringify(it.lines),sameTruck=tp===undefined||(tp?.id??null)===(it.truckPlan??null);
     if(day===it.day&&time===it.time&&sameLines&&sameTruck)return {...this.planReply(it,what+' is already on '+dayLabel(day)+' at '+timeWords(time)+'.'),changed:false};
-    if(it.type==='TRUCK')requireRule(now<atLocal(it.day,DAY_START)&&it.status==='PLANNED','The truck day has started. Cancel it instead.');
+    if(it.type==='TRUCK')requireRule(it.status==='MISSED'||(now<atLocal(it.day,DAY_START)&&it.status==='PLANNED'),'The truck day has started. Cancel it instead.');
     if(day!==it.day||time!==it.time)this.planWhen(it.type,day,time,now);
     if(it.type==='MATERIALS')requireRule(['WAITING','PACKING','PACKED','MISSED'].includes(it.stage),'The truck is already loading this list. Bring it back from the yard board instead.');
     if(it.type==='WORKERS')requireRule(!it.people.some(p=>p.moved),'People are already on site. Cancel it instead.');
@@ -390,13 +401,13 @@ export const planMethods={
     if(it.type==='TRUCK'&&moved){if(it.truck)requireRule(!this.planDayItems(day,'TRUCK').some(x=>x.id!==it.id&&x.truck===it.truck),this.planName(it.truck,'That truck')+' is already booked on '+dayLabel(day)+'.');if(it.driver)this.planDriver(it.driver,day,it.id);}
     if(it.type==='WORKERS'){if(moved){const also=new Set();for(const p of it.people){this.planPersonFree(p.person,day,it.id,{site:it.site,also});also.add(p.person);}}requireRule(!this.planDayItems(day,'WORKERS').some(x=>x.id!==it.id&&x.site===it.site&&x.time===time),'Workers are already booked for '+this.planSiteName(it.site)+' at '+timeWords(time)+' that day. Change the one already booked.');}
     if(it.type==='RESTACK'&&moved)requireRule(!this.planDayItems(day,'RESTACK').some(x=>x.id!==it.id),'A re-stack is already booked for '+dayLabel(day)+'.');
-    this.planEdit(it.id,x=>{const was=dayLabel(x.day)+' '+timeWords(x.time);x.day=day;x.time=time;
+    this.planEdit(it.id,x=>{const was=dayLabel(x.day)+' '+timeWords(x.time);x.day=day;x.time=time;if(x.status==='MISSED')Object.assign(x,{status:'PLANNED',problem:null,why:null,missedAt:null});
       if(x.type==='TRUCK'){if(x.message){this.planCallOff(x.message,'Moved to '+dayLabel(day),now);x.message=null;}x.stage=x.driver?'ASKING':'READY';}
       if(x.type==='MATERIALS'){this.planRelease(x,now);this.planCallOff(x.packMessage,'Moved to '+dayLabel(day),now);Object.assign(x,{packMessage:null,held:[],got:{},short:[],left:[],stage:'WAITING',status:'PLANNED',problem:null,why:null,missedAt:null});x.packDay=x.pack==='SAME_DAY'?day:(addDays(day,-1)<cal.today?cal.today:addDays(day,-1));if(lines)x.lines=lines;if(tp!==undefined)x.truckPlan=tp?.id??null;else if(moved&&x.truckPlan)x.truckPlan=null;}
       if(x.type==='WORKERS'){for(const p of x.people){this.planCallOff(p.message,'Moved to '+dayLabel(day),now);p.message=null;}x.stage='BOOKED';}
       this.planLog(x,'Moved from '+was+' to '+dayLabel(day)+' '+timeWords(time)+'.',now);});
     if(it.type==='TRUCK'&&moved)this.planUnlinkTruck(it.id,this.planWhat(it)+' moved to '+dayLabel(day)+', so this list goes on the next free truck.',now);
-    this.planStep(it.id);return {...this.planReply(it,what+' moved to '+dayLabel(day)+' at '+timeWords(time)+'.'+(it.type==='WORKERS'&&it.people.some(p=>p.message)?' Everyone is asked again with the new time.':'')),changed:true};},
+    this.planStep(it.id);return {...this.planReply(it,what+' moved to '+dayLabel(day)+' at '+timeWords(time)+'.'+(it.type==='WORKERS'&&it.people.some(p=>p.message)?' Everyone is asked again with the new time.':'')+snap),changed:true};},
   planWhat(it){if(it.type==='TRUCK')return it.hire?'The hire truck':this.planName(it.truck,'The truck');if(it.type==='MATERIALS')return 'The list for '+this.planSiteName(it.site);if(it.type==='WORKERS')return 'The workers for '+this.planSiteName(it.site);return 'The re-stack';},
   planCancel(input){const it=this.planItemFor(input?.id),now=this.planNow();requireRule(PLAN_FIXABLE.includes(it.status),'This is already '+(it.status==='DONE'?'done':'cancelled')+'.');
     requireRule(!(it.type==='MATERIALS'&&['LOADING','ON_THE_WAY'].includes(it.stage)),'The truck is already loading this list. Bring it back from the yard board instead.');

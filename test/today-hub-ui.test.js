@@ -61,7 +61,7 @@ test('the update cards: sites with a stage word and a bar, paperwork expired fir
  w.f.cmd('gameSend',{site:w.a.id,lines:[{product:w.p.id,quantity:w.per}]});assert.ok(w.f.until(()=>w.f.piecesAt(w.a.id,w.p.id)===w.per,800));
  let html=await show(w);
  const sites=html.slice(html.indexOf('id="tdh-sites"'));assert.ok(sites.includes('Bondi')&&sites.includes('Going up'),'gear there and more planned');assert.match(sites,/class="tdh-bar"[^>]*><b data-style="width:\d+%"><\/b>/);assert.ok(sites.includes('data-sch-open-site="'+w.a.id+'"'));
- const paper=html.slice(html.indexOf('id="tdh-paper"'));assert.ok(paper.indexOf('Expired 2 days ago')>0&&paper.indexOf('Expired')<paper.indexOf('All good: 1 more'),'expired first; the good ones folded');assert.ok(paper.includes('data-tdh-paper-add'));
+ const paper=html.slice(html.indexOf('id="tdh-paper"'));assert.ok(paper.indexOf('Review overdue')>0&&paper.indexOf('Review overdue')<paper.indexOf('All good: 1 more'),'due for review first; the good ones folded');assert.ok(paper.includes('data-tdh-paper-add'));
  const who=html.slice(html.indexOf('id="tdh-who"'));for(const r of w.f.sim.snapshot().resources.filter(r=>r.type==='WORKER'&&r.location===w.f.yard.id))assert.ok(who.includes('data-cw-open="'+r.id+'"'),'yard crew '+r.name);
  assert.ok(html.includes('id="tdh-yt"')&&html.includes('Where we begin today'));
  const biz=html.slice(html.indexOf('id="tdh-biz"'));assert.ok(biz.includes('Set your prices')&&biz.includes('data-view="HIRE"'),'no rates yet: set your prices');assert.ok(!/\$\d/.test(biz),'no dollars without prices');
@@ -103,7 +103,7 @@ test("review fixes on the page: a low-stock line, the Workers form uses the serv
  td.openForm('WORKERS',D5,{site:w.b.id,count:9});td.select(D5);f=td.view();assert.match(f,/Only \d+ free that day, so \d+ will show as short\. Tap <b>Pick people…<\/b> to choose anyone\./);td.select(D1);
  // paperwork: a SWMS with no name is titled by its site; the chosen date in words under the date box
  const paper=html.slice(html.indexOf('id="tdh-paper"'));assert.ok(paper.includes('<span class="tdh-ptype">SWMS</span><span class="tdh-paper-text"><b>Bondi</b>'),'no SWMS | SWMS');
- td.openForm('PAPER',D1,{expiresOn:'2026-10-20'});assert.ok(td.view().includes('data-tdh-date-words aria-live="polite">Tue 20 Oct 2026</small>'));td.reset();
+ td.openForm('PAPER',D1,{type:'JHSA',expiresOn:'2026-10-20'});assert.ok(td.view().includes('data-tdh-date-words aria-live="polite">Tue 20 Oct 2026</small>'));td.reset();
  // the list for tomorrow: Dave never answers, so at 5 pm it didn't go; it waits for a new day
  w.f.clock(D1,'17:00');w.f.pass();html=await show(w);assert.match(html,/Didn(&#39;|&#x27;|'|’)t go/);assert.ok(html.includes('data-tdh-mini="'+w.mat.item.id+'|move"')&&html.includes('Pick a new day'));
  w.f.clock(addDays(D0,2),'08:00');html=await show(w,OWNER,addDays(D0,2));assert.ok(html.includes('class="tdh-missed"')&&html.includes('data-tdh-goto="'+w.mat.item.id+'"'),'on Where we begin today until it has a new day');

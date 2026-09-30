@@ -56,8 +56,11 @@ const unitWord=(p,n)=>G.mode==='add'&&p?.packQuantity>0?(n===1?'pack':'packs'):(
 // Sort order: kind (tube, standard, ledger ...), its look, its family, then short to long.
 const sortKey=(a,b)=>GA_ROW_ORDER.indexOf(gaKind(a.p))-GA_ROW_ORDER.indexOf(gaKind(b.p))||byName(gaLook(a.p),gaLook(b.p))||byName(a.p.system??'',b.p.system??'')||byName(gaFamily(a.p),gaFamily(b.p))||((gaLength(a.p)??0)-(gaLength(b.p)??0))||byName(a.p.name,b.p.name);
 // ---------------------------------------------------------------- the skeleton
+// Honest labels: this company is the Practice yard. The crew, trucks and deliveries on the board are simulated, so the top bar always says so,
+// quietly (no banner). A real-records mode is a later piece of work; until then every company is a Practice yard.
+const PRACTICE_CHIP='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice yard<span class="gm-practice-more"> &middot; simulated</span></span>';
 export function gmShell(ctx){resetFor(ctx);G.ctx=ctx;const s=ctx.state,company=esc(ctx.account?.company?.name??'Your company');
- const top='<header class="gm-top"><div class="gm-brand"><span class="gm-mark" aria-hidden="true">'+gaImg(GA_BUTTONS.stock(),'gm-mark-img')+'</span><b>'+company+'</b></div>'
+ const top='<header class="gm-top"><div class="gm-brand"><span class="gm-mark" aria-hidden="true">'+gaImg(GA_BUTTONS.stock(),'gm-mark-img')+'</span><b>'+company+'</b>'+PRACTICE_CHIP+'</div>'
   +'<div class="gm-top-right"><button type="button" class="gm-office-btn" data-gm-office aria-haspopup="dialog" aria-expanded="false">'+gaImg(GA_BUTTONS.office(),'gm-office-img')+'<span>Office</span></button></div></header>';
  if(!yardOf(s))return '<div class="gm" data-gm="start">'+top+startHTML(ctx)+officeHTML(ctx)+'</div>';
  return '<div class="gm" data-gm="board">'+top+'<div class="gm-body"><section class="gm-board scene world-scene" aria-label="Your yard and sites">'+wmShell()
@@ -132,7 +135,7 @@ function slotHTML(x,many){const p=x.p,pick=G.picks.get(p.id),where=G.mode==='tru
   +(tag?'<i class="gm-len">'+esc(tag)+'</i>':'')+(many?'<s class="gm-sys '+(SYS_CLASS[p.system]??'')+'"></s>':'')+corner+'</button>';}
 // "Which scaffold do you use?": the three systems as pictures; the reviewed supplier lists load for the ones picked.
 function partsHTML(s){const on=G.systems;return '<div class="gm-parts"><div class="gm-sysgrid" role="group" aria-label="Scaffold systems">'+SYSTEMS.map(([id,name,words])=>'<button type="button" class="gm-sys-btn'+(on.has(id)?' on':'')+'" data-gm-system="'+id+'" aria-pressed="'+on.has(id)+'">'+gaSystemPic(id,'gm-sys-img')+'<b>'+name+'</b><small>'+words+'</small></button>').join('')+'</div>'
- +'<p class="gm-parts-note">We load your supplier\'s own parts list with the real weights. You can add your own list later in the Office.</p></div>';}
+ +'<p class="gm-parts-note">We load a starter parts list copied from published supplier catalogues, with the weights as they print them. Check them against your own supplier. You can add your own list later in the Office.</p></div>';}
 function amountHTML(s){if(!G.sel||!PICKING.includes(G.mode))return '';const p=products(s).find(x=>x.id===G.sel);if(!p)return '';
  const stops=stopsFor(s,p),q=G.picks.get(p.id)??0,i=stops.findIndex(x=>x.qty===q),idx=i<0?(q?stops.filter(x=>x.qty<q).length:0):i+1,max=stops.length;
  const words=q?(G.mode==='add'&&!(p.packQuantity>0)&&!(p.unitWeight>0)?num(q)+' pieces':idx+' '+unitWord(p,idx)+(G.mode!=='add'&&idx===max?' · all of it':'')):'None yet';
@@ -180,7 +183,7 @@ function hintOf(s){const stuck=(s.trucks??[]).find(t=>t.game?.problem);if(stuck)
  if(!products(s).length)h=phone()?{id:'parts',text:'Welcome! First, load your scaffold parts.',act:['Load my parts','parts'],point:'add'}:null;
  else if(!stockHere)h={id:'add',text:'Tap Add stock to fill your yard with scaffolding.',act:['Add stock','add'],point:'add'};
  else if(!sites.length)h={id:'site',text:'Now open your first client site: tap an empty block on the map.',act:['Open a site','newsite']};
- else if(moving&&!delivered)h={id:'watch',text:'Sit back and watch. The crew does it all.'};
+ else if(moving&&!delivered)h={id:'watch',text:'In the Practice yard the crew and trucks are simulated. Watch them work.'};
  else if(!delivered)h={id:'send',text:'Tap Send to send scaffolding to '+sites[0].name+'. The crew does the rest.',act:['Send','send'],point:'send'};
  else h={id:'tapsite',text:'Tap a site on the map to see what is there.',target:sites.find(x=>hasStock(s,x.id))?.id??sites[0].id};
  return h&&!G.hintOff.has(h.id)?h:null;}
@@ -208,8 +211,10 @@ const POPS={'Delivered':'tick','Back at the yard':'tick','Not sent':'warn','More
 function pops(s){const list=s.notifications??[],ids=list.map(n=>n.id);if(G.seen===null){G.seen=new Set(ids);return;}for(const n of list){if(G.seen.has(n.id))continue;G.seen.add(n.id);const kind=POPS[n.title];if(!kind)continue;
   let text=n.body;if(n.title==='Delivered')text=n.body.split('!')[0]+'!';else if(n.title==='Back at the yard'){const m=n.body.match(/is back from (.*?)(?: and| with)/);text=m?'Back at the yard from '+m[1]+'!':'Back at the yard!';}
   pop(text,kind);}}
-export function pop(text,kind='tick'){const box=document.querySelector('[data-gm-pops]');if(!box)return;const el=document.createElement('div');el.className='gm-pop '+kind;el.innerHTML=(kind==='tick'?'<span class="gm-tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>':kind==='go'?'<span class="gm-go-dot" aria-hidden="true"></span>':kind==='warn'?'<span class="gm-warn-dot" aria-hidden="true">!</span>':'')+'<span>'+esc(text)+'</span>';
- box.append(el);while(box.children.length>2)box.firstElementChild.remove();document.querySelector('.gm-board')?.classList.add('popping');setTimeout(()=>{el.classList.add('out');setTimeout(()=>{el.remove();if(!box.children.length)document.querySelector('.gm-board')?.classList.remove('popping');},600);},kind==='warn'?7000:kind==='tick'?4200:3200);}
+// act: a button on the message (the paused yard's Resume); that message stays a little longer.
+export function pop(text,kind='tick',act=null){const box=document.querySelector('[data-gm-pops]');if(!box)return;const el=document.createElement('div');el.className='gm-pop '+kind;el.innerHTML=popInner(text,kind,act);
+ box.append(el);while(box.children.length>2)box.firstElementChild.remove();document.querySelector('.gm-board')?.classList.add('popping');setTimeout(()=>{el.classList.add('out');setTimeout(()=>{el.remove();if(!box.children.length)document.querySelector('.gm-board')?.classList.remove('popping');},600);},act?12000:kind==='warn'?7000:kind==='tick'?4200:3200);}
+function popInner(text,kind,act){return (kind==='tick'?'<span class="gm-tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>':kind==='go'?'<span class="gm-go-dot" aria-hidden="true"></span>':kind==='warn'?'<span class="gm-warn-dot" aria-hidden="true">!</span>':'')+'<span>'+esc(text)+'</span>'+(act?'<button type="button" class="gm-pop-act" data-gm-resume>'+esc(act)+'</button>':'');}
 // ---------------------------------------------------------------- the small window over the map: a new site
 function win2HTML(){if(G.win?.kind!=='newsite')return '';
  return '<div class="gm-nw" role="dialog" aria-labelledby="gm-nw-h"><button type="button" class="gm-x" data-gm-win-x aria-label="Close">&times;</button><div class="gm-nw-pic">'+gaSprite('si-site','gm-nw-img')+'</div><h3 id="gm-nw-h">Open a new site</h3><p>'+(G.win.then==='send'?'Where does it go? ':'')+'What is the site called?</p>'
@@ -281,8 +286,14 @@ function bindOnce(root){if(root.__gmBound)return;root.__gmBound=true;
  root.addEventListener('focusin',e=>{const b=e.target.closest?.('[data-gm-slot]');if(b&&b.matches(':focus-visible'))showCard(b);});root.addEventListener('focusout',()=>hideCard());
  if(!G.keys){G.keys=true;document.addEventListener('keydown',e=>{if(e.key!=='Escape'||!document.querySelector('[data-gm]'))return;if(G.office){gmOfficeToggle(false);return;}if(G.win){closeWin();return;}if(!document.querySelector('[data-gm-card]')?.hidden){hideCard();return;}if(G.mode!=='yard')setMode('yard');});
   addEventListener('resize',()=>{if(document.querySelector('[data-gm="board"]'))refreshNow();});}}
-async function run(action,data,ok){const ctx=G.ctx;if(G.busy)return null;G.busy=true;refreshNow();try{const r=await ctx.cmd(action,data);await ctx.refresh();G.busy=false;if(ok)ok(r);return r;}catch(e){ctx.notify(e.message);return null;}finally{G.busy=false;refreshNow();}}
+// Send and Bring back while the yard is paused: nothing would move, so the server says so at once and the message offers one button that
+// resumes the yard and does what was asked.
+const PAUSED_ACT={gameSend:'Resume and send',gameCollect:'Resume and bring back'};
+async function run(action,data,ok){const ctx=G.ctx;if(G.busy)return null;G.busy=true;refreshNow();try{const r=await ctx.cmd(action,data);await ctx.refresh();G.busy=false;if(ok)ok(r);return r;}
+ catch(e){if(PAUSED_ACT[action]&&/^The yard is paused/.test(e.message)){G.resume={action,data,ok};pop(e.message,'warn',PAUSED_ACT[action]);}else ctx.notify(e.message);return null;}finally{G.busy=false;refreshNow();}}
+async function resumeAndGo(b){const r=G.resume;G.resume=null;b.closest('.gm-pop')?.remove();if(await run('pause',{paused:false})&&r)await run(r.action,r.data,r.ok);}
 function onClick(e){const ctx=G.ctx,s=ctx?.state;if(!ctx)return;const t=e.target;const b=t.closest('button');if(!b)return;
+ if(b.hasAttribute('data-gm-resume')){resumeAndGo(b);return;}
  if(sfClick(b,sfApi()))return;
  if(b.dataset.view){e.preventDefault();gmOfficeToggle(false);ctx.go(b.dataset.view);return;}
  if(b.id==='settings'){gmOfficeToggle(false);ctx.settings?.();return;}
@@ -355,7 +366,7 @@ export function cardHTML(s,p){const yard=yardOf(s),yr=rowsAt(s,yard?.id).get(p.i
 // number is always what is free in the yard now; the amount picked is its own tag at the top (amber when it is more than is free). Any amount can
 // be typed, because the yard may be restocked by then. + and - step one stillage at a time.
 // gmPlanPicker(host, {state, lift}, {title, lines, onDone(lines), onCancel}) draws into host (the Today page's sheet) and keeps its own state.
-const PP={host:null,ctx:null,opts:null,picks:new Map(),sel:null,tab:null,sys:null};
+const PP={host:null,ctx:null,opts:null,picks:new Map(),sel:null,tab:null,sys:null,asked:null};
 const ppLift=()=>PP.ctx?.lift>0?PP.ctx.lift:1500000;
 const ppPer=p=>gpPerStillage(p,ppLift());
 const ppAll=()=>products(PP.ctx?.state).filter(p=>ppPer(p)>0);
@@ -370,11 +381,15 @@ function ppSlot(x){const p=x.p,q=PP.picks.get(p.id)??0,tag=gaLenTag(p),label=p.n
  const corner=(x.count?'<b class="gm-n">'+gpCount(x.count)+'</b>':'')+(q?'<b class="pp-q'+(q>x.count?' over':'')+'">'+gpCount(q)+'</b>':'');
  return '<button type="button" class="gm-slot'+(x.count||q?'':' dim')+(q?' picked':'')+(PP.sel===p.id?' sel':'')+'" data-pp-slot="'+esc(p.id)+'" aria-label="'+esc(label)+'" aria-pressed="'+(!!q)+'">'+gaItem(p)+(tag?'<i class="gm-len">'+esc(tag)+'</i>':'')+corner+'</button>';}
 function ppAmount(){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return '<div class="gm-amt pp-amt pp-amt-empty"><p class="gm-empty-line">Tap a part, then how many.</p></div>';
- const q=PP.picks.get(p.id)??0,have=ppFree(ppHave().get(p.id)),per=ppPer(p),n=q?Math.ceil(q/per):0;
- const words=q?num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages')+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
+ const q=PP.picks.get(p.id)??0,have=ppFree(ppHave().get(p.id)),per=ppPer(p),n=q?Math.ceil(q/per):0,asked=PP.asked?.id===p.id&&PP.asked.q<q?PP.asked.q:0;
+ const words=q?(asked?'You asked for '+num(asked)+'. They come in stillages of '+num(per)+', so '+num(q)+' will go.':num(q)+' pieces &middot; about '+n+' '+(n===1?'stillage':'stillages'))+(q>have?' &middot; <span class="pp-over">more than you have: '+num(have)+' free in the yard now</span>':''):num(have)+' free in the yard now';
  return '<div class="gm-amt pp-amt"><div class="gm-amt-top">'+gaItem(p,'gm-amt-pic')+'<div class="gm-amt-name"><b>'+esc(p.name)+'</b><small data-pp-words>'+words+'</small></div>'+(q?'<button type="button" class="gm-chip" data-pp-unpick>Remove</button>':'')+'</div>'
   +'<div class="pp-amt-row"><button type="button" class="gm-step" data-pp-step="-1" aria-label="One stillage less">&minus;</button><input type="number" class="gm-num" data-pp-num min="0" max="100000" step="1" value="'+q+'" inputmode="numeric" aria-label="How many '+esc(p.name)+'"><button type="button" class="gm-step" data-pp-step="1" aria-label="One stillage more">+</button></div>'
-  +'<p class="pp-per">+ and &minus; add or take away one stillage ('+num(per)+' pieces). You can type any number.</p></div>';}
+  +'<p class="pp-per">+ and &minus; add or take away one stillage ('+num(per)+' pieces). A number you type goes up to whole stillages, as on the yard board.</p></div>';}
+// A typed amount goes up to whole stillages at once, as the board's amount box does (the crew packs whole stillages: game-pick.js), and the
+// words say so: "You asked for 30. They come in stillages of 145, so 145 will go."
+function ppType(id,value){const p=ppAll().find(x=>x.id===id);const q=Math.max(0,Math.min(100000,Math.floor(Number(value)||0))),per=p?ppPer(p):0,snap=per>0&&q>0?Math.ceil(q/per)*per:q;
+ ppSet(id,snap);PP.asked=snap>q&&q>0?{id,q}:null;}
 function ppHTML(){const {sys,list}=ppList(),tabs=ppTabs(list),here=PP.tab==='all'||!tabs?list:list.filter(x=>gaTab(x.p)===PP.tab),picks=[...PP.picks].filter(([,q])=>q>0),ps=new Map(ppAll().map(p=>[p.id,p]));
  const sorted=[...here].sort((a,b)=>GA_TABS.findIndex(t=>t.id===gaTab(a.p))-GA_TABS.findIndex(t=>t.id===gaTab(b.p))||sortKey(a,b));
  const sysbar=sys.length>1?'<div class="gm-sysbar pp-sys" role="radiogroup" aria-label="Scaffold system">'+sys.map(id=>'<button type="button" role="radio" class="gm-sysopt'+(id===PP.sys?' on':'')+'" data-pp-sys="'+esc(id)+'" aria-checked="'+(id===PP.sys)+'"><s class="gm-sys '+(SYS_CLASS[id]??'')+'"></s>'+esc(SYS_NAME[id]??id)+'</button>').join('')+'</div>':'';
@@ -387,21 +402,21 @@ function ppDraw(){if(!PP.host||ppDrawing)return;ppDrawing=true;try{const a=PP.ho
 function ppSet(id,q){q=Math.max(0,Math.min(100000,Math.floor(Number(q)||0)));if(q)PP.picks.set(id,q);else PP.picks.delete(id);}
 function ppClose(done){const o=PP.opts,lines=[...PP.picks].filter(([,q])=>q>0).map(([product,quantity])=>({product,quantity}));const host=PP.host;PP.host=null;if(host){host.removeEventListener('click',ppClick);host.removeEventListener('change',ppChange);host.removeEventListener('keydown',ppKey);host.innerHTML='';}if(done)o?.onDone?.(lines);else o?.onCancel?.();}
 function ppClick(e){const b=e.target.closest?.('button');if(!b||!PP.host?.contains(b)||b.disabled)return;
- if(b.dataset.ppSlot){const id=b.dataset.ppSlot,p=ppAll().find(x=>x.id===id);if(p&&!PP.picks.get(id)&&PP.sel!==id)ppSet(id,ppPer(p));PP.sel=id;ppDraw();PP.host?.querySelector('[data-pp-num]')?.focus({preventScroll:true});return;}
+ if(b.dataset.ppSlot){const id=b.dataset.ppSlot,p=ppAll().find(x=>x.id===id);if(p&&!PP.picks.get(id)&&PP.sel!==id)ppSet(id,ppPer(p));if(PP.sel!==id)PP.asked=null;PP.sel=id;ppDraw();PP.host?.querySelector('[data-pp-num]')?.focus({preventScroll:true});return;}
  if(b.dataset.ppTab){PP.tab=b.dataset.ppTab;ppDraw();return;}
  if(b.dataset.ppSys){PP.sys=b.dataset.ppSys;PP.tab=null;ppDraw();return;}
- if(b.dataset.ppStep){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return;const per=ppPer(p),q=PP.picks.get(p.id)??0,step=Number(b.dataset.ppStep);ppSet(p.id,step>0?(Math.floor(q/per)+1)*per:Math.max(0,(Math.ceil(q/per)-1)*per));ppDraw();return;}
+ if(b.dataset.ppStep){const p=ppAll().find(x=>x.id===PP.sel);if(!p)return;const per=ppPer(p),q=PP.picks.get(p.id)??0,step=Number(b.dataset.ppStep);ppSet(p.id,step>0?(Math.floor(q/per)+1)*per:Math.max(0,(Math.ceil(q/per)-1)*per));PP.asked=null;ppDraw();return;}
  if(b.hasAttribute('data-pp-unpick')){PP.picks.delete(PP.sel);PP.sel=null;ppDraw();return;}
  if(b.hasAttribute('data-pp-done')){ppClose(true);return;}
  if(b.hasAttribute('data-pp-cancel'))ppClose(false);}
-function ppChange(e){const t=e.target;if(t.matches?.('[data-pp-num]')&&PP.sel){ppSet(PP.sel,t.value);ppDraw();}}
-function ppKey(e){if(e.key==='Escape'){e.preventDefault();ppClose(false);return;}if(e.key==='Enter'&&e.target.matches?.('[data-pp-num]')){e.preventDefault();if(PP.sel)ppSet(PP.sel,e.target.value);e.target.blur?.();ppDraw();}}
-export function gmPlanPicker(host,ctx,opts={}){if(PP.host&&PP.host!==host)ppClose(false);PP.host=host;PP.ctx=ctx;PP.opts=opts;PP.picks=new Map();for(const l of opts.lines??[])if(l?.product&&l.quantity>0)PP.picks.set(l.product,Math.floor(l.quantity));PP.sel=null;PP.tab=null;PP.sys=null;
+function ppChange(e){const t=e.target;if(t.matches?.('[data-pp-num]')&&PP.sel){ppType(PP.sel,t.value);ppDraw();}}
+function ppKey(e){if(e.key==='Escape'){e.preventDefault();ppClose(false);return;}if(e.key==='Enter'&&e.target.matches?.('[data-pp-num]')){e.preventDefault();if(PP.sel)ppType(PP.sel,e.target.value);e.target.blur?.();ppDraw();}}
+export function gmPlanPicker(host,ctx,opts={}){if(PP.host&&PP.host!==host)ppClose(false);PP.host=host;PP.ctx=ctx;PP.opts=opts;PP.picks=new Map();for(const l of opts.lines??[])if(l?.product&&l.quantity>0)PP.picks.set(l.product,Math.floor(l.quantity));PP.sel=null;PP.tab=null;PP.sys=null;PP.asked=null;
  const first=(opts.lines??[])[0]?.product;if(first){const p=ppAll().find(x=>x.id===first);if(p){PP.sel=first;PP.sys=p.system;}}
  host.addEventListener('click',ppClick);host.addEventListener('change',ppChange);host.addEventListener('keydown',ppKey);ppDraw();
  if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>host.querySelector?.('.pp-grid .gm-slot:not(.dim),[data-pp-cancel]')?.focus({preventScroll:true}));}
 export const gmPlanPickerOpen=()=>!!PP.host;
 // The picker in node (tests): draw into a stand-in host, pick amounts, read the lines back.
 export const gmTest={planPick(ctx,lines=[]){let out=null;const host={innerHTML:'',addEventListener(){},removeEventListener(){},querySelector:()=>null,contains:()=>true};gmPlanPicker(host,ctx,{title:'Parts',lines,onDone:l=>{out=l;},onCancel:()=>{out=null;}});
- return {html:()=>ppHTML(),select(id){PP.sel=id;},set(id,q){ppSet(id,q);PP.sel=id;return ppHTML();},step(n){const b={dataset:{ppStep:String(n)},hasAttribute:()=>false,disabled:false};ppClick({target:{closest:()=>b}});return PP.picks.get(PP.sel)??0;},done(){ppClose(true);return out;},cancel(){ppClose(false);return out;}};}};
-export const __gm={learn:s=>learn(s),sysbar:s=>sysbarHTML(s),state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setTruck:id=>{G.mode='truck';G.truck=id;},head:s=>headHTML(s),setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;}};
+ return {html:()=>ppHTML(),select(id){PP.sel=id;},set(id,q){ppSet(id,q);PP.sel=id;return ppHTML();},type(id,q){PP.sel=id;ppType(id,q);return ppHTML();},step(n){const b={dataset:{ppStep:String(n)},hasAttribute:()=>false,disabled:false};ppClick({target:{closest:()=>b}});return PP.picks.get(PP.sel)??0;},done(){ppClose(true);return out;},cancel(){ppClose(false);return out;}};}};
+export const __gm={learn:s=>learn(s),sysbar:s=>sysbarHTML(s),state:()=>G,setMode:(m,site)=>{G.mode=m;if(site)G.site=site;},setTruck:id=>{G.mode='truck';G.truck=id;},head:s=>headHTML(s),setItems:(loc,list)=>{G.items={loc,list,at:Date.now(),busy:false};},pick:(id,q)=>{if(q)G.picks.set(id,q);else G.picks.delete(id);G.sel=id;},gridItems:s=>gridItems(s),hint:s=>hintOf(s),truckWords:(s,t)=>truckWords(s,t),loadWords:(s,p)=>loadWords(s,p),grid:(s)=>{const l=gridItems(s);tabsHTML(s,l);return gridHTML(s,l);},tabs:s=>tabsHTML(s,gridItems(s)),acts:s=>actsHTML(s),amount:s=>amountHTML(s),trips:s=>tripsHTML(s),start:ctx=>startHTML(ctx),office:ctx=>officeHTML(ctx),shell:ctx=>gmShell(ctx),reset:()=>{G.who=null;},run:(a,d,ok)=>run(a,d,ok),resumeAndGo:b=>resumeAndGo(b),popInner:(t,k,a)=>popInner(t,k,a),setCtx:c=>{G.ctx=c;}};
