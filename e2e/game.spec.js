@@ -20,7 +20,7 @@ test('sign up, choose a yard size, load the parts, add stock, send it to a site,
   const yard=(await api(page,'state?page=0')).yards[0];await api(page,'commands/resources',{location:yard.id,workers:4,machines:2,stepMs:120,speed:20000});
   const load=page.getByRole('button',{name:'Load my parts list'});await expect(load).toBeDisabled();
   await page.locator('[data-gm-system="quickstage"]').click();await load.click();
-  await expect(page.locator('.gm-pop').filter({hasText:'Your parts list is loaded'})).toBeVisible({timeout:20000});
+  await expect(page.locator('.gm-pop').filter({hasText:'The starter parts list is loaded'})).toBeVisible({timeout:20000});
   // Add stock opens by itself: a slot, Add to the yard
   const s0=await api(page,'state?page=0'),std=s0.products.find(p=>p.name==='Kwikstage standard 3.0 m');
   await expect(page.getByRole('heading',{name:'Add stock to the yard'})).toBeVisible();

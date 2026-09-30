@@ -80,7 +80,7 @@ export const gameMethods={
     const have=new Set(this.repo.all('product').map(p=>p.manufacturer+'|'+p.region+'|'+p.reference));let added=0;
     for(const f of files){const j=JSON.parse(readFileSync(new URL(f,dir),'utf8')),rows=(j.products??[]).filter(p=>on.has(p.system)&&!have.has(p.manufacturer+'|'+p.region+'|'+p.reference));
       for(let i=0;i<rows.length;i+=100){this.importCatalogue({name:(j.name??f)+(i?' part '+(i/100+1):''),products:rows.slice(i,i+100)});for(const p of rows.slice(i,i+100))have.add(p.manufacturer+'|'+p.region+'|'+p.reference);added+=Math.min(100,rows.length-i);}}
-    requireRule(added,'Your parts list is already loaded.');return {added,message:'Your parts list is loaded.'};},
+    requireRule(added,'Your parts list is already loaded.');return {added,message:'The starter parts list is loaded. Check the weights against your own supplier.'};},
   // Stock arriving at the yard, one product at a time: its own stillages are topped up first, then new ones are set down (gamePlace). A stillage
   // holds one pack, or as much as the yard forklift and the site crane can lift when a pack is heavier than that (the pack is split), so every
   // stillage can be moved and sent (game-pick.js gpPerStillage). A part with no weight in the parts list is refused: nobody could lift it.

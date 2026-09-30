@@ -56,8 +56,11 @@ const unitWord=(p,n)=>G.mode==='add'&&p?.packQuantity>0?(n===1?'pack':'packs'):(
 // Sort order: kind (tube, standard, ledger ...), its look, its family, then short to long.
 const sortKey=(a,b)=>GA_ROW_ORDER.indexOf(gaKind(a.p))-GA_ROW_ORDER.indexOf(gaKind(b.p))||byName(gaLook(a.p),gaLook(b.p))||byName(a.p.system??'',b.p.system??'')||byName(gaFamily(a.p),gaFamily(b.p))||((gaLength(a.p)??0)-(gaLength(b.p)??0))||byName(a.p.name,b.p.name);
 // ---------------------------------------------------------------- the skeleton
+// Honest labels: this company is the Practice yard. The crew, trucks and deliveries on the board are simulated, so the top bar always says so,
+// quietly (no banner). A real-records mode is a later piece of work; until then every company is a Practice yard.
+const PRACTICE_CHIP='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice yard &middot; simulated</span>';
 export function gmShell(ctx){resetFor(ctx);G.ctx=ctx;const s=ctx.state,company=esc(ctx.account?.company?.name??'Your company');
- const top='<header class="gm-top"><div class="gm-brand"><span class="gm-mark" aria-hidden="true">'+gaImg(GA_BUTTONS.stock(),'gm-mark-img')+'</span><b>'+company+'</b></div>'
+ const top='<header class="gm-top"><div class="gm-brand"><span class="gm-mark" aria-hidden="true">'+gaImg(GA_BUTTONS.stock(),'gm-mark-img')+'</span><b>'+company+'</b>'+PRACTICE_CHIP+'</div>'
   +'<div class="gm-top-right"><button type="button" class="gm-office-btn" data-gm-office aria-haspopup="dialog" aria-expanded="false">'+gaImg(GA_BUTTONS.office(),'gm-office-img')+'<span>Office</span></button></div></header>';
  if(!yardOf(s))return '<div class="gm" data-gm="start">'+top+startHTML(ctx)+officeHTML(ctx)+'</div>';
  return '<div class="gm" data-gm="board">'+top+'<div class="gm-body"><section class="gm-board scene world-scene" aria-label="Your yard and sites">'+wmShell()
@@ -132,7 +135,7 @@ function slotHTML(x,many){const p=x.p,pick=G.picks.get(p.id),where=G.mode==='tru
   +(tag?'<i class="gm-len">'+esc(tag)+'</i>':'')+(many?'<s class="gm-sys '+(SYS_CLASS[p.system]??'')+'"></s>':'')+corner+'</button>';}
 // "Which scaffold do you use?": the three systems as pictures; the reviewed supplier lists load for the ones picked.
 function partsHTML(s){const on=G.systems;return '<div class="gm-parts"><div class="gm-sysgrid" role="group" aria-label="Scaffold systems">'+SYSTEMS.map(([id,name,words])=>'<button type="button" class="gm-sys-btn'+(on.has(id)?' on':'')+'" data-gm-system="'+id+'" aria-pressed="'+on.has(id)+'">'+gaSystemPic(id,'gm-sys-img')+'<b>'+name+'</b><small>'+words+'</small></button>').join('')+'</div>'
- +'<p class="gm-parts-note">We load your supplier\'s own parts list with the real weights. You can add your own list later in the Office.</p></div>';}
+ +'<p class="gm-parts-note">We load a starter parts list copied from published supplier catalogues, with the weights as they print them. Check them against your own supplier. You can add your own list later in the Office.</p></div>';}
 function amountHTML(s){if(!G.sel||!PICKING.includes(G.mode))return '';const p=products(s).find(x=>x.id===G.sel);if(!p)return '';
  const stops=stopsFor(s,p),q=G.picks.get(p.id)??0,i=stops.findIndex(x=>x.qty===q),idx=i<0?(q?stops.filter(x=>x.qty<q).length:0):i+1,max=stops.length;
  const words=q?(G.mode==='add'&&!(p.packQuantity>0)&&!(p.unitWeight>0)?num(q)+' pieces':idx+' '+unitWord(p,idx)+(G.mode!=='add'&&idx===max?' · all of it':'')):'None yet';
@@ -180,7 +183,7 @@ function hintOf(s){const stuck=(s.trucks??[]).find(t=>t.game?.problem);if(stuck)
  if(!products(s).length)h=phone()?{id:'parts',text:'Welcome! First, load your scaffold parts.',act:['Load my parts','parts'],point:'add'}:null;
  else if(!stockHere)h={id:'add',text:'Tap Add stock to fill your yard with scaffolding.',act:['Add stock','add'],point:'add'};
  else if(!sites.length)h={id:'site',text:'Now open your first client site: tap an empty block on the map.',act:['Open a site','newsite']};
- else if(moving&&!delivered)h={id:'watch',text:'Sit back and watch. The crew does it all.'};
+ else if(moving&&!delivered)h={id:'watch',text:'In the Practice yard the crew and trucks are simulated. Watch them work.'};
  else if(!delivered)h={id:'send',text:'Tap Send to send scaffolding to '+sites[0].name+'. The crew does the rest.',act:['Send','send'],point:'send'};
  else h={id:'tapsite',text:'Tap a site on the map to see what is there.',target:sites.find(x=>hasStock(s,x.id))?.id??sites[0].id};
  return h&&!G.hintOff.has(h.id)?h:null;}

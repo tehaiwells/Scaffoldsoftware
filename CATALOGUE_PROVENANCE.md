@@ -1,6 +1,13 @@
 # Catalogue provenance and unresolved data
 
-No manufacturer source documents were read or imported. None of the candidate PDFs was present in this project directory. The rejected internal/private AT-PAC Yard Pick Ticket was not read, used, compared, or turned into fixtures.
+Two kinds of catalogue data ship with the app, and they must not be confused:
+
+1. `catalogues/synthetic.json`: invented DEMO ONLY data (below). No manufacturer document was used for it.
+2. `catalogues/verified/`: supplier parts lists transcribed on 2026-09-22 from supplier documents the owner supplied (see "Supplier catalogue batches" at the end). These are what the yard board loads.
+
+The rejected internal/private AT-PAC Yard Pick Ticket was not read, used, compared, or turned into fixtures.
+
+What "SOURCE VERIFIED" means here: each value was copied from a printed page of a supplier document and cites that document and page. It does not mean the value was checked against real parts, certified, or confirmed by the manufacturer, and it is not a claim that the parts suit any purpose.
 
 `catalogues/synthetic.json` is original, intentionally invented DEMO ONLY data, not a summary of any manufacturer catalogue. It contains two fictional component variants and one explicitly unknown-weight variant. The 5 kg/3 kg unit weights and 100/50 operating pack quantities are synthetic. The demo 2 m × 1 m × 1 m stillage with 50 kg tare is synthetic. These are not commercial factual specifications, load ratings, endorsements or safe-working limits.
 
@@ -12,12 +19,12 @@ For reviewed factual imports, prepare a JSON object with `name` and `products` (
 
 Set IMPORT_EMAIL and IMPORT_PASSWORD in your local shell, then run `node scripts/import-catalogue.js approved-batch.json`. The importer authenticates the operator and executes one atomic command; any invalid/conflicting row rolls the whole batch back. It imports reviewed structured facts, not PDFs or photographs. Approval and legal suitability of factual source reuse remain a human review step. No commercial reuse or manufacturer endorsement is claimed.
 
-All real manufacturer values, regional variants, container models, tare masses, safe ratings, pack conventions, machine profiles and operating times remain unverified and require owner review. Live operations are deliberately not implemented.
+Apart from the transcribed supplier lists below (copied from the printed page only, as explained above), all manufacturer values, regional variants, container models, tare masses, safe ratings, pack conventions, machine profiles and operating times are unverified and need the owner's review. The app's yard is a Practice yard: the crew, trucks and deliveries are simulated. Live operations are deliberately not implemented.
 
 
 ## Supplier catalogue batches (catalogues/verified/)
 
-Seven reviewed batches (514 variants) were transcribed from nine supplier documents the owner supplied on 2026-09-22 and are imported with status SOURCE VERIFIED, each record citing the document and page:
+Seven reviewed batches (514 variants) were transcribed from nine supplier documents the owner supplied on 2026-09-22 and are imported with status SOURCE VERIFIED (copied from the printed page, as defined at the top; not checked against real parts), each record citing the document and page:
 
 - Turbo Scaffolding (Australia) product sheets: Scaffold-Tubes, Scaffold-Fittings, Scaffold-Parts-&-Tools, Scaffold-Stairs-&-Ladders, Scaffold-Accessories-&-Specials, Aluminium-Lattice-Beams, Aluminium-Stairs, Kwikstage-Modular-Scaffold. Kwikstage items map to the Quickstage system; the tube, fitting, access, beam and accessory sheets map to Tube & Clip.
 - AT-PAC (Atlantic Pacific Equipment) Product Catalog, North America edition 2020, Ringlock and Tube & Clamp: 337 variants mapped to the AT-PAC system.
