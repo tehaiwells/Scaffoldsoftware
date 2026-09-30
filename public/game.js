@@ -64,6 +64,7 @@ const truckKind = (t) => ((t?.payload ?? 0) >= HEAVY ? 'Big truck' : 'Truck');
 // ---------------------------------------------------------------- state of the board (per browser tab)
 const G = {
   mode: 'yard',
+  intake: {},
   site: null,
   truck: null,
   tab: null,
@@ -279,6 +280,17 @@ const modeChip = (ctx) => {
         '<span class="gm-switch-word" aria-hidden="true">Switch</span><span class="gm-switch-caret" aria-hidden="true">&#9662;</span></button>'
     : chip;
 };
+// A real yard's one calm chip: "Needs you · 3" (snapshot.needsYou, ADR 0010). Tapping it opens Today, where the card is.
+const needsChip = (s) => {
+  const n = s?.needsYou?.count ?? 0;
+  return n
+    ? '<button type="button" class="gm-needs" data-view="TODAY" title="' +
+        esc(n + (n === 1 ? ' thing' : ' things') + ' for you to sort out, on Today') +
+        '"><span class="gm-needs-dot" aria-hidden="true"></span>Needs you · ' +
+        n +
+        '</button>'
+    : '';
+};
 const switchPop = (ctx) =>
   (ctx.account?.memberships?.length ?? 0) > 1
     ? '<div class="gm-switch-pop" data-gm-switch-pop hidden><p>Which yard?</p>' +
@@ -297,7 +309,9 @@ export function gmShell(ctx) {
     company +
     '</b>' +
     modeChip(ctx) +
-    '</div>' +
+    '<span data-gm-needs-slot>' +
+    needsChip(s) +
+    '</span></div>' +
     '<div class="gm-top-right"><button type="button" class="gm-office-btn" data-gm-office aria-haspopup="dialog" aria-expanded="false">' +
     gaImg(GA_BUTTONS.office(), 'gm-office-img') +
     '<span>Office</span></button></div></header>' +
@@ -325,6 +339,32 @@ export function gmShell(ctx) {
     '</div>'
   );
 }
+// A real yard's Add stock keeps an intake record with the stock (ADR 0010, H3): what it cost each, the supplier, the invoice, the day.
+const intakeHTML = (s) => {
+  const f = G.intake,
+    today = s?.liveBoard?.today ?? s?.calendar?.today ?? '';
+  return (
+    '<div class="gm-intake" data-gm-intake><p class="gm-intake-h">Where it came from <small>optional · kept with the stock</small></p><div class="gm-intake-f"><label><span>Cost each ($)</span><input inputmode="decimal" name="unitCost" value="' +
+    esc(f.unitCost ?? '') +
+    '" placeholder="0.00"></label><label><span>Supplier</span><input name="supplier" maxlength="80" value="' +
+    esc(f.supplier ?? '') +
+    '"></label><label><span>Invoice</span><input name="reference" maxlength="60" value="' +
+    esc(f.reference ?? '') +
+    '"></label><label><span>Received</span><input type="date" name="receivedOn" value="' +
+    esc(f.receivedOn ?? today) +
+    '"></label></div></div>'
+  );
+};
+const intakeInput = () => {
+  const f = G.intake,
+    out = {};
+  const cost = String(f.unitCost ?? '')
+    .trim()
+    .replace(/[$,\s]/g, '');
+  if (cost && Number.isFinite(Number(cost)) && Number(cost) >= 0) out.unitCost = Math.round(Number(cost) * 100);
+  for (const k of ['supplier', 'reference', 'receivedOn']) if (String(f[k] ?? '').trim()) out[k] = String(f[k]).trim();
+  return out;
+};
 const bigBtn = (k, label, title, cls = '') =>
   '<button type="button" class="gm-big gm-big-' +
   k +
@@ -849,6 +889,7 @@ function actsHTML(s) {
   }
   if (G.mode === 'add')
     return (
+      (live() ? intakeHTML(s) : '') +
       '<div class="gm-acts"><button type="button" class="gm-go gm-go-big" data-gm-do="add"' +
       (picks.length && !G.busy ? '' : ' disabled') +
       '>' +
@@ -1379,6 +1420,7 @@ export function gmUpdate(ctx) {
   const top = grid?.scrollTop ?? 0;
   if (setHTML(grid, gridHTML(s, list)) && grid) grid.scrollTop = top;
   setHTML(root.querySelector('[data-gm-trips]'), tripsHTML(s));
+  setHTML(root.querySelector('[data-gm-needs-slot]'), needsChip(s));
   const hint = hintHTML(s);
   setHTML(root.querySelector('[data-gm-hint]'), hint);
   aimHint();
@@ -1922,8 +1964,9 @@ function onClick(e) {
         done();
       });
     else if (b.dataset.gmDo === 'add')
-      run('gameAddStock', { lines }, () => {
+      run('gameAddStock', { lines, ...(live() ? intakeInput() : {}) }, () => {
         pop('Added to the yard!', 'tick');
+        G.intake = {};
         setMode('yard');
       });
     else if (b.dataset.gmDo === 'parts')
@@ -1978,6 +2021,12 @@ function setPickFromIndex(k) {
   }
 }
 function onInput(e) {
+  if (e.target.closest?.('[data-gm-intake]') && e.target.name) {
+    G.intake[e.target.name] = e.target.value;
+    const box = e.target.closest('[data-gm-acts]');
+    if (box) box.__h = null; // typed values live in G.intake now: the next update draws them back
+    return;
+  }
   if (e.target.matches('[data-gm-range]')) setPickFromIndex(Number(e.target.value));
   // a real yard: the words under the part follow the number as it is typed (kept exactly, never snapped)
   if (e.target.matches('[data-gm-num]') && live() && G.mode !== 'add' && G.sel) {

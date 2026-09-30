@@ -17,7 +17,7 @@ export const LIVE_CHIP =
 export const LIVE_SITES_NEXT =
   'To send to a site, tap Send on the board or book Materials on Today. Your driver confirms each trip on their phone.';
 export const LIVE_CREW_NEXT =
-  'Nobody signs on in the app yet, so nobody shows as at the yard or working. That comes next. Your people are on Workers, Your team.';
+  'Your people are on Workers, Your team. Who is on site comes from an On site tap on Today (a leading hand’s phone, or the office), never by itself.';
 // The Office pages' strip under the title: the Practice yard keeps its simulation strip; the real yard says, calmly, what it is.
 export const LIVE_STRIP =
   '<div class="simulation-banner live-banner"><span class="status-dot"></span> Live &middot; your real yard <span>Only what your team records. Nothing moves or answers by itself.</span></div>';

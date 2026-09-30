@@ -145,7 +145,11 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/crew-sw.js': ['crew-sw.js', 'text/javascript'], // opens the page with no signal (a secure address only)
     '/crew.webmanifest': ['crew.webmanifest', 'application/manifest+json'], // "Add to home screen" opens My trips
   }); // a driver's phone, "My trips": taps queued with one key each (ADR 0009)
-  Object.assign(assets, { '/live-office.js': ['live-office.js', 'text/javascript'] }); // a real yard's trips on Today, the truck page and Your team
+  Object.assign(assets, {
+    '/live-office.js': ['live-office.js', 'text/javascript'], // a real yard's trips on Today, the truck page and Your team
+    '/live-today.js': ['live-today.js', 'text/javascript'], // Today as a dispatch tool: Needs you, the lanes, the run sheet (ADR 0010)
+    '/live-returns.js': ['live-returns.js', 'text/javascript'], // Back & counted, quarantine, the site-finish question, values (ADR 0010)
+  });
   return async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');

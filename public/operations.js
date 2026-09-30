@@ -67,7 +67,69 @@ const loHost = {
   state: () => state,
   refresh: () => refresh(true),
   redraw: () => loRedraw(),
+  owner: () => !!account?.permissions?.includes('company.manage'),
+  // Today's pieces (public/live-today.js): where one action goes
+  go: (v) => schGo(v),
+  goItem: (id, day) => {
+    if (view !== 'TODAY' && !schGo('TODAY')) return;
+    tdGoItem(id, day);
+  },
+  goTrip: (id) => ltGoTrip(id),
+  selectDay: (d) => {
+    if (view !== 'TODAY' && !schGo('TODAY')) return;
+    tdSelect(d, { scroll: true });
+  },
+  addForm: (kind, day) => {
+    if (view !== 'TODAY' && !schGo('TODAY')) return;
+    tdSelect(day);
+    tdForm = tdhNewForm(kind, day);
+    tdRedraw();
+    requestAnimationFrame(() => document.getElementById('tdh-form')?.scrollIntoView({ block: 'nearest' }));
+  },
+  today: () => tdhToday(),
+  finished: () => {
+    LOM?.__lr?.reset?.();
+  },
 };
+// A trip by id (today's, or a later day's): open Today on its day and bring its card into view.
+function ltGoTrip(id) {
+  api('trips')
+    .then((d) => {
+      const t = [...(d?.trips ?? []), ...(d?.upcoming ?? [])].find((x) => x.id === id);
+      if (!t) {
+        notify('That trip is not on the list any more.');
+        return;
+      }
+      if (view !== 'TODAY' && !schGo('TODAY')) return;
+      tdSelect(t.day);
+      requestAnimationFrame(() => {
+        const el = document.querySelector('[data-lo-trip="' + CSS.escape(id) + '"]');
+        el?.scrollIntoView({ block: 'center', behavior: tdCalm() ? 'auto' : 'smooth' });
+        el?.classList.add('is-new');
+        setTimeout(() => el?.classList.remove('is-new'), 1800);
+      });
+    })
+    .catch((e) => notify(e.message));
+}
+// Today as a dispatch tool in a real yard (public/live-today.js, ADR 0010): the Needs-you card, the day's tools, the lanes, the run sheet.
+let LTM = null,
+  ltLoading = false;
+function lt() {
+  if (!liveMode()) return null;
+  if (!LTM && !ltLoading && typeof document !== 'undefined') {
+    ltLoading = true;
+    import('./live-today.js')
+      .then((m) => {
+        LTM = m;
+        m.ltSetup(loHost);
+        loRedraw();
+      })
+      .catch(() => {
+        ltLoading = false;
+      });
+  }
+  return LTM;
+}
 function lo() {
   if (!liveMode()) return null;
   if (!LOM && !loLoading && typeof document !== 'undefined') {
@@ -88,8 +150,8 @@ function lo() {
 function loRedraw() {
   if (typeof document === 'undefined' || !onPage() || deferRender) return;
   if (view === 'TODAY') return tdRedraw();
-  if (!['TRUCK12', 'TRUCK2', 'WORKERS'].includes(view)) return;
-  if (document.activeElement?.closest?.('.lo-form, .lo-link-box')) return;
+  if (!['TRUCK12', 'TRUCK2', 'WORKERS', 'STOCK', 'MATERIALS', 'SITES'].includes(view)) return;
+  if (document.activeElement?.closest?.('.lo-form, .lo-link-box, .lr-values, .lr-finish')) return;
   render();
 }
 // Remove site's one fix button for an open stocktake: the stock page opens at that stocktake, marked for a moment.
@@ -1082,6 +1144,7 @@ function render() {
   mountSprites();
   gsMount();
   histSync();
+  if (liveMode() && LIVE_HIDDEN_TILES.includes(view)) view = 'TODAY'; // the real yard: the Schedule and the Control room are Today
   if (view === 'HOME' && isOps() && !shapeEditor) {
     renderGame();
     return;
@@ -1203,7 +1266,7 @@ function bindPage(patch, oldWorkerPositions) {
       (b) =>
         (b.onclick = () => {
           if (!leaveEditor()) return;
-          view = b.dataset.view;
+          view = liveMode() && LIVE_HIDDEN_TILES.includes(b.dataset.view) ? 'TODAY' : b.dataset.view;
           selected = null;
           pinnedSite = null;
           heldSite = null;
@@ -3934,6 +3997,9 @@ export function materialsView() {
       mlHero() +
       miFixPanel() +
       (empty ? miImportPanel() + componentsPanel() : componentsPanel() + miImportPanel()) +
+      (liveMode() && !empty && account.permissions.includes('company.manage')
+        ? (lo()?.lrValuesHTML(state.products, { owner: true }) ?? '')
+        : '') +
       intakePanel() +
       '</div>';
   if (dom) {
@@ -9048,6 +9114,7 @@ function stockView() {
   return (
     '<div class="page-stock">' +
     stkHero() +
+    (liveMode() ? (lo()?.lrQuarantineHTML(state, { ops: isOps() }) ?? '') : '') +
     stockTabs() +
     (stockTab === 'REGISTER'
       ? registerPanel()
@@ -11004,7 +11071,7 @@ function siCard(s, ix) {
             s.id +
             '">Change site shape &amp; size</button>'
           : '') +
-        (s.status !== 'ARCHIVED' ? sfOfficeActs(state, s) : '') +
+        (s.status !== 'ARCHIVED' ? siFinishOrRemove(s, ops) : '') +
         '</div>'
       : '';
   return (
@@ -21421,15 +21488,29 @@ function tdView() {
     t = tdhT(),
     today = tdhToday(),
     sel = tdhSelDay();
-  const html =
-    '<div class="page-today tdh">' +
-    tdhHead(p, t, today) +
-    '<div class="tdh-top">' +
-    tdhCal(p, today, sel) +
-    tdhDay(p, today, sel) +
-    '</div>' +
-    tdhCards(p, t, today) +
-    '</div>';
+  const L = lt(),
+    ops = isOps();
+  const live = L
+    ? '<div class="lt-live" data-lt-day="' +
+      esc(sel ?? '') +
+      '">' +
+      L.ltNeedsHTML(L.ltNeeds(), { ops, today }) +
+      (sel ? L.ltToolsHTML(sel, today, { ops }) : '') +
+      '</div>'
+    : '';
+  const top =
+    L && sel && L.ltMode() === 'lanes'
+      ? '<div class="lt-lanes-wrap" data-lt-day="' +
+        esc(sel) +
+        '">' +
+        L.ltLanesHTML(L.ltDispatch(sel), {
+          ops,
+          pic: (l) => trkPic('spr-truck12', 'lt-lane-img'),
+          waiting: lo()?.loWaitingHTML({ day: sel, ops }) ?? '',
+        }) +
+        '</div>'
+      : '<div class="tdh-top">' + tdhCal(p, today, sel) + tdhDay(p, today, sel) + '</div>';
+  const html = '<div class="page-today tdh">' + tdhHead(p, t, today) + live + top + tdhCards(p, t, today) + '</div>';
   tdViewHTML = html;
   return html;
 }
@@ -21837,13 +21918,15 @@ function tdhItem(v) {
           : 'spr-forklift';
   const [sk, sw] = done
     ? ['done', v.flags?.red ? 'Part done' : 'Done']
-    : red
-      ? ['red', 'Needs sorting']
-      : wait
-        ? ['wait', 'Waiting for an answer']
-        : v.status === 'ACTIVE'
-          ? ['on', 'Under way']
-          : ['ok', 'Booked'];
+    : v.flags?.draft
+      ? ['draft', 'Draft']
+      : red
+        ? ['red', 'Needs sorting']
+        : wait
+          ? ['wait', 'Waiting for an answer']
+          : v.status === 'ACTIVE'
+            ? ['on', 'Under way']
+            : ['ok', 'Booked'];
   let body = '';
   // a short list says so once, in the lines below; a list above what is free in the yard gets a calm amber line before its day
   if (v.problem && !(v.short?.length && /^Short:/.test(v.problem)))
@@ -21958,7 +22041,9 @@ function tdhItem(v) {
       [v.consolidate ? 'Top up part-full stillages' : '', v.stackEmpties ? 'stack the empties' : '']
         .filter(Boolean)
         .join(' and ') +
-      '. Nothing leaves the yard.</p>';
+      '. Nothing leaves the yard.' +
+      (liveMode() && !done ? ' A yard hand taps Done on their phone, or you do here.' : '') +
+      '</p>';
   if (v.note) body += '<p class="tdh-note-line">&ldquo;' + esc(v.note) + '&rdquo;</p>';
   const b = (attr, words, cls = 'secondary') =>
       '<button type="button" class="' + cls + ' tdh-btn" ' + attr + '>' + words + '</button>',
@@ -21971,6 +22056,11 @@ function tdhItem(v) {
     );
   if (ops && v.type === 'MATERIALS' && v.short?.length && v.status !== 'CANCELLED')
     acts.push(b('data-tdh-rest="' + id + '"', 'Plan the rest', 'tdh-soft'));
+  if (v.canSend) acts.push(b('data-tdh-send="' + id + '"', 'Send', 'tdh-soft'));
+  if (v.canSignOn && v.people?.some((r) => !r.moved && !r.gone))
+    acts.push(b('data-tdh-mini="' + id + '|onsite"', 'On site', 'tdh-soft'));
+  if (v.canDone && (v.type === 'RESTACK' || v.people?.some((r) => r.moved)))
+    acts.push(b('data-tdh-done="' + id + '"', v.type === 'WORKERS' ? 'Day done' : 'Done'));
   if (v.type === 'TRUCK' && v.canAsk && !v.driverRow)
     acts.push(b('data-tdh-mini="' + id + '|driver"', 'Name a driver', 'tdh-soft'));
   else if (v.type === 'TRUCK' && v.canAsk && v.driverRow?.answer === 'YES')
@@ -22022,7 +22112,7 @@ function tdhItem(v) {
     (done ? tdhTick() : '') +
     esc(v.words || '') +
     '</span></div>' +
-    (['done', 'red', 'on'].includes(sk) ? '<span class="tdh-state ' + sk + '">' + sw + '</span>' : '') +
+    (['done', 'red', 'on', 'draft'].includes(sk) ? '<span class="tdh-state ' + sk + '">' + sw + '</span>' : '') +
     '</div>' +
     body +
     (acts.length ? '<div class="tdh-acts">' + acts.join('') + '</div>' : '') +
@@ -22055,13 +22145,27 @@ function tdhPerson(r, v, kind) {
     words = '';
   if (r.moved) {
     cls = 'yes';
-    words = 'At ' + site;
+    words =
+      'At ' +
+      site +
+      (r.signOn
+        ? r.signOn.kind === 'ON_BEHALF'
+          ? ' · recorded by ' + r.signOn.byName
+          : ' · ' + r.signOn.byName + ' tapped On site'
+        : '');
   } else if (r.gone) {
     cls = 'off';
     words = 'Left the team';
   } else if (r.answer === 'YES') {
     cls = 'yes';
-    words = r.via === 'OFFICE' ? 'Said yes on the phone' : kind === 'driver' ? 'Said yes' : 'I’ll be there';
+    words =
+      r.via === 'PHONE'
+        ? 'Said yes on their phone'
+        : r.via === 'OFFICE'
+          ? 'Said yes on the phone' + (liveMode() ? ' (the office took the call)' : '')
+          : kind === 'driver'
+            ? 'Said yes'
+            : 'I’ll be there';
   } else if (r.answer === 'WAITING') {
     cls = 'wait';
     words = 'Waiting for an answer';
@@ -22251,6 +22355,30 @@ function tdhMiniHTML(v) {
           x +
           '</div></div>';
   }
+  if (k === 'onsite') {
+    const rows = (v.people ?? []).filter((r) => !r.moved && !r.gone);
+    return wrap(
+      'onsite',
+      'Who is on site at ' + esc(v.siteName ?? 'the site') + '?',
+      '<fieldset class="tdh-who"><legend>Tick who arrived</legend>' +
+        rows
+          .map(
+            (r) =>
+              '<label class="tdh-check"><input type="checkbox" name="people" value="' +
+              esc(r.person) +
+              '"' +
+              (r.answer === 'YES' ? ' checked' : '') +
+              '><span><b>' +
+              esc(r.name) +
+              '</b><small>' +
+              esc(r.answer === 'YES' ? 'said yes' : r.answer === 'NO' ? 'said no' : 'no answer yet') +
+              '</small></span></label>',
+          )
+          .join('') +
+        '</fieldset><p class="tdh-note">Recorded by you for them. A leading hand can tap On site on their own phone.</p>',
+      'They are on site',
+    );
+  }
   if (k === 'truck') {
     const trucks = (p?.items ?? []).filter(
       (i) => i.type === 'TRUCK' && i.day === v.day && i.status !== 'CANCELLED' && i.status !== 'DONE',
@@ -22330,7 +22458,7 @@ function tdhAdds(sel) {
     b('TRUCK', 'spr-truck12', 'Truck', 'Book one, with a driver') +
     b('MATERIALS', 'spr-stillage', 'Materials', 'A list for a site') +
     b('WORKERS', 'spr-worker', 'Workers', 'People to a site') +
-    (liveMode() ? '' : b('RESTACK', 'spr-forklift', 'Re-stack', 'Tidy the yard')) +
+    b('RESTACK', 'spr-forklift', 'Re-stack', liveMode() ? 'A yard job, with a Done tap' : 'Tidy the yard') +
     '</div>'
   );
 }
@@ -22656,7 +22784,9 @@ function tdhForm(p, day) {
     ok = !!(f.consolidate || f.stackEmpties);
     note = taken.restack
       ? 'A re-stack is already booked that day.'
-      : 'The yard crew does it between their other jobs. Nothing leaves the yard.';
+      : liveMode()
+        ? 'A yard hand taps Done on their phone when it is tidy, or you do here. Nothing leaves the yard.'
+        : 'The yard crew does it between their other jobs. Nothing leaves the yard.';
     if (taken.restack) ok = false;
   }
   return (
@@ -22674,10 +22804,15 @@ function tdhForm(p, day) {
     body +
     '</div>' +
     (note ? '<p class="tdh-note">' + note + '</p>' : '') +
+    (liveMode()
+      ? '<label class="tdh-check tdh-draft"><input type="checkbox" name="draft"' +
+        (f.draft ? ' checked' : '') +
+        '><span><b>Just a draft for now</b><small>On the calendar, sent to nobody, until you tap Send</small></span></label>'
+      : '') +
     '<div class="tdh-form-acts"><button type="submit" class="tdh-go"' +
     (ok && !tdBusy ? '' : ' disabled') +
     '>' +
-    esc(go) +
+    esc(f.draft ? 'Save the draft for ' + dl : go) +
     '</button><button type="button" class="tdh-link" data-tdh-form-x>Cancel</button></div>' +
     (tdForm.err ? '<p class="tdh-form-err" role="alert">' + esc(tdForm.err) + '</p>' : '') +
     '</form>'
@@ -23020,7 +23155,6 @@ function tdhWho(t, p, today) {
       '</button></p>';
   if (!t) body += tdhWait;
   else if (!body) body = '<p class="tdh-quiet">Nobody is booked today.</p>';
-  if (t && liveMode()) body += '<p class="tdh-quiet tdh-live-next">' + esc(LIVE_CREW_NEXT) + '</p>';
   const sub = !r ? '' : (r.sub ?? (r.waiting.length ? r.words : 'Everyone who is booked has said yes'));
   return tdhCard(
     'who',
@@ -23372,6 +23506,8 @@ async function tdRun(fn, { flash = true, keep = false } = {}) {
     refresh(false).catch(() => {});
   }
 }
+// A real yard's booking form: "Just a draft for now" books it as a DRAFT (planSend later); the Practice yard never sends the flag.
+const draftOf = (f) => (liveMode() && f.draft ? { draft: true } : {});
 async function tdSubmit() {
   const f = tdForm.f,
     k = tdForm.kind,
@@ -23390,6 +23526,7 @@ async function tdSubmit() {
           time: f.time,
           ...(kind === 'T' ? { truck: val } : { hire: { size: val } }),
           driver: f.driver || null,
+          ...draftOf(f),
         });
       }
       if (k === 'MATERIALS')
@@ -23402,6 +23539,7 @@ async function tdSubmit() {
           truckPlan: f.truckPlan || null,
           packer: f.packer || null,
           note: f.note || null,
+          ...draftOf(f),
         });
       if (k === 'WORKERS')
         return command('planWorkers', {
@@ -23410,6 +23548,7 @@ async function tdSubmit() {
           site: f.site,
           count: f.count,
           people: f.who === 'PICK' ? f.people : null,
+          ...draftOf(f),
         });
       if (k === 'RESTACK')
         return command('planRestack', {
@@ -23417,6 +23556,7 @@ async function tdSubmit() {
           time: f.time,
           consolidate: !!f.consolidate,
           stackEmpties: !!f.stackEmpties,
+          ...draftOf(f),
         });
       if (k === 'PAPER')
         return command('paperworkAdd', {
@@ -23479,7 +23619,7 @@ function tdBindOnce() {
   tdBound = true;
   document.addEventListener('click', (e) => {
     const t = e.target?.closest?.(
-      '[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]',
+      '[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-send],[data-tdh-done],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]',
     );
     if (!t || !onPage() || t.disabled) return;
     const d = t.dataset;
@@ -23593,6 +23733,24 @@ function tdBindOnce() {
     }
     if (d.tdhYes !== undefined) {
       tdRun(() => command('messageAnswer', { id: d.tdhYes, yes: true, via: 'OFFICE' }));
+      return;
+    }
+    if (d.tdhSend !== undefined) {
+      tdRun(() => command('planSend', { id: d.tdhSend }));
+      return;
+    }
+    if (d.tdhDone !== undefined) {
+      const v = (tdhP()?.items ?? []).find((i) => i.id === d.tdhDone);
+      if (
+        v &&
+        !confirm(
+          (v.type === 'WORKERS'
+            ? 'Mark the day at ' + (v.siteName ?? 'the site') + ' done?'
+            : 'Mark the re-stack done?') + ' Recorded by you for them.',
+        )
+      )
+        return;
+      tdRun(() => command('planDone', { id: d.tdhDone }));
       return;
     }
     if (d.tdhCancel !== undefined) {
@@ -23766,6 +23924,15 @@ function tdBindOnce() {
             tdRedraw();
           }
         });
+      else if (kind === 'onsite')
+        tdRun(() => command('crewSignOn', { item: id, people: new FormData(f).getAll('people') }), { keep: true }).then(
+          (r) => {
+            if (r) {
+              tdMini = null;
+              tdRedraw();
+            }
+          },
+        );
       else if (kind === 'truck')
         tdRun(() => command('planMove', { id, truckPlan: v.truckPlan || null }), { keep: true }).then((r) => {
           if (r) {
@@ -23932,9 +24099,7 @@ function tmTeam() {
       (x.away ? ' disabled title="Away at a site today"' : '') +
       '>Remove</button></span></li>' +
       // a real yard: the driver's own phone (a link to send, the phones signed in, Sign out this phone)
-      (drv && liveMode() && LOM
-        ? '<li class="tm-phone-row">' + LOM.loPhoneHTML({ id: x.id, name: x.name }) + '</li>'
-        : '')
+      (liveMode() && LOM ? '<li class="tm-phone-row">' + LOM.loPhoneHTML({ id: x.id, name: x.name }) + '</li>' : '')
     );
   };
   if (liveMode()) lo();
@@ -24016,6 +24181,15 @@ async function tmRemove(id, btn) {
     btn.disabled = false;
   }
   tmLoad(true);
+}
+// A real yard's site with scaffolding on record: the one finish question (sent N · back M · K missing) instead of Remove site.
+function siFinishOrRemove(s, ops) {
+  if (!liveMode()) return sfOfficeActs(state, s);
+  const L = lo();
+  if (!L) return sfOfficeActs(state, s);
+  const a = L.lrAccount(s.id);
+  const onRecord = a && (a.sent || a.onSite || a.missing || (a.unresolvedTrips ?? []).length || a.looking);
+  return onRecord ? L.lrFinishHTML(s, a, { ops }) : sfOfficeActs(state, s);
 }
 function tmGo() {
   if (!schGo('WORKERS')) return;

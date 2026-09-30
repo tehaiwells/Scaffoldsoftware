@@ -114,6 +114,16 @@ there / Can't make it, the lists to pack and returns to count (a yardsman), the 
 - Hire (`hire.js`) reads the new ledger events: `STILL_ON_SITE`, `DAMAGED` and `RETURNED`-by-count as moves; `LOST`, `WRITTEN_OFF` and
   `SCRAPPED` as removals (no minimum-hire top-up).
 - The Practice yard is untouched: every command here is `requireLive`; `DRAFT` cannot be made there; the DEMO suite is unchanged.
+- Screens (no new Office page, §13.7): Today in a real yard carries the Needs-you card and the day's tools at the top (Day / Dispatch
+  lanes, Move the day, Copy yesterday's crews, Print run sheets), a Draft toggle on the four booking forms, Send on a draft, On site
+  and Day done on a Workers booking, Done on a re-stack (`public/live-today.js`, loaded beside `live-office.js`); the lanes view
+  replaces the calendar and day panel in place; the run sheet prints from the page (one sheet per driver). The Schedule and Control
+  room tiles of a real yard both mean Today. Back & counted lives on the trip card: Back, count later; Count it now; Sort it out with
+  the four outcomes (`public/live-returns.js`); the Stock page gets a Quarantine card, the Materials catalogue the owner's Replacement
+  values (with a paste from a spreadsheet), the board's Add stock the intake fields, Client sites the one finish question in place of
+  Remove site where scaffolding is on record; the board's top bar the one chip "Needs you · N". The phone page (`public/crew.js`)
+  shows a person's own asks with I'll be there / Can't make it (a reason in one tap), the yard hand's lists to pack (Packed, with
+  counts), returns to count and the re-stack (Done), the leading hand's gang (On site, Day done), each tap queued with its own key.
 - Tests: `test/live-dispatch.test.js` (the LIVE Today suite: never ticks; draft never sends; the driver's own yes; no driverless trip;
   sign-on never automatic; Move the day all-or-nothing for 10 items; Copy yesterday; run sheet; dispatch lanes; 0 state changes from the
   clock), `test/live-returns.test.js` (count later, every shortfall one outcome, LOST at replacement value, DAMAGED quarantined and never

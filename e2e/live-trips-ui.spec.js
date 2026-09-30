@@ -102,7 +102,7 @@ test('the board orders exact pieces, the phone confirms the trip, the board, the
   await phone.goto(new URL(new URL(link).pathname + new URL(link).hash, baseURL).href);
   await expect(phone.getByRole('heading', { name: 'My trips, Dave' })).toBeVisible({ timeout: 30000 });
   await expect.poll(() => phone.evaluate(() => location.hash)).toBe('');
-  await expect(phone.locator('.cr-card')).toContainText('To Bondi');
+  await expect(phone.locator('.cr-card:not(.cr-askcard)')).toContainText('To Bondi'); // his ask sits above the trip (ADR 0010)
   await phone.getByRole('button', { name: 'Loaded & left', exact: true }).click();
   await expect(phone.locator('input[data-cr-q]')).toHaveValue('13');
   await phone.locator('.cr-confirm button[type=submit]').click();

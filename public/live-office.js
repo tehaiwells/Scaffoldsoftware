@@ -2,6 +2,21 @@
 // against sent, and the steps people confirmed), the office confirming a step for a driver (recorded ON_BEHALF), booking a truck and driver
 // for an order, and a driver's phone link (Copy link, Text it) with the phones signed in. Loaded only in a real yard (operations.js imports
 // it when the company is LIVE, ADR 0007). The HTML functions are pure; loSetup wires one set of listeners on the document.
+// Back & counted (ADR 0010) lives in public/live-returns.js: the count, the four outcomes, quarantine, the site-finish question, values.
+import {
+  lrSetup,
+  lrTripExtraHTML,
+  lrCountLaterHTML,
+  lrForget,
+  lrQuarantineHTML,
+  lrFinishHTML,
+  lrAccount,
+  lrValuesHTML,
+  lrIntakeFieldsHTML,
+  lrIntakeRead,
+  __lr,
+} from './live-returns.js';
+export { lrQuarantineHTML, lrFinishHTML, lrAccount, lrValuesHTML, lrIntakeFieldsHTML, lrIntakeRead, __lr };
 const esc = (s) =>
   String(s ?? '').replace(
     /[&<>"']/g,
@@ -106,6 +121,16 @@ const localInput = (ms) => {
 /** @param {{get:(p:string)=>Promise<any>,cmd:(a:string,d:any)=>Promise<any>,notify:(t:string)=>void,redraw:()=>void,refresh:()=>Promise<any>,state:()=>any}} host */
 export function loSetup(host) {
   LO.host = host;
+  lrSetup({
+    ...host,
+    trip: (id) => tripById(id),
+    closeTrip: () => {
+      LO.open = null;
+    },
+    forget: loForget,
+    owner: () => !!host.owner?.(),
+    products: () => new Map((host.state?.()?.products ?? []).map((p) => [p.id, p])),
+  });
   if (typeof document === 'undefined' || LO.bound) return;
   LO.bound = true;
   document.addEventListener('click', onClick);
@@ -220,16 +245,6 @@ export function loDocket(t) {
     '</tr></thead><tbody>' +
     rows +
     '</tbody></table>' +
-    (ended && (t.notBack ?? []).length
-      ? '<p class="lo-warn">' +
-        esc(
-          plural(
-            t.notBack.reduce((n, x) => n + x.quantity, 0),
-            'piece',
-          ),
-        ) +
-        ' not counted back yet.</p>'
-      : '') +
     (owed.length && !t.undelivered
       ? '<p class="lo-warn">Short ' + esc(owed.map((x) => x.n + ' × ' + x.l.name).join(', ')) + ': still to send.</p>'
       : '')
@@ -328,7 +343,9 @@ function formHTML(t) {
     (LO.working ? ' disabled' : '') +
     '>' +
     esc(moves ? 'Confirm ' + label.toLowerCase() : 'Mark packed') +
-    '</button><button type="button" class="lo-link" data-lo-x>Never mind</button></div>' +
+    '</button><button type="button" class="lo-link" data-lo-x>Never mind</button>' +
+    (o.action === 'tripReturned' ? lrCountLaterHTML(t) : '') +
+    '</div>' +
     (moves
       ? '<p class="lo-note">Recorded as done by the office for ' +
         esc(t.driverName) +
@@ -399,6 +416,7 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
     (compact && !open ? '' : loDocket(t)) +
     loSteps(t) +
     (open ? formHTML(t) : acts ? '<div class="lo-acts">' + acts + '</div>' : '') +
+    lrTripExtraHTML(t, { ops }) +
     '</article>'
   );
 }
@@ -457,6 +475,16 @@ export function loWaitingHTML({ day = null, ops = true } = {}) {
               heldWords(o) +
               (o.neededOn ? ' · needed ' + o.neededOn.slice(8) + '/' + o.neededOn.slice(5, 7) : ''),
           ) +
+          (o.suggestedTruck
+            ? '<small class="lo-suggest">Next free: ' +
+              esc(
+                o.suggestedTruck.name +
+                  (o.suggestedTruck.driverName ? ' with ' + o.suggestedTruck.driverName : '') +
+                  ' · ' +
+                  o.suggestedTruck.why,
+              ) +
+              ' <em>(a suggestion: you pick)</em></small>'
+            : '') +
           '</small></span>' +
           (ops
             ? '<span class="lo-wait-acts"><button type="button" class="lo-btn" data-lo-book="' +
@@ -534,7 +562,7 @@ export function loPhoneHTML(driver) {
   if (made)
     h +=
       '<div class="lo-link-box"><p class="lo-link-h">' +
-      esc('Send this to ' + driver.name + '. It opens their trips on their phone. It works once, for 7 days.') +
+      esc('Send this to ' + driver.name + '. It opens their page on their phone. It works once, for 7 days.') +
       '</p><input class="lo-link-url" readonly value="' +
       esc(made.link) +
       '" aria-label="Phone link for ' +
@@ -601,6 +629,7 @@ async function run(action, data, done) {
   try {
     const r = await LO.host.cmd(action, data);
     loForget();
+    lrForget();
     done?.(r);
     if (r?.message) LO.host.notify(r.message);
     await LO.host.refresh();
@@ -656,9 +685,12 @@ function onClick(e) {
     LO.open = null;
     LO.formErr = null;
     const s = LO.host.state?.() ?? {};
-    LO.book.truck = (s.trucks ?? []).find((t) => !t.retired && !t.hired)?.id ?? null;
-    LO.book.driver = (loTeam()?.people ?? []).find((p) => p.kind === 'driver')?.id ?? null;
-    const o = orderById(d.loBook);
+    const o = orderById(d.loBook),
+      sug = o?.suggestedTruck ?? null;
+    // the suggestion starts the form; the office picks (a booked truck's lane, or any truck and driver)
+    LO.book.truck = sug?.truck ?? (s.trucks ?? []).find((t) => !t.retired && !t.hired)?.id ?? null;
+    LO.book.driver = sug?.driver ?? (loTeam()?.people ?? []).find((p) => p.kind === 'driver')?.id ?? null;
+    LO.book.truckPlan = sug?.truckPlan ?? null;
     // the company's day and clock come from the server; after 5 pm company time the booking starts on tomorrow
     const known = [...LO.days.values()].find((v) => v.data)?.data,
       today = known?.today,
@@ -685,7 +717,7 @@ function onClick(e) {
     LO.working = true;
     LO.copied = false;
     LO.host
-      .post('crew-links', { driver: d.loLink })
+      .post('crew-links', { person: d.loLink })
       .then((r) => {
         LO.phone = { ...r, driver: d.loLink };
         LO.devAt = 0;
@@ -743,6 +775,7 @@ function onInput(e) {
   } else if (t.dataset.loF) LO.form[t.dataset.loF] = t.value;
   else if (t.dataset.loB && LO.book) {
     LO.book[t.dataset.loB] = t.value;
+    if (t.dataset.loB !== 'time') LO.book.truckPlan = null; // not the suggested booking any more
     // a new truck or day: the time moves to that truck's next free hour (a time picked by hand stays)
     if ((t.dataset.loB === 'truck' || t.dataset.loB === 'day') && e.type === 'change' && !LO.book.timeSet) {
       const known = [...LO.days.values()].find((v) => v.data)?.data;
@@ -793,7 +826,9 @@ function onSubmit(e) {
       b[/** @type {any} */ (el).dataset.loB] = /** @type {any} */ (el).value;
     run(
       'tripBook',
-      { orders: [b.order], truck: b.truck, driver: b.driver, day: b.day || undefined, time: b.time || undefined },
+      b.truckPlan
+        ? { orders: [b.order], truckPlan: b.truckPlan, time: b.time || undefined }
+        : { orders: [b.order], truck: b.truck, driver: b.driver, day: b.day || undefined, time: b.time || undefined },
       () => {
         LO.book = null;
       },

@@ -1,8 +1,10 @@
-// A driver's phone: "My trips" (ADR 0009, audit thin #5). Opened from the link the office makes (/crew#t=<token>): the page claims the link
-// once (POST /api/crew/claim), which signs this phone in for that driver only, then clears the link from the address bar. Big type, high
-// contrast, big buttons, for a phone in the sun. Each trip has one next step: Loaded & left (check the list, change a number if different),
-// Delivered (received by: a name), and for bring-backs Collected and Back at yard. Every tap is kept on the phone first with its own
-// idempotency key (public/crew-queue.js) and sent when there is signal, so a tap is never lost and never counted twice.
+// A person's phone (ADR 0009 and 0010, audit thin #5, #33). Opened from the link the office makes (/crew#t=<token>): the page claims the
+// link once (POST /api/crew/claim), which signs this phone in for that person only, then clears the link from the address bar. Big type,
+// high contrast, big buttons, for a phone in the sun. A driver sees "My trips": each trip has one next step, Loaded & left (check the list,
+// change a number if different), Delivered (received by: a name), and for bring-backs Collected and Back at yard. Everyone sees their own
+// asks with I'll be there / Can't make it; a yard hand sees the lists to pack (Packed, with counts), the returns to count and the re-stack
+// (Done); a leading hand sees the gang (On site, Day done). Every tap is kept on the phone first with its own idempotency key
+// (public/crew-queue.js) and sent when there is signal, so a tap is never lost and never counted twice. Nothing here answers by itself.
 // The render functions are pure (the tests import them in Node); the page wiring runs only in a browser.
 import { createCrewQueue, sendTap } from './crew-queue.js';
 
@@ -17,7 +19,16 @@ export const CREW_ACTIONS = {
   tripDelivered: { label: 'Delivered', ask: 'Check what came off. Then type who took it.' },
   tripCollected: { label: 'Collected', ask: 'Check what went on the truck. Change a number if it is different.' },
   tripReturned: { label: 'Back at yard', ask: 'Check what came off at the yard.' },
+  // the yard hand, the leading hand and everyone's own answers (ADR 0010)
+  packConfirmed: { label: 'Packed', ask: 'Check what you packed. Change a number if it is different.' },
+  returnCount: { label: 'Counted back', ask: 'Count what came off the truck at the yard.' },
+  messageAnswer: { label: 'Your answer', ask: '' },
+  messageSeen: { label: 'Got it', ask: '' },
+  crewSignOn: { label: 'On site', ask: 'Who is here?' },
+  planDone: { label: 'Done', ask: '' },
 };
+// Why someone can't make it: three taps, or their own words.
+export const CREW_REASONS = ['Crook', 'Another job', "Something's come up"];
 // Back at yard straight after Loaded & left: the site would not take it (refused, or shut), so the load came back.
 export const CREW_UNDELIVERED = {
   label: 'Came back, not delivered',
@@ -337,6 +348,311 @@ export function conflictWords(p, me) {
     esc('You said ' + said + (p.input?.receivedBy ? ', ' + p.input.receivedBy : '') + '. Call the office.')
   );
 }
+// ---------------------------------------------------------------- everyone's own asks; the yard hand's packs, counts and task; the leading hand's gang
+/** A tap already waiting on this phone for a record (an ask, a trip, a booking). @param {any[]} pending @param {string} action @param {string} id */
+const waitingFor = (pending, action, id) =>
+  (pending ?? []).find(
+    (t) => t.action === action && (t.input?.id === id || t.input?.trip === id || t.input?.item === id),
+  );
+const sending = (v) => (v.offline ? 'saved, sends when there is signal' : 'sending…');
+/** One ask: "Can you make it?" with I'll be there / Can't make it (or Got it for a list to pack). @param {any} a @param {any} v */
+export function askCard(a, v) {
+  const w = waitingFor(v.pending, 'messageAnswer', a.id) ?? waitingFor(v.pending, 'messageSeen', a.id),
+    open = v.open?.ask === a.id,
+    when = esc(a.dayLabel + ' ' + (a.timeWords ?? '')),
+    where = a.siteName ? esc(a.siteName) : '',
+    done = !!w || !!a.answeredAt || a.seen || (!a.canAnswer && !a.canSee);
+  const said = w
+    ? w.action === 'messageSeen'
+      ? 'Got it'
+      : w.input?.yes
+        ? 'I’ll be there'
+        : 'Can’t make it' + (w.input?.reason ? ': ' + w.input.reason : '')
+    : a.words;
+  let body = '';
+  if (open)
+    body =
+      '<form class="cr-confirm cr-no" data-cr-ask-form="' +
+      esc(a.id) +
+      '"><p class="cr-ask">Why not? One tap, or your own words.</p><div class="cr-reasons">' +
+      CREW_REASONS.map(
+        (r) =>
+          '<button type="button" class="cr-chip' +
+          (v.reason === r ? ' on' : '') +
+          '" data-cr-reason="' +
+          esc(r) +
+          '">' +
+          esc(r) +
+          '</button>',
+      ).join('') +
+      '</div><label class="cr-rcv"><span>Or say why</span><input name="reason" maxlength="200" autocomplete="off" placeholder="A few words" value="' +
+      esc(v.reason && !CREW_REASONS.includes(v.reason) ? v.reason : '') +
+      '"></label>' +
+      (v.formError ? '<p class="cr-err" role="alert">' + esc(v.formError) + '</p>' : '') +
+      '<button type="submit" class="cr-big cr-soft">Send: can’t make it</button><button type="button" class="cr-link" data-cr-cancel>Never mind</button></form>';
+  else if (!done)
+    body =
+      a.subject === 'PACK'
+        ? '<button type="button" class="cr-big" data-cr-seen="' + esc(a.id) + '">Got it</button>'
+        : '<div class="cr-two"><button type="button" class="cr-big" data-cr-yes="' +
+          esc(a.id) +
+          '">I’ll be there</button><button type="button" class="cr-big cr-soft" data-cr-no="' +
+          esc(a.id) +
+          '">Can’t make it</button></div>';
+  return (
+    '<article class="cr-card cr-askcard' +
+    (done ? ' is-done' : '') +
+    (open ? ' is-open' : '') +
+    '" id="ask-' +
+    esc(a.id) +
+    '"><div class="cr-card-head"><span class="cr-time">' +
+    esc(a.time ?? '') +
+    '</span><span class="cr-where"><b>' +
+    (a.subject === 'DRIVE'
+      ? 'Drive' + (where ? ' to ' + where : '')
+      : a.subject === 'PACK'
+        ? 'Pack a list for ' + (where || 'a site')
+        : 'Work at ' + (where || 'a site')) +
+    '</b><small>' +
+    when +
+    (a.address ? ' · ' + esc(a.address) : '') +
+    '</small></span></div>' +
+    (a.text ? '<p class="cr-msg">' + esc(a.text) + '</p>' : '') +
+    (done
+      ? '<p class="cr-state st-' +
+        (w ? 'wait' : a.answer === 'YES' || a.seen ? 'yes' : a.answer === 'NO' ? 'no' : 'off') +
+        '">' +
+        esc(said) +
+        (w ? ' · ' + sending(v) : '') +
+        '</p>'
+      : '') +
+    (a.directions && !done
+      ? '<p class="cr-contact"><a href="' + esc(a.directions) + '" rel="noopener">Directions</a></p>'
+      : '') +
+    body +
+    '</article>'
+  );
+}
+const lineEdit = (l, q, was) =>
+  '<li' +
+  (q !== was ? ' class="changed"' : '') +
+  '><span class="cr-name">' +
+  esc(l.name) +
+  (q !== was ? '<small>Was ' + was + '</small>' : '') +
+  '</span><span class="cr-qty"><button type="button" class="cr-step" data-cr-step="-1" data-p="' +
+  esc(l.product) +
+  '" aria-label="One less ' +
+  esc(l.name) +
+  '">−</button><input type="number" inputmode="numeric" min="0" step="1" data-cr-q="' +
+  esc(l.product) +
+  '" value="' +
+  q +
+  '" aria-label="How many ' +
+  esc(l.name) +
+  '"><button type="button" class="cr-step" data-cr-step="1" data-p="' +
+  esc(l.product) +
+  '" aria-label="One more ' +
+  esc(l.name) +
+  '">+</button></span></li>';
+/** A list to pack (the yard hand): the lines, and Packed with counts. @param {any} trip @param {any} v */
+export function packCard(trip, v) {
+  const w = waitingFor(v.pending, 'packConfirmed', trip.id),
+    open = v.open?.pack === trip.id,
+    packed = trip.state === 'PACKED' || !!w;
+  let body;
+  if (open)
+    body =
+      '<form class="cr-confirm" data-cr-pack-form="' +
+      esc(trip.id) +
+      '"><p class="cr-ask">' +
+      CREW_ACTIONS.packConfirmed.ask +
+      '</p><ul class="cr-lines cr-edit">' +
+      (trip.lines ?? []).map((l) => lineEdit(l, v.draft?.[l.product] ?? l.asked, l.asked)).join('') +
+      '</ul>' +
+      (v.formError ? '<p class="cr-err" role="alert">' + esc(v.formError) + '</p>' : '') +
+      '<button type="submit" class="cr-big">Packed</button><button type="button" class="cr-link" data-cr-cancel>Not yet</button></form>';
+  else
+    body =
+      '<ul class="cr-lines">' +
+      (trip.lines ?? [])
+        .map(
+          (l) =>
+            '<li><span class="cr-name">' +
+            esc(l.name) +
+            (l.held < l.asked ? '<small>' + l.held + ' held in the yard</small>' : '') +
+            '</span><b class="cr-n">' +
+            l.asked +
+            '</b></li>',
+        )
+        .join('') +
+      '</ul>' +
+      (packed
+        ? '<p class="cr-state st-yes">Packed' + (w ? ' · ' + sending(v) : '') + '</p>'
+        : '<button type="button" class="cr-big" data-cr-pack="' + esc(trip.id) + '">Packed</button>');
+  return (
+    '<article class="cr-card' +
+    (packed ? ' is-done' : '') +
+    (open ? ' is-open' : '') +
+    '" id="pack-' +
+    esc(trip.id) +
+    '"><div class="cr-card-head"><span class="cr-time">' +
+    esc(trip.time ?? '') +
+    '</span><span class="cr-where"><b>' +
+    esc(trip.label + ' for ' + trip.siteName) +
+    '</b><small>' +
+    esc((trip.day === v.me?.today ? 'Today' : 'Tomorrow') + (trip.truckName ? ' · ' + trip.truckName : '')) +
+    (trip.driverName ? ' with ' + esc(trip.driverName) : '') +
+    '</small></span></div>' +
+    body +
+    '</article>'
+  );
+}
+/** A return back at the yard, not counted yet (the yard hand): Count it, per material. @param {any} trip @param {any} v */
+export function returnCard(trip, v) {
+  const w = waitingFor(v.pending, 'returnCount', trip.id),
+    open = v.open?.count === trip.id;
+  const body = open
+    ? '<form class="cr-confirm" data-cr-count-form="' +
+      esc(trip.id) +
+      '"><p class="cr-ask">' +
+      CREW_ACTIONS.returnCount.ask +
+      '</p><ul class="cr-lines cr-edit">' +
+      (trip.lines ?? [])
+        .filter((l) => l.onTruck > 0 || l.collected > 0)
+        .map((l) => lineEdit(l, v.draft?.[l.product] ?? l.onTruck, l.onTruck))
+        .join('') +
+      '</ul>' +
+      (v.formError ? '<p class="cr-err" role="alert">' + esc(v.formError) + '</p>' : '') +
+      '<button type="submit" class="cr-big">Counted</button><button type="button" class="cr-link" data-cr-cancel>Not yet</button></form>'
+    : w
+      ? '<p class="cr-state st-wait">Counted · ' + sending(v) + '</p>'
+      : '<ul class="cr-lines">' +
+        (trip.lines ?? [])
+          .map(
+            (l) =>
+              '<li><span class="cr-name">' +
+              esc(l.name) +
+              '</span><b class="cr-n">' +
+              (l.onTruck || l.collected || 0) +
+              '</b></li>',
+          )
+          .join('') +
+        '</ul><button type="button" class="cr-big" data-cr-count="' +
+        esc(trip.id) +
+        '">Count it</button>';
+  return (
+    '<article class="cr-card' +
+    (open ? ' is-open' : '') +
+    '" id="count-' +
+    esc(trip.id) +
+    '"><div class="cr-card-head"><span class="cr-time">' +
+    esc(trip.time ?? '') +
+    '</span><span class="cr-where"><b>' +
+    esc(trip.label + ' back from ' + trip.siteName) +
+    '</b><small>Back at the yard, not counted yet' +
+    (trip.driverName ? ' · ' + esc(trip.driverName) : '') +
+    '</small></span></div>' +
+    body +
+    '</article>'
+  );
+}
+/** The leading hand's gang for a booking: who said yes, who is on site; On site and Day done. @param {any} g @param {any} v */
+export function gangCard(g, v) {
+  const on = waitingFor(v.pending, 'crewSignOn', g.item),
+    done = waitingFor(v.pending, 'planDone', g.item),
+    open = v.open?.gang === g.item;
+  const people = (g.people ?? [])
+    .map(
+      (p) =>
+        '<li><span class="cr-name">' +
+        esc(p.name) +
+        '</span><span class="cr-pill ' +
+        (p.onSite || p.answer === 'YES' ? 'yes' : p.answer === 'NO' ? 'no' : 'wait') +
+        '">' +
+        esc(
+          p.onSite
+            ? 'On site'
+            : p.answer === 'YES'
+              ? 'Said yes'
+              : p.answer === 'NO'
+                ? 'Can’t make it'
+                : 'No answer yet',
+        ) +
+        '</span></li>',
+    )
+    .join('');
+  const here = (g.people ?? []).filter((p) => p.onSite).length;
+  let body = '<ul class="cr-lines cr-people">' + people + '</ul>';
+  if (open) {
+    const chosen = v.who ?? (g.people ?? []).filter((p) => p.answer === 'YES' && !p.onSite).map((p) => p.person);
+    body +=
+      '<form class="cr-confirm" data-cr-on-form="' +
+      esc(g.item) +
+      '"><p class="cr-ask">Who is here?</p><ul class="cr-who">' +
+      (g.people ?? [])
+        .filter((p) => !p.onSite)
+        .map(
+          (p) =>
+            '<li><label><input type="checkbox" data-cr-who="' +
+            esc(p.person) +
+            '"' +
+            (chosen.includes(p.person) ? ' checked' : '') +
+            '><span>' +
+            esc(p.name) +
+            '</span></label></li>',
+        )
+        .join('') +
+      '</ul>' +
+      (v.formError ? '<p class="cr-err" role="alert">' + esc(v.formError) + '</p>' : '') +
+      '<button type="submit" class="cr-big">On site</button><button type="button" class="cr-link" data-cr-cancel>Not yet</button></form>';
+  } else if (done) body += '<p class="cr-state st-yes">Day done · ' + sending(v) + '</p>';
+  else if (on) body += '<p class="cr-state st-wait">On site · ' + sending(v) + '</p>';
+  else
+    body +=
+      '<div class="cr-two">' +
+      (g.canSignOn ? '<button type="button" class="cr-big" data-cr-on="' + esc(g.item) + '">On site</button>' : '') +
+      (g.canDone && here
+        ? '<button type="button" class="cr-big cr-soft" data-cr-done="' + esc(g.item) + '">Day done</button>'
+        : '') +
+      '</div>';
+  return (
+    '<article class="cr-card' +
+    (open ? ' is-open' : '') +
+    '" id="gang-' +
+    esc(g.item) +
+    '"><div class="cr-card-head"><span class="cr-time">' +
+    esc(g.time ?? '') +
+    '</span><span class="cr-where"><b>' +
+    esc('Your gang at ' + g.siteName) +
+    '</b><small>' +
+    esc(here + ' of ' + (g.people ?? []).length + ' on site') +
+    '</small></span></div>' +
+    body +
+    '</article>'
+  );
+}
+/** A yard task (the re-stack): one Done tap. @param {any} x @param {any} v */
+export function taskCard(x, v) {
+  const w = waitingFor(v.pending, 'planDone', x.id);
+  return (
+    '<article class="cr-card' +
+    (w ? ' is-done' : '') +
+    '" id="task-' +
+    esc(x.id) +
+    '"><div class="cr-card-head"><span class="cr-time">' +
+    esc(x.time ?? '') +
+    '</span><span class="cr-where"><b>' +
+    esc(x.words) +
+    '</b><small>Top up the part-full stillages, stack the empties. Nothing leaves the yard.</small></span></div>' +
+    (w
+      ? '<p class="cr-state st-yes">Done · ' + sending(v) + '</p>'
+      : '<button type="button" class="cr-big" data-cr-done="' + esc(x.id) + '">Done</button>') +
+    '</article>'
+  );
+}
+/** "My trips" for a driver, "My day" for anyone else. @param {any} me */
+export const crewTitle = (me) =>
+  (me?.person?.kind === 'worker' ? 'My day, ' : 'My trips, ') + (me?.person?.name ?? me?.driver?.name ?? '');
 /** The whole page. @param {any} v */
 export function crewPage(v) {
   if (v.notSigned) {
@@ -399,6 +715,7 @@ export function crewPage(v) {
           '">OK</button></div>',
       )
       .join('');
+  const driver = me.person ? me.person.kind === 'driver' : true;
   const list = order.length
     ? order
         .map(
@@ -412,20 +729,58 @@ export function crewPage(v) {
               .join(''),
         )
         .join('')
-    : '<section class="cr-none">' +
-      TRUCK +
-      '<h2>No trips for you today</h2><p>New trips show here when the office books them.</p></section>';
+    : driver
+      ? '<section class="cr-none">' +
+        TRUCK +
+        '<h2>No trips for you today</h2><p>New trips show here when the office books them.</p></section>'
+      : '';
+  // everyone's own asks first (an unanswered one is the thing to do), then the yard hand's and leading hand's work, then a driver's trips
+  const asks = (me.asks ?? [])
+    .slice()
+    .sort((a, b) => Number(!a.canAnswer && !a.canSee) - Number(!b.canAnswer && !b.canSee));
+  const section = (title, cards) => (cards.length ? '<h2 class="cr-day">' + title + '</h2>' + cards.join('') : '');
+  const other =
+    section(
+      'Can you make it?',
+      asks.map((a) => askCard(a, v)),
+    ) +
+    section(
+      'Your gang',
+      (me.gang ?? []).map((g) => gangCard(g, v)),
+    ) +
+    section(
+      'Lists to pack',
+      (me.packs ?? []).map((t) => packCard(t, v)),
+    ) +
+    section(
+      'Count what came back',
+      (me.returns ?? []).map((t) => returnCard(t, v)),
+    ) +
+    section(
+      'Yard jobs',
+      (me.tasks ?? []).map((x) => taskCard(x, v)),
+    );
+  const quiet =
+    !driver && !other && !order.length
+      ? '<section class="cr-none">' +
+        TRUCK +
+        '<h2>Nothing for you right now</h2><p>Asks from the office show here. Answer them with one tap.</p></section>'
+      : '';
   return (
     '<header class="cr-top">' +
     TRUCK +
     '<div><b>' +
     esc(typeof me.company === 'string' ? me.company : (me.company?.name ?? 'Scaffold Yard')) +
     '</b><h1>' +
-    esc('My trips, ' + (me.driver?.name ?? '')) +
+    esc(crewTitle(me)) +
     '</h1></div></header>' +
     bar +
+    other +
     list +
-    '<footer class="cr-foot"><button type="button" class="cr-link" data-cr-refresh>Check for new trips</button><button type="button" class="cr-link cr-out" data-cr-signout>Sign out this phone</button></footer>'
+    quiet +
+    '<footer class="cr-foot"><button type="button" class="cr-link" data-cr-refresh>' +
+    (driver ? 'Check for new trips' : 'Check for new asks') +
+    '</button><button type="button" class="cr-link cr-out" data-cr-signout>Sign out this phone</button></footer>'
   );
 }
 
@@ -460,6 +815,8 @@ function boot() {
     open: null,
     draft: {},
     rcv: '',
+    reason: '',
+    who: null,
     offline: false,
     cachedAt: null,
     notSigned: null,
@@ -544,6 +901,17 @@ function boot() {
       V.offline = true;
     }
   }
+  // one of the new taps (an answer, a pack, a count, On site, Done): kept on the phone first, then sent
+  const tapNow = (action, input) => {
+    queue.tap(action, input);
+    V.open = null;
+    V.draft = {};
+    V.reason = '';
+    V.who = null;
+    V.formError = null;
+    draw();
+    flush();
+  };
   const openFor = (tripId, action) => {
     V.open = { trip: tripId, action };
     V.draft = {};
@@ -561,6 +929,39 @@ function boot() {
     const b = /** @type {HTMLElement} */ (e.target).closest('button');
     if (!b) return;
     if (b.dataset.crGo) return openFor(b.dataset.trip, b.dataset.crGo);
+    if (b.dataset.crYes) return tapNow('messageAnswer', { id: b.dataset.crYes, yes: true });
+    if (b.dataset.crSeen) return tapNow('messageSeen', { id: b.dataset.crSeen });
+    if (b.dataset.crNo) {
+      V.open = { ask: b.dataset.crNo };
+      V.reason = '';
+      V.formError = null;
+      draw();
+      document.getElementById('ask-' + b.dataset.crNo)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    if (b.dataset.crReason) {
+      V.reason = V.reason === b.dataset.crReason ? '' : b.dataset.crReason;
+      V.formError = null;
+      draw();
+      return;
+    }
+    if (b.dataset.crPack || b.dataset.crCount || b.dataset.crOn) {
+      V.open = b.dataset.crPack
+        ? { pack: b.dataset.crPack }
+        : b.dataset.crCount
+          ? { count: b.dataset.crCount }
+          : { gang: b.dataset.crOn };
+      V.draft = {};
+      V.who = null;
+      V.formError = null;
+      draw();
+      const id =
+        (b.dataset.crPack ? 'pack-' : b.dataset.crCount ? 'count-' : 'gang-') +
+        (b.dataset.crPack ?? b.dataset.crCount ?? b.dataset.crOn);
+      document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    if (b.dataset.crDone) return tapNow('planDone', { id: b.dataset.crDone });
     if (b.dataset.crRcv) {
       V.rcv = b.dataset.crRcv;
       V.formError = null;
@@ -569,6 +970,9 @@ function boot() {
     }
     if (b.hasAttribute('data-cr-cancel')) {
       V.open = null;
+      V.reason = '';
+      V.who = null;
+      V.formError = null;
       draw();
       return;
     }
@@ -623,11 +1027,63 @@ function boot() {
       t.closest('li')?.classList.toggle('changed', true);
     }
     if (t.name === 'receivedBy') V.rcv = t.value;
+    if (t.name === 'reason') V.reason = t.value;
+    if (t.dataset.crWho) {
+      const list = [...root.querySelectorAll('[data-cr-who]')]
+        .filter((i) => /** @type {HTMLInputElement} */ (i).checked)
+        .map((i) => /** @type {HTMLElement} */ (i).dataset.crWho);
+      V.who = list;
+    }
   });
+  // the counts typed into a pack or a count form, per material
+  const typed = (f, key) => {
+    const lines = [];
+    for (const i of f.querySelectorAll('[data-cr-q]')) {
+      const el = /** @type {HTMLInputElement} */ (i);
+      lines.push({ product: el.dataset.crQ ?? '', quantity: Math.max(0, Math.floor(Number(el.value) || 0)) });
+    }
+    return lines;
+  };
   root.addEventListener('submit', (e) => {
     e.preventDefault();
     const f = /** @type {HTMLFormElement} */ (e.target);
     if (!V.open) return;
+    if (f.dataset.crAskForm) {
+      const reason = String(V.reason ?? new FormData(f).get('reason') ?? '').trim();
+      tapNow('messageAnswer', { id: f.dataset.crAskForm, yes: false, ...(reason ? { reason } : {}) });
+      return;
+    }
+    if (f.dataset.crPackForm) {
+      const trip = V.me?.packs?.find((t) => t.id === f.dataset.crPackForm),
+        lines = typed(f);
+      if (!trip) return;
+      const changed = lines.some((l) => l.quantity !== (trip.lines.find((x) => x.product === l.product)?.asked ?? 0));
+      tapNow('packConfirmed', changed ? { trip: trip.id, lines } : { trip: trip.id });
+      return;
+    }
+    if (f.dataset.crCountForm) {
+      const trip = V.me?.returns?.find((t) => t.id === f.dataset.crCountForm),
+        lines = typed(f);
+      if (!trip) return;
+      tapNow('returnCount', { trip: trip.id, lines });
+      return;
+    }
+    if (f.dataset.crOnForm) {
+      const g = V.me?.gang?.find((x) => x.item === f.dataset.crOnForm);
+      if (!g) return;
+      const people =
+        V.who ??
+        [...f.querySelectorAll('[data-cr-who]')]
+          .filter((i) => /** @type {HTMLInputElement} */ (i).checked)
+          .map((i) => /** @type {HTMLElement} */ (i).dataset.crWho);
+      if (!people.length) {
+        V.formError = 'Tick who is here.';
+        draw();
+        return;
+      }
+      tapNow('crewSignOn', { item: g.item, people });
+      return;
+    }
     const trip = V.me?.trips.map((t) => crewTrip(t, queue.pending())).find((t) => t.id === V.open.trip);
     if (!trip) return;
     const action = V.open.action,

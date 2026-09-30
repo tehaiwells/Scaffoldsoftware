@@ -2785,3 +2785,75 @@ body.in-game #app {
   color: #3f5a33;
   line-height: 1.6;
 }
+/* ---- A real yard's "Needs you" chip in the top bar (ADR 0010): one calm count, tapping it opens Today ---- */
+.gm-needs {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #f1c23288;
+  background: #f1c23222;
+  color: #fff3c4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.gm-needs:hover,
+.gm-needs:focus-visible {
+  background: #f1c23244;
+  border-color: #f1c232;
+}
+.gm-needs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f1c232;
+  box-shadow: 0 0 0 3px #f1c2322e;
+}
+/* Add stock in a real yard: what it cost and where it came from */
+.gm-intake {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #f4f2ea;
+  border: 1px solid #e3ddcc;
+}
+.gm-intake-h {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #3d5446;
+}
+.gm-intake-h small {
+  font-weight: 600;
+  color: #6b7f72;
+}
+.gm-intake-f {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+.gm-intake-f label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  font-weight: 750;
+  color: #3d5446;
+}
+.gm-intake-f input {
+  min-height: 34px;
+  margin: 0;
+  font-size: 13px;
+}
+@media (max-width: 720px) {
+  .gm-needs {
+    margin-left: 4px;
+    padding: 3px 8px;
+  }
+}
