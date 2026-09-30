@@ -166,7 +166,10 @@ test('the site card: bills to, the off-hire notice with its pickup number, an op
   __lb.open('offHire', f.site.id, { when: D0, pickupDay: D0 });
   html = lbSiteHTML(site, { customers, offHires: null, ops: true, today: D0, products });
   assert.match(html, /name="when" type="date" value="2026-10-13"[^>]*max="2026-10-13"/);
-  assert.match(html, /name="pickupDay" type="date" value="2026-10-13"[^>]*min="2026-10-13"/);
+  // a pickup day already gone is allowed (paperwork caught up later: the pickup is then overdue on Needs you)
+  assert.match(html, /name="pickupDay" type="date" value="2026-10-13"/);
+  assert.doesNotMatch(html, /name="pickupDay"[^>]*min=/);
+  assert.match(html, /A pickup day already gone is overdue on Needs you/);
   assert.match(html, /Record the off-hire/);
   __lb.open(null);
   // the builder calls it off: the card shows the pickup number and the bring-back; once collected, the collection day
@@ -470,7 +473,10 @@ test('go-live on screen: the lists, a refused row explained, what came in; the p
   html = lbParallelHTML();
   assert.match(html, /<b>Acme Builders<\/b><small>1 site<\/small><\/td><td class="num">\$110\.00<\/td>/);
   assert.match(html, /data-lb-typed="[^"]+"[^>]*value="100\.00"/);
-  assert.match(html, /<td class="num is-over"><b>\$10\.00<\/b><small>\+10%<\/small>/);
+  assert.match(
+    html,
+    /<td class="num is-over" data-lb-diff="[^"]+" data-lb-app="11000"><b>\$10\.00<\/b><small>\+10%<\/small>/,
+  );
   assert.match(html, /Work it out again/);
 });
 

@@ -700,6 +700,11 @@ export const returnsMethods = {
     }
     let onSite = 0;
     for (const c of this.tripContainersAt(siteId)) for (const l of this.repo.lines(c.id)) onSite += l.quantity;
+    // gear already on hire when the yard went live (opening lots, ADR 0011): on the record, never sent by a truck
+    const opening = cached(
+      this.db,
+      "SELECT COALESCE(SUM(quantity),0) n FROM ledger WHERE company_id=? AND event='OPENING_BALANCE' AND destination=? AND actor_kind='IMPORT'",
+    ).get(this.repo.company, siteId).n;
     const charged = cached(
       this.db,
       "SELECT COALESCE(SUM(quantity),0) n FROM charge_lines WHERE company_id=? AND site_id=? AND reason IN ('LOST','SITE_FINISH')",
@@ -712,7 +717,7 @@ export const returnsMethods = {
     // K in the question: what the site never brought back and nobody has settled (on its record, or missing from a trip). The integrity
     // number: sent - back - on site - charged - written off, 0 at every closed site.
     const missing = onSite + unresolved,
-      unaccounted = sent - (back + damaged) - onSite - charged - writtenOff,
+      unaccounted = sent + opening - (back + damaged) - onSite - charged - writtenOff,
       active = site?.status === 'ACTIVE';
     const tail =
       (charged ? ' · ' + charged + ' charged' : '') + (writtenOff ? ' · ' + writtenOff + ' written off' : '');
@@ -720,6 +725,7 @@ export const returnsMethods = {
       site: siteId,
       siteName: site?.name ?? 'The site',
       sent,
+      opening,
       collected,
       back: back + damaged,
       counted: back,
@@ -731,10 +737,19 @@ export const returnsMethods = {
       unresolvedTrips,
       missing,
       unaccounted,
-      words: 'sent ' + sent + ' · back ' + (back + damaged) + ' · ' + missing + ' missing',
+      words:
+        (opening ? 'on hire at go-live ' + opening + ' · ' : '') +
+        'sent ' +
+        sent +
+        ' · back ' +
+        (back + damaged) +
+        ' · ' +
+        missing +
+        ' missing',
       // the same numbers as an active site's card says them: gear on site is on hire, not missing, until the site finishes
       summary: active
-        ? 'sent ' +
+        ? (opening ? 'on hire at go-live ' + opening + ' · ' : '') +
+          'sent ' +
           sent +
           ' · back ' +
           (back + damaged) +

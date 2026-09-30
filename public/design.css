@@ -32636,6 +32636,56 @@ body.tdh-sheet-open {
   color: #2f4f3d;
   font-size: 13px;
 }
+/* why Issue is off: a pickup still waiting, with the one button that fixes it */
+.lb-warn {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #fff4e5;
+  color: #7a4a10;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.lb-warn .lb-btn {
+  margin-left: 6px;
+}
+.lb-st-reason,
+.lb-drift {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: #5b7466;
+}
+.lb-drift {
+  color: #7a4a10;
+}
+.lb-line.is-zero td {
+  color: #6c7f70;
+}
+.lb-check-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #3d5a45;
+}
+.lb-check-line input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+}
+.hr-pickup {
+  display: block;
+  color: #7a4a10;
+  font-weight: 600;
+}
+.hr-apply-from {
+  margin-left: 6px;
+}
 /* go-live */
 .lb-chips {
   display: flex;
@@ -32782,12 +32832,64 @@ body.tdh-sheet-open {
   .lb-table td {
     padding: 6px 5px;
   }
-  /* a phone: the rate column steps aside (it is in the reprint); pieces, piece-days and the amount stay */
-  .lb-table th:nth-child(4),
-  .lb-table td:nth-child(4) {
+  /* a phone: each line stacks (the material first, then pieces · piece-days · rate · amount with the amount on the right) instead
+     of a sideways scroller that hides the amount */
+  .lb-table thead {
     display: none;
   }
+  .lb-table {
+    min-width: 0; /* not the page's 520 px table minimum: the lines stack */
+  }
+  .lb-table,
+  .lb-table tbody,
+  .lb-table tfoot,
+  .lb-table tr,
+  .lb-table td {
+    display: block;
+  }
+  .lb-table-wrap {
+    overflow-x: visible;
+  }
+  .lb-table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid #e6eadf;
+  }
+  .lb-table td {
+    border-bottom: 0;
+    padding: 2px 0;
+  }
+  .lb-table td.lb-c-what {
+    padding-bottom: 4px;
+  }
+  .lb-table td.num {
+    display: inline-block;
+    width: auto;
+    text-align: left;
+    padding-right: 10px;
+    white-space: normal;
+  }
+  .lb-table td.num:empty {
+    display: none;
+  }
+  .lb-table td.num[data-l]::before {
+    content: attr(data-l) ' ';
+    color: #6c7f70;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .lb-table td.lb-c-amt {
+    float: right;
+    padding-right: 0;
+    font-size: 14px;
+  }
+  .lb-table tfoot tr {
+    border-bottom: 0;
+  }
   .lb-table tfoot td[colspan] {
-    display: table-cell;
+    display: inline-block;
+  }
+  .lb-table tfoot td.num {
+    float: right;
   }
 }

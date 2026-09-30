@@ -94,6 +94,7 @@ const loHost = {
   // billing (public/live-billing.js): what the signed-in person may do, the Needs-you jump to a customer's statement, the parts picker again
   perms: () => account?.permissions ?? [],
   pickCustomer: (id) => LBM?.lbPick?.(id),
+  openAdjust: (statement, cents, words) => LBM?.lbAdjust?.(statement, cents, words),
   parts: () => {
     if (!isOps()) return;
     if (view !== 'HOME' && !schGo('HOME')) return;
@@ -413,7 +414,7 @@ function bind(id, action, transform = (x) => x, after = null) {
     const button = node.querySelector('button[type=submit],button:not([type])');
     if (button) button.disabled = true;
     try {
-      const result = await command(action, transform(data));
+      const result = await command(action, await transform(data));
       notify(result?.message ?? 'Saved.');
       after?.(result);
       await refresh(true);
@@ -11029,7 +11030,7 @@ function siBillFields(s = null) {
   const L = lb(),
     c = L?.lbCustomers();
   return (
-    '<label>Customer<select name="customer"' +
+    '<label>Bills to (customer)<select name="customer"' +
     (c ? '' : ' disabled') +
     '><option value="">' +
     (c ? 'No customer yet' : 'Loading customers…') +
@@ -11046,10 +11047,26 @@ function siBillFields(s = null) {
           '</option>',
       )
       .join('') +
-    '</select></label><label>PO (optional)<input name="po" maxlength="60" value="' +
+    '</select></label><label>New customer (not in the list yet)<input name="newCustomer" maxlength="120" placeholder="e.g. Acme Builders" autocomplete="off"></label><label>PO (optional)<input name="po" maxlength="60" value="' +
     esc(s?.po ?? '') +
     '"></label>'
   );
+}
+// A site form of a real yard: a customer typed as new is made first (Client sites' Customers card takes the ABN and terms after), then
+// the site bills to it; the free-text client field is the Practice yard's only.
+async function siBillData(d) {
+  if (!liveMode()) return d;
+  const { newCustomer, ...rest } = d;
+  if (newCustomer && String(newCustomer).trim()) {
+    const made = await command('customerSave', { name: String(newCustomer).trim() });
+    rest.customer = made.customer.id;
+    rest.client = made.customer.name;
+  } else if (rest.customer) {
+    const L = lb(),
+      c = (L?.lbCustomers()?.customers ?? []).find((x) => x.id === rest.customer);
+    if (c) rest.client = c.name;
+  }
+  return rest;
 }
 function siBillBlock(s, ops) {
   if (!liveMode()) return '';
@@ -11135,9 +11152,12 @@ function siCard(s, ix) {
             '<span>Edit site details<small>Name, address, client, contact and supervisor</small></span></span>',
           text('name', 'Site name', s.name) +
             text('address', 'Address / location', s.address) +
-            '<label>Client company<input name="client" maxlength="250" value="' +
-            esc(s.client ?? '') +
-            '"></label><label>Site contact<input name="contact" maxlength="250" value="' +
+            (liveMode()
+              ? ''
+              : '<label>Client company<input name="client" maxlength="250" value="' +
+                esc(s.client ?? '') +
+                '"></label>') +
+            '<label>Site contact<input name="contact" maxlength="250" value="' +
             esc(s.contact ?? '') +
             '"></label><label>Contact email<input name="email" type="email" maxlength="254" value="' +
             esc(s.email ?? '') +
@@ -11275,7 +11295,8 @@ function siteView() {
             '<span>Create a site<small>Name, address, client and contact; draw its shape after</small></span></span>',
           text('name', 'Site name') +
             text('address', 'Address / location') +
-            '<label>Client company (optional)<input name="client" maxlength="250"></label><label>Site contact (optional)<input name="contact" maxlength="250"></label><label>Contact email (optional)<input name="email" type="email" maxlength="254"></label><label>Contact phone (optional)<input name="phone" maxlength="60"></label>' +
+            (liveMode() ? '' : '<label>Client company (optional)<input name="client" maxlength="250"></label>') +
+            '<label>Site contact (optional)<input name="contact" maxlength="250"></label><label>Contact email (optional)<input name="email" type="email" maxlength="254"></label><label>Contact phone (optional)<input name="phone" maxlength="60"></label>' +
             siBillFields() +
             `<label>Assigned supervisor<select name="supervisor"><option value="">Not assigned</option>${options(account.users)}</select></label>`,
           'Create site',
@@ -11453,8 +11474,9 @@ function bindViews() {
   bind('container', 'container');
   bind('opening', 'opening');
   bind('truck', 'truck');
-  bind('site', 'site');
-  for (const s of state.sites) bind('site-details-' + s.id, 'siteDetails', (d) => ({ ...d, id: s.id }));
+  bind('site', 'site', (d) => siBillData(d));
+  for (const s of state.sites)
+    bind('site-details-' + s.id, 'siteDetails', async (d) => ({ ...(await siBillData(d)), id: s.id }));
   if (selected)
     for (const l of state.balances.filter((l) => l.container === selected))
       bind('remove-line-' + selected + '-' + l.product_id, 'removeStock', (d) => ({
@@ -19448,6 +19470,15 @@ function hrSitesCard(d) {
     (r.status !== 'ACTIVE' ? ' &middot; archived' : '') +
     (r.overrides ? ' &middot; ' + hrN(r.overrides, 'negotiated rate') : '') +
     '</small>' +
+    (r.pickup
+      ? '<small class="hr-pickup">hire stopped ' +
+        esc(hrDay(r.pickup.stoppedOn)) +
+        ' (off-hire called by ' +
+        esc(r.pickup.who) +
+        '), awaiting pickup ' +
+        esc(r.pickup.pickup) +
+        '</small>'
+      : '') +
     hrCollection(r) +
     '</span></span></td>' +
     '<td class="num hr-c-pcs" data-label="On hire">' +
@@ -20048,6 +20079,15 @@ function hrRateRow(d, p) {
     (msg ? ' ' + (msg.ok ? 'ok' : 'bad') : '') +
     '" role="status">' +
     (msg ? esc(msg.text) : '') +
+    (msg?.earliest
+      ? ' <button type="button" class="hr-link hr-apply-from" data-hr-apply-from="' +
+        esc(msg.earliest) +
+        '" data-hr-apply-pid="' +
+        esc(p.id) +
+        '">Apply from ' +
+        esc(hrDay(msg.earliest)) +
+        '</button>'
+      : '') +
     '</span></span>' +
     (site ? '<p class="hr-rate-result" data-hr-result>' + hrResult(d, p.id) + '</p>' : '') +
     '</div>'
@@ -20231,7 +20271,8 @@ async function hrSave(pid, btn) {
     document.activeElement?.blur?.();
     await hrLoad(true);
   } catch (e) {
-    hrMsg.set(key, { ok: false, text: e.message });
+    // a real yard's rate refused past an issued statement (BILLED): the earliest day it may start is one button away
+    hrMsg.set(key, { ok: false, text: e.message, earliest: e.code === 'BILLED' ? (e.detail?.earliest ?? null) : null });
     hrRowsPaint();
   }
 }
@@ -20475,6 +20516,12 @@ function hrBindOnce() {
     }
     if ((b = t.closest('[data-hr-save]'))) {
       hrSave(b.dataset.hrSave, b);
+      return;
+    }
+    if ((b = t.closest('[data-hr-apply-from]'))) {
+      hrEff = b.dataset.hrApplyFrom;
+      hrEffAll = false;
+      hrSave(b.dataset.hrApplyPid, b);
       return;
     }
     if (t.closest('[data-hr-retry]')) {

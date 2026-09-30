@@ -615,12 +615,12 @@ test('unbilled since: the view, Today’s business card, and the UNBILLED rule a
     items.map((i) => [i.words, i.action.label]),
     [
       ['Coogee has gear on hire and no customer to bill', 'Pick a customer'],
-      ['Acme Builders: $330.00 unbilled since Thu 15 Oct (33 days)', 'Issue statement'],
+      ['Acme Builders: $330.00 unbilled since Thu 15 Oct', 'Issue statement'],
     ],
   );
   const gm = member(f, 'GENERAL_MANAGER');
   const theirs = gm.sim.needsYou().items.find((i) => i.kind === 'UNBILLED' && /Acme/.test(i.words));
-  assert.equal(theirs.words, 'Acme Builders: unbilled since Thu 15 Oct (33 days)', 'no amount without finance.view');
+  assert.equal(theirs.words, 'Acme Builders: unbilled since Thu 15 Oct', 'no amount without finance.view');
 });
 
 test('permissions: Accounts sees money and issues statements, never operations; supervisors and crew never see money', (t) => {

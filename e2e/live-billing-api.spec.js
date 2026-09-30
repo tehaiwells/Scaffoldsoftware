@@ -162,10 +162,19 @@ test('customer, site, send, deliver, off-hire, collect, statement, Xero file, id
   expect((await bad.json()).detail.check.rows[0].problems[0]).toMatch(/not understood/);
   const since = addDays(today, -20);
   await cmd('goLiveImport', { kind: 'onHire', rows: [{ Site: 'Manly', Part: product.name, Qty: '8', Since: since }] });
+  // a statement runs to yesterday while the lot is still out (a statement to today is refused while gear is on hire)
+  const toToday = await desk.post('/api/commands/statementIssue', {
+    data: { customer: gl.made[0].id, to: today },
+    headers: { 'Idempotency-Key': key() },
+  });
+  expect(toToday.status()).toBe(409);
+  expect((await toToday.json()).code).toBe('TO_TODAY');
   const first = (await cmd('statementIssue', { customer: gl.made[0].id })).statement;
   expect(first.number).toBe('ST-000002');
   expect(first.sites[0].from).toBe(since);
-  expect(first.sites[0].lines[0].pieceDays).toBe(21 * 8);
-  expect(first.subtotal).toBe(21 * 8 * 100, 'priced at the rate of each day: the new rate starts tomorrow');
+  expect(first.to).toBe(addDays(today, -1));
+  expect(first.sites[0].lines[0].pieceDays).toBe(20 * 8);
+  expect(first.subtotal).toBe(20 * 8 * 100, 'priced at the rate of each day: the new rate starts tomorrow');
+  expect(first.gst).toBe(1600);
   await desk.dispose();
 });

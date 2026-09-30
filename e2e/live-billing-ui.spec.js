@@ -128,17 +128,31 @@ test('customer → site → send → deliver → opening lot → off-hire → co
   await expect(siteCard).toContainText('by Mick · pickup B-1');
   const offHires = (await api('off-hire')).offHires;
   expect(offHires[0].label).toBe('P-1');
-  const coll = await book([offHires[0].order]);
-  await cmd('tripCollected', { trip: coll.id });
-  await cmd('tripReturned', { trip: coll.id });
 
-  // ---- Hire: the customer's preview, then Issue → locked and numbered; the rule's words on the line
+  // ---- Hire while the pickup is still waiting: the preview says so and offers the day before the call; Issue is off
   await page.goto('/?view=HIRE');
   await expect(page.getByRole('heading', { level: 1, name: 'Hire', exact: true })).toBeVisible({ timeout: 45000 });
   const st = page.locator('#lb-statements');
   await expect(st).toContainText('Choose a customer', { timeout: 45000 });
   await st.locator('[data-lb-cust]').selectOption(acme.id);
+  await expect(st.locator('.lb-warn')).toContainText('Pickup P-1 at Bondi is not collected yet', { timeout: 30000 });
+  await expect(st.getByRole('button', { name: 'Issue statement', exact: true })).toHaveCount(0);
+  await st
+    .locator('.lb-warn')
+    .getByRole('button', { name: /^Up to / })
+    .click();
+  await expect(st).toContainText('$45.00', { timeout: 30000 }); // the lot to the day before the call: 5 pieces × 9 days
+  await expect(st).not.toContainText('Off-hire called');
+  await expect(st.getByRole('button', { name: 'Issue statement', exact: true })).toBeVisible();
+  // the gear is collected the same day: back to the default (yesterday), the rule's words on the line
+  const coll = await book([offHires[0].order]);
+  await cmd('tripCollected', { trip: coll.id });
+  await cmd('tripReturned', { trip: coll.id });
+  await page.goto('/?view=HIRE');
+  await expect(st).toContainText('Choose a customer', { timeout: 45000 });
+  await st.locator('[data-lb-cust]').selectOption(acme.id);
   await expect(st).toContainText('Preview', { timeout: 30000 });
+  expect(await st.locator('[data-lb-to]').inputValue()).toBe(addDays(today, -1));
   await expect(st).toContainText('Off-hire called');
   await expect(st).toContainText('by Mick (pickup P-1)');
   await expect(st).toContainText('Company rule: hire stops on the off-hire day');
@@ -174,6 +188,10 @@ test('customer → site → send → deliver → opening lot → off-hire → co
   expect(lines[1]).toContain('"45.00"');
   expect(lines[1]).toContain('"200"');
   await expect(st).toContainText('When Xero asks, the amounts are Tax Exclusive', { timeout: 30000 });
+  await expect(st).toContainText('1 statement, $49.50 inc GST');
+  await expect(st.locator('.lb-st').first()).toContainText('in the Xero file for', { timeout: 30000 });
+  await expect(st.locator('.lb-st').first()).toContainText('(downloaded ');
+  await expect(st.locator('[data-lb-fmt="generic"]')).toBeEnabled();
   // the reprint: the same bytes twice, and the same after a rate change dated tomorrow
   const print1 = await (await page.request.get('/api/statement.txt?id=' + issued.id)).text();
   expect(print1).toMatch(/HIRE STATEMENT ST-000001/);
@@ -216,11 +234,22 @@ test('customer → site → send → deliver → opening lot → off-hire → co
   const hh = (await api('customers')).customers.find((c) => c.name === 'Harbour Homes');
   await st.locator('[data-lb-cust]').selectOption(hh.id);
   await expect(st).toContainText('Manly', { timeout: 30000 });
-  await expect(st).toContainText('$168.00'); // 8 pieces × 21 days at $1.00 (the new rate starts tomorrow)
+  await expect(st).toContainText('$160.00'); // 8 pieces × 20 days at $1.00 to yesterday (the new rate starts tomorrow)
   await st.getByRole('button', { name: 'Issue statement', exact: true }).click();
   await expect(st).toContainText('ST-000002 issued', { timeout: 30000 });
   const second = (await api('statements')).statements.find((s) => s.number === 'ST-000002');
   expect(second.from).toBe(since);
-  expect(second.subtotal).toBe(21 * 8 * 100);
+  expect(second.to).toBe(addDays(today, -1));
+  expect(second.subtotal).toBe(20 * 8 * 100);
+  // ---- reversed with a reason: the reason is on the row and on the reversing document
+  const row2 = st.locator('.lb-st').filter({ hasText: 'ST-000002' }).first();
+  await row2.getByRole('button', { name: 'Reverse…', exact: true }).click();
+  await row2.locator('input[name=reason]').fill('Wrong PO, reissue next week');
+  await row2.getByRole('button', { name: 'Reverse it', exact: true }).click();
+  await expect(st.locator('.lb-st').first()).toContainText('ST-000003', { timeout: 30000 });
+  await expect(st.locator('.lb-st').first()).toContainText('Reverses ST-000002: Wrong PO, reissue next week');
+  const third = (await api('statements')).statements.find((s) => s.number === 'ST-000003');
+  const print3 = await (await page.request.get('/api/statement.txt?id=' + third.id)).text();
+  expect(print3).toContain('Reverses ST-000002: Wrong PO, reissue next week');
   expect(errors).toEqual([]);
 });

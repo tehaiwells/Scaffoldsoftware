@@ -274,14 +274,23 @@ const lotsOf = (s, today) => [
 ];
 const heldFor = (l) => daysBetween(l.first ?? l.start, l.end);
 // Per-day pieces on hire, piece-days and minimum-hire top-up piece-days for one site and product over [from, to].
-/** @param {HireSlot} s @param {Day} from @param {Day} to @param {Day} today @param {number|null} [minDays] @returns {{daily:number[],pieceDays:number,topUp:number,start:number,end:number}} */
+/** @param {HireSlot} s @param {Day} from @param {Day} to @param {Day} today @param {number|null} [minDays] @returns {{daily:number[],pieceDays:number,topUp:number,start:number,end:number,arrived:number,left:number,sameDay:number}} */
 export function hirePeriod(s, from, to, today, minDays = null) {
   const lots = lotsOf(s, today),
     n = daysBetween(from, to) + 1,
     daily = new Array(Math.max(0, n)).fill(0);
   let pieceDays = 0,
-    topUp = 0;
+    topUp = 0,
+    // what moved inside the period: pieces that arrived, pieces that left, and pieces that did both on one day (a same-day return:
+    // 0 days, but the customer still sees the delivery on the statement, ADR 0011 review)
+    arrived = 0,
+    left = 0,
+    sameDay = 0;
   for (const l of lots) {
+    // pieces on hire on the first day count as 'at start'; a lot that arrives after it (or comes and goes on that day) is 'in'
+    if ((l.start > from || (l.start === from && l.closed && l.end === from)) && l.start <= to) arrived += l.q;
+    if (l.closed && l.end >= from && l.end <= to) left += l.q;
+    if (l.closed && l.start === l.end && l.start >= from && l.start <= to) sameDay += l.q;
     const d = overlapDays(l.start, l.end, from, to);
     if (!d) continue;
     pieceDays += l.q * d;
@@ -294,7 +303,7 @@ export function hirePeriod(s, from, to, today, minDays = null) {
       const held = heldFor(l);
       if (held < minDays) topUp += l.q * (minDays - held);
     }
-  return { daily, pieceDays, topUp, start: daily[0] ?? 0, end: daily.at(-1) ?? 0 };
+  return { daily, pieceDays, topUp, start: daily[0] ?? 0, end: daily.at(-1) ?? 0, arrived, left, sameDay };
 }
 // The rate that applies from a standard version and a site version: a site price (week and/or day) replaces the standard price as a whole (a negotiated
 // week price is never mixed with the standard day price); the minimum comes from the site when it sets one, else from the standard.
@@ -334,6 +343,16 @@ export const hireAmount = (pieceDays, rate) =>
   !rate?.priced ? null : rate.rule === 'day' ? pieceDays * rate.day : Math.round((pieceDays * rate.week) / 7);
 /** @type {(subtotal:number)=>number} */
 export const hireGst = (subtotal) => Math.round((subtotal * GST_PERCENT) / 100);
+/** GST on one line, rounded to the cent on its own with the sign kept (the way Xero and MYOB work a line's tax out, ADR 0011: a
+ * statement's GST is the sum of its lines' GST so the statement, the MYOB file and the invoice Xero raises agree). @type {(c:number|null)=>number} */
+export const lineGst = (c) => (c == null ? 0 : Math.sign(c) * Math.round((Math.abs(c) * GST_PERCENT) / 100));
+/** Cents as '-$1,234.56' for words people read (toasts, Needs you, the locked text); '' for null. @type {(c:number|null)=>string} */
+export const hireDollars = (c) => {
+  if (c == null) return '';
+  const v = Math.abs(Math.round(c)),
+    whole = String(Math.floor(v / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (c < 0 ? '-' : '') + '$' + whole + '.' + String(v % 100).padStart(2, '0');
+};
 /** Cents as dollars and cents ('12.50'); '' for null. @type {(c:number|null)=>string} */
 export const hireMoney = (c) =>
   c == null
@@ -404,6 +423,8 @@ export function hireCharge(s, from, to, today, segs) {
       n7: 0,
       topUp: 0,
       top7: 0,
+      /** @type {{q:number,held:number,days:number}[]} */
+      tops: [], // the top-up by pieces and days short of the minimum, so the line can say '24 × 28 days + 30 × 17 days'
     }));
   const add = (q, S, E) => {
     if (S > T || E <= F) return;
@@ -430,6 +451,9 @@ export function hireCharge(s, from, to, today, segs) {
     if (held >= r.minDays) continue;
     o.topUp += l.q * (r.minDays - held);
     if (r.priced) o.top7 += l.q * (cost7(r, r.minDays) - cost7(r, held));
+    const same = o.tops.find((t) => t.held === held);
+    if (same) same.q += l.q;
+    else o.tops.push({ q: l.q, held, days: r.minDays - held });
   }
   return out.map((o) => ({
     from: o.seg.from,
@@ -439,6 +463,7 @@ export function hireCharge(s, from, to, today, segs) {
     amount: o.seg.rate.priced ? Math.round(o.n7 / 7) : null,
     topUp: o.topUp,
     topUpAmount: o.topUp && o.seg.rate.priced ? Math.round(o.top7 / 7) : null,
+    topUps: o.tops.sort((a, b) => b.days - a.days),
   }));
 }
 
@@ -776,7 +801,7 @@ export const hireMethods = {
       for (const s of st.sites) {
         if (siteId && s.site !== siteId) continue;
         if (from && s.to < from) continue;
-        if (!s.lines.some((l) => l.product.id === productId)) continue;
+        if (!s.lines.some((l) => l.product.id === productId && !l.zero)) continue; // a same-day return billed nothing
         if (!hit || s.to > hit.to) hit = { site: s.site, name: s.name, to: s.to, number: st.number };
       }
     }
@@ -885,7 +910,20 @@ export const hireMethods = {
       st = sync(this.db, this.user.company_id);
     return this.hireView(st, cal, { site: query.site || null, from: query.from || null, to: query.to || null });
   },
-  hireView(st, cal, { site, from, to }) {
+  // The same read for the app's own billing (billing.js: a customer's statement, the unbilled figure, the parallel run, the re-reading
+  // of a billed period), without the on-screen limit of 400 days: an opening lot may have been out for years (ADR 0011 review). Never
+  // on a route: the caller has checked who is asking.
+  hireFull(query = {}) {
+    const cal = this.live() ? this.planNowCal() : calendarNow(),
+      st = sync(this.db, this.user.company_id);
+    return this.hireView(st, cal, {
+      site: query.site || null,
+      from: query.from || null,
+      to: query.to || null,
+      noLimit: true,
+    });
+  },
+  hireView(st, cal, { site, from, to, noLimit = false }) {
     const today = cal.today,
       weekStart = cal.weekStart,
       monthStart = today.slice(0, 8) + '01',
@@ -966,7 +1004,10 @@ export const hireMethods = {
         everOn = new Set(),
         unpricedNow = new Map();
       for (const sid of st.book.keys()) {
-        const byProduct = slotsAt(sid);
+        // pieces, since and the longest hire read the book as it is (the gear is there until it is collected); only the money reads
+        // it through the hire-stop rule (ADR 0011 review: a site with an open off-hire window is not "all back")
+        const byProduct = slotsAt(sid),
+          raw = st.book.get(sid);
         let n = 0,
           since = null,
           accrued = 0,
@@ -976,23 +1017,28 @@ export const hireMethods = {
           missing = new Set(),
           rr = 0,
           first = null,
-          longest = null;
+          longest = null,
+          pickup = null;
         for (const [pid, lots] of byProduct) {
           everOn.add(pid);
-          const segs = timeline(sid, pid),
+          const real = raw?.get(pid) ?? lots,
+            segs = timeline(sid, pid),
             now = segs.find((x) => inSeg(x, today))?.rate,
-            openQ = lots.open.reduce((a, l) => a + l.q, 0);
-          const start = [...lots.closed.map((l) => l.start), ...lots.open.map((l) => l.start)].sort()[0];
+            openQ = real.open.reduce((a, l) => a + l.q, 0);
+          const start = [...real.closed.map((l) => l.start), ...real.open.map((l) => l.start)].sort()[0];
           if (start && (!first || start < first)) first = start;
           if (openQ) {
             n += openQ;
             onHire.set(pid, (onHire.get(pid) ?? 0) + openQ);
-            const s0 = lots.open[0].start;
+            const s0 = real.open[0].start;
             if (!since || s0 < since) since = s0;
             if (!longest || s0 < longest.since) longest = { product: pid, since: s0, days: daysBetween(s0, today) + 1 };
             if (now?.priced) rr += openQ * now.perWeek;
             else unpricedNow.set(pid, (unpricedNow.get(pid) ?? 0) + openQ);
           }
+          const held = lots.closed.find((l) => l.why === 'offhire' && l.oh && l.oh.collectedOn == null);
+          if (held?.oh && (!pickup || held.oh.stoppedOn < pickup.stoppedOn))
+            pickup = { pickup: held.oh.pickup, when: held.oh.when, who: held.oh.who, stoppedOn: held.oh.stoppedOn };
           if (!start) continue;
           for (const c of hireCharge(lots, start, today, today, segs)) {
             if (!c.pieceDays && !c.topUp) continue;
@@ -1019,6 +1065,7 @@ export const hireMethods = {
             runRate: rr,
             missing: [...missing],
             longest,
+            pickup,
           });
       }
       return { sites: out, onHire, everOn, unpricedNow };
@@ -1071,6 +1118,8 @@ export const hireMethods = {
         missing: x.missing,
         overrides: siteRates.filter((r) => r.site === sid).length,
         collection: nextCollection.get(sid) ?? null,
+        // a real yard: the off-hire notice whose pickup is still waiting (hire stopped by the rule, the gear still there)
+        pickup: x.pickup ?? null,
       });
     }
     rows.sort(
@@ -1143,12 +1192,20 @@ export const hireMethods = {
         slotsAt,
         rule,
         within,
+        noLimit,
       });
     return result;
   },
   // One site's statement: a line per material and rate period with piece-days in the period (plus a minimum-hire top-up where pieces went back early),
   // subtotal, GST and total.
-  hireStatement(st, siteId, from, to, cal, { timeline, product, siteById, rk, rates, slotsAt, rule, within }) {
+  hireStatement(
+    st,
+    siteId,
+    from,
+    to,
+    cal,
+    { timeline, product, siteById, rk, rates, slotsAt, rule, within, noLimit = false },
+  ) {
     const today = cal.today,
       s = siteById.get(siteId);
     if (!s) throw new AppError(404, 'Record not found in your company.');
@@ -1158,29 +1215,62 @@ export const hireMethods = {
     requireRule(from <= to, 'The statement starts after it ends. Pick a From date on or before the To date.');
     const clamped = to > today;
     if (clamped) to = today;
-    requireRule(daysBetween(from, to) + 1 <= MAX_DAYS, 'Choose a period of at most ' + MAX_DAYS + ' days.');
+    // the on-screen limit only: the app's own billing reads any period (hireFull)
+    if (!noLimit)
+      requireRule(daysBetween(from, to) + 1 <= MAX_DAYS, 'Choose a period of at most ' + MAX_DAYS + ' days.');
     const core = memo(st, 's|' + rk + '|' + siteId + '|' + from + '|' + to, () => {
       const days = daysBetween(from, to) + 1,
         daily = new Array(days).fill(0),
         lines = [];
       for (const [pid, lots] of slotsAt(siteId)) {
-        const p = hirePeriod(lots, from, to, today);
-        const charges = hireCharge(lots, from, to, today, timeline(siteId, pid)).filter((c) => c.pieceDays || c.topUp);
-        if (!charges.length) continue;
+        const p = hirePeriod(lots, from, to, today),
+          segs = timeline(siteId, pid);
+        const charges = hireCharge(lots, from, to, today, segs).filter((c) => c.pieceDays || c.topUp),
+          moved = { in: p.arrived, out: p.left, sameDay: p.sameDay };
+        if (!charges.length && !moved.in && !moved.out) continue;
         p.daily.forEach((n, i) => {
           daily[i] += n;
         });
-        // the hire-stop rule's marks on this product's lots inside the period (one per pickup), so the line can say so (ADR 0011)
+        // the hire-stop rule's marks on this product's lots inside the period (one per pickup), so the line can say so (ADR 0011):
+        // only once the period reaches the day the rule bites (the stop day; the call day when hire ran to collection), so a
+        // statement to the day before a call says nothing about it
         const marks = new Map();
         for (const l of lots.closed)
-          if (l.oh && overlapDays(l.start, addDays(l.oh.collectedOn ?? l.end, 1), from, to) && !marks.has(l.oh.pickup))
+          if (
+            l.oh &&
+            to >= (l.oh.ran ? l.oh.when : l.oh.stoppedOn) &&
+            overlapDays(l.start, addDays(l.oh.collectedOn ?? l.end, 1), from, to) &&
+            !marks.has(l.oh.pickup)
+          )
             marks.set(l.oh.pickup, l.oh);
         const offHire = [...marks.values()].map((m) => ({
           ...m,
           rule,
           within,
+          provisional: m.collectedOn == null, // the pickup is still waiting: the reading may change (ADR 0011 review)
           words: offHireWords(m, rule, within),
         }));
+        if (!charges.length) {
+          // pieces came and went inside the period without a charge (a same-day return): the customer still sees the delivery
+          lines.push({
+            pid,
+            rateFrom: from,
+            rateTo: to,
+            split: false,
+            start: 0,
+            end: 0,
+            peak: 0,
+            pieceDays: 0,
+            rate: segs.find((x) => inSeg(x, to))?.rate ?? hireRateFor(null, null),
+            amount: 0,
+            topUp: null,
+            offHire,
+            daily: new Array(days).fill(0),
+            moved,
+            zero: true,
+          });
+          continue;
+        }
         for (const c of charges) {
           const a = c.from && c.from > from ? c.from : from,
             b = c.to && c.to < to ? c.to : to,
@@ -1198,9 +1288,13 @@ export const hireMethods = {
             pieceDays: c.pieceDays,
             rate: c.rate,
             amount: c.amount,
-            topUp: c.topUp ? { pieceDays: c.topUp, amount: c.topUpAmount, minDays: c.rate.minDays } : null,
+            topUp: c.topUp
+              ? { pieceDays: c.topUp, amount: c.topUpAmount, minDays: c.rate.minDays, parts: c.topUps }
+              : null,
             offHire,
             daily: mine,
+            moved: charges.length > 1 ? { ...moved, split: true } : moved,
+            zero: false,
           });
         }
       }
@@ -1224,11 +1318,16 @@ export const hireMethods = {
     for (const l of lines) {
       pieceDays += l.pieceDays;
       if (l.product.demo) demo = true;
+      if (l.zero) continue; // nothing to price on a same-day return
       if (!l.rate.priced) unpricedIds.add(l.pid);
       else subtotal += l.amount + (l.topUp?.amount ?? 0);
     }
     missing = unpricedIds.size;
-    const gst = hireGst(subtotal),
+    // GST line by line, as the issued statement and the accounting file work it out (ADR 0011 review)
+    const gst = lines.reduce(
+        (g, l) => (l.zero || !l.rate.priced ? g : g + lineGst(l.amount) + lineGst(l.topUp?.amount ?? 0)),
+        0,
+      ),
       used = new Set(lines.map((l) => l.pid));
     const asOf =
       rates

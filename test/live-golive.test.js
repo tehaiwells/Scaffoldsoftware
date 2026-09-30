@@ -57,6 +57,12 @@ test('an opening lot: on hire from onHireSince (IMPORT, occurred_at that day at 
   // the bring-back and the statement work on an opening lot like on any delivery
   const b = f.cmd('bringBackCreate', { site: f.site.id, lines: [{ product: f.product.id, quantity: 5 }] }).order;
   assert.equal(b.lines[0].held, 5);
+  assert.throws(
+    () => f.cmd('statementIssue', { customer: acme.id, to: D0 }),
+    (e) => e.code === 'TO_TODAY' && /still has gear on hire/.test(e.message),
+    'to today while the lot is out: refused',
+  );
+  f.clock(D(1), '09:00');
   const st = f.cmd('statementIssue', { customer: acme.id, to: D0 }).statement;
   assert.equal(st.sites[0].from, D(-30));
   assert.equal(st.subtotal, p.subtotal);
@@ -230,7 +236,8 @@ test('the go-live import: customers, sites, stock, on-hire lots and rates from p
     ],
   });
   assert.equal(f.sim.hire({}).rates.length, 3);
-  // the first statement: Coogee from 3 Sep to today (D0 = 13 Oct): 41 days
+  // the first statement: Coogee from 3 Sep to D0 (13 Oct): 41 days, issued the next morning (the lots are still out)
+  f.clock(D(1), '09:00');
   const first = f.cmd('statementIssue', { customer: c.made[0].id, to: D0 }).statement;
   assert.equal(first.number, 'ST-000001');
   assert.equal(first.sites[0].name, 'Coogee');

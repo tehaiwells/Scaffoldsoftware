@@ -150,9 +150,8 @@ export class Simulation {
       this.auth.require(this.user, 'requests.create');
     else if (PAPERWORK_OPS.includes(action))
       this.auth.require(this.user, 'requests.create'); // the site (or operations.manage for company-wide) is checked in paperwork.js
-    else if (['hireRate', 'hireSiteRate'].includes(action)) {
-      if (!this.auth.permissions(this.user).includes('finance.view')) this.auth.require(this.user, 'company.manage');
-    }
+    // prices are the owner's (ADR 0011 review): accounts reads money and issues statements but never sets a rate
+    else if (['hireRate', 'hireSiteRate'].includes(action)) this.auth.require(this.user, 'company.manage');
     // Record what really happened (ADR 0009, src/domain/trips.js): orders by anyone who may request (a supervisor for their own sites),
     // booking and packing by the office, the four confirmations by the trip's own driver or the office for them (checked in trips.js).
     else if (ORDER_OPS.includes(action)) this.auth.require(this.user, 'requests.create');

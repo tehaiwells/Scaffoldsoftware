@@ -119,13 +119,81 @@ archives even a never-used site instead of deleting it); statements are never re
 statements and messages are not pruned within `retentionYears` (a setting, default 7); the clock's daily housekeeping in a real yard
 removes only closed messages and notifications older than that.
 
+## After review (1 October 2026)
+
+The money review and the owner's walk-through of part 4 found the cases below; each is now a rule, with a test in
+`test/live-billing-review.test.js`.
+
+- **A statement runs up to yesterday unless a day is given, and never up to today while the customer still has gear out** (`TO_TODAY`).
+  A statement to today would count every open lot for the whole of today; a collection later that day (the collection day is not
+  charged) would leave the locked document over-billed by a day per piece. With everything back, a statement to today is fine.
+- **An off-hire notice whose pickup is still waiting blocks a statement past its stop day** (`PICKUP_OPEN`): the rule stops hire only if
+  the gear is collected within the window, so the reading is not settled. The preview says so and offers the day before the call
+  (`suggestedTo`); a statement to the day before a call says nothing about it (the rule's words appear only once the period reaches
+  the stop day, or the call day when hire ran to collection).
+- **A billed period that reads differently later is offered as a worked-out adjustment.** `statementDrift` re-reads each standing
+  statement's site periods today and compares them with what was billed, less what has already been adjusted against that
+  statement *to square a hire re-read* (`adjustmentAdd {hire: true}`, the tick on the Adjust form, pre-ticked when opened from the
+  offer; a goodwill credit against the same statement is not one); a difference is a Needs-you item `BILLED_CHANGED` (finance.view
+  only) whose action opens the Adjust form on that statement with the amount, and a line under the statement in the issued list. The ledger is never altered and the issued statement never
+  re-priced: the difference is the owner's adjustment, or nothing.
+- **A site moves to another customer only once nothing of its hire waits for the old customer's statement**: hire before today after
+  `billedUpTo`, or an unbilled charge line, refuses the change and says which statement to issue first (to yesterday); today's hire
+  then goes with the site. A billed site never goes back to "no customer" (the same rule as `customerUnlinkSite`). Charge lines go to
+  the customer they were stamped with (`charge_lines.customer_id`), a site's customer only when the line has none. **A reversal goes
+  back to the customer it was billed to**: refused when the site now bills to someone else.
+- **The Hire overview counts the gear as it is** (pieces, since, the longest hire, the replay check) while an off-hire window is open;
+  only the money reads the hire-stop rule. The site row says "hire stopped <day>, awaiting pickup P-n".
+- **GST is worked out line by line**: each line's GST rounded to the cent on its own (sign kept), the statement's GST the sum — the way
+  Xero and MYOB work a line's tax out, so the statement, the MYOB file's Tax Amount and the invoice Xero raises from the file agree to
+  the cent. A statement issued before this rule keeps its GST and the file shares it by largest remainder, as before. **A credit larger
+  than the hire** (a negative total with positive lines) is refused (`MIXED_CREDIT`): Xero and MYOB take a negative total as a credit
+  note, which holds only credits. The way through is on the preview: the hire without the open adjustments (`withAdjustments: false`,
+  the adjustments wait for the next statement), then the credit on a statement of its own (all lines negative).
+- **The app's own billing reads any period.** The 400-day limit is the on-screen preview's only (`hireFull` for a customer's statement,
+  the unbilled figure, the parallel run and the re-reading above): an opening lot years back bills, and Today and the Customers card
+  never break on it.
+- **An opening lot dated on or before the site's `billedUpTo` is refused** unless the command says the office knows (`beforeBilled:
+  true`, a tick on the form): the days up to `billedUpTo` would never reach a statement, so they go on an adjustment.
+- **The same sheet pasted twice is skipped**: an on-hire row whose site, part and day are already on record from an import, and a stock
+  row for a part already brought in from a stock list, plan "skip" with the count, unless the list is checked with "add these again"
+  (`again: true`). A sites row naming a removed site is skipped with "open it again from Client sites"; an on-hire row for a removed
+  site is a problem.
+- **A customer with money owing is not removed** (`unbilledCore` exposure or an open adjustment): issue the last statement first. A
+  removed customer stays on the parallel run while it has hire in the period.
+- **The one-time link** makes customers through the same checks as a typed one (the name to 120 characters) and leaves the billing
+  email for the owner: a site contact is not accounts payable.
+- **An off-hire nets out a bring-back already open** for the site: the pickup asks for what is not already held, or is that bring-back
+  itself (the notice points at it). **A pickup day already gone is allowed** (paperwork caught up on Monday for last week's call): it
+  is overdue on Needs you at once; the bring-back itself is for today at the earliest.
+- **Prices are the owner's**: `hireRate` and `hireSiteRate` need `company.manage`; Accounts reads rates and issues statements but sets
+  none.
+- **The document says what moved and what the top-up covers**: the pieces column reads "30 at start · 24 in · 54 out (24 same-day
+  return) · 0 at end"; the minimum-hire top-up line reads "24 × 28 days + 30 × 11 days short of the 28-day minimum"; a same-day return
+  with nothing to charge is still a line ($0.00) so the customer sees every delivery (a statement of only such lines is nothing to
+  issue). The same words go into the Xero and MYOB descriptions. The locked text carries the year on every date, the issue time in
+  company time with the zone, and on a reversing statement the reason ("Reverses ST-000002: …"); the issued list shows the reason and
+  which monthly file a statement is in ("in the Xero file for October 2026 (downloaded Thu 1 Oct)" — a file the office imports; nothing
+  is sent). Money words everywhere come from one formatter (`hireDollars`: -$2,345.20); days from one (the server's 'Sat 19 Sep'; the
+  page no longer asks the browser's locale, which said 'Sept'); the settings' "Saved" day is the company's (`updatedOn`).
+- On screen: a refusal under a billing form is shown at once (the form loses focus so the card redraws) and as a toast; the phone
+  layout stacks each statement line (material, then pieces · piece-days · rate · amount) instead of a sideways scroller; the parallel
+  run shows the difference as the figure is typed; the accounting file's words come from `GET /api/accounting-summary` (nothing
+  recorded), not the download's headers; "Generic CSV" is a button like the other two; a rate refused past `billedUpTo` offers "Apply
+  from <earliest>" as one button; a real yard's site forms drop the free-text client field for the customer picker plus a "New
+  customer" box (the customer is made first, then the site bills to it); the site's record line counts opening lots ("on hire at
+  go-live 30 · sent 44 · …").
+
 ## Verify with an adviser (notes, never claims in the UI)
 
 - Tax invoices: a GST-registered supplier must give a tax invoice on request for taxable sales over $82.50 (ATO). This design leaves the
   tax invoice to the accounting package on purpose; confirm the statement wording with an adviser.
 - Record keeping: business records are generally kept for 5 years (ATO); employee time records 7 years (Fair Work). `retentionYears`
   defaults to 7 so both are covered; confirm.
-- GST: 10 % on the ex-GST subtotal, rounded to the cent, as before; confirm the rounding rule the accountant prefers (per line or per total).
+- GST: 10 % worked out line by line, each line rounded to the cent (the way Xero and MYOB do it, so the files agree with the
+  statement); confirm with the accountant that per-line rounding is what they want on the statement itself.
+- A credit note: the app never puts a credit larger than the hire on one statement (see *After review*); confirm how the accountant
+  wants credits raised in the package (a negative invoice from the file, or a credit note keyed by hand).
 
 ## Consequences
 

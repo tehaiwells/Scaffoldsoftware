@@ -31,19 +31,38 @@ export const lbCents = (v) => {
     [a, b = ''] = t.replace('-', '').split('.');
   return (neg ? -1 : 1) * (Number(a) * 100 + Number(b.padEnd(2, '0')));
 };
-/** 'Sun 18 Oct' for a company day (no browser clock: the day is the server's). @param {string} d */
-export const lbDay = (d) =>
-  DAY.test(String(d ?? ''))
-    ? new Date(d + 'T12:00:00Z')
-        .toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
-        .replace(',', '')
-    : '';
-const lbDayYear = (d) =>
-  DAY.test(String(d ?? ''))
-    ? new Date(d + 'T12:00:00Z')
-        .toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
-        .replace(',', '')
-    : '';
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+  MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** 'Sun 18 Oct' for a company day, the same words as the server's (no browser clock, no locale: 'Sep', never 'Sept'). @param {string} d */
+export const lbDay = (d) => {
+  if (!DAY.test(String(d ?? ''))) return '';
+  const t = new Date(d + 'T12:00:00Z');
+  return DAYS[t.getUTCDay()] + ' ' + t.getUTCDate() + ' ' + MONTHS[t.getUTCMonth()];
+};
+const lbDayYear = (d) => (lbDay(d) ? lbDay(d) + ' ' + d.slice(0, 4) : '');
+const MONTH_WORDS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+/** 'October 2026' for 'YYYY-MM'. @param {string} m */
+const lbMonth = (m) =>
+  /^\d{4}-\d{2}$/.test(String(m ?? '')) ? MONTH_WORDS[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4) : '';
+const yesterday = (d) => {
+  if (!DAY.test(String(d ?? ''))) return '';
+  const t = new Date(d + 'T12:00:00Z');
+  t.setUTCDate(t.getUTCDate() - 1);
+  return t.toISOString().slice(0, 10);
+};
 export const STOP_RULE_WORDS = {
   OFF_HIRE_DAY: 'the off-hire day',
   DAY_AFTER: 'the day after the off-hire call',
@@ -77,6 +96,7 @@ const LB = {
   previewBusy: false,
   cust: '',
   to: '',
+  noAdj: false, // preview and issue without the open adjustments (a credit larger than the hire)
   month: '',
   open: null,
   form: {},
@@ -109,6 +129,12 @@ export const lbPick = (id) => {
   LB.cust = id ?? '';
   LB.previewKey = '';
 };
+/** Needs you's BILLED_CHANGED action: the Adjust form opens on that statement with the worked-out amount. @param {string} statement @param {number} cents @param {string} [description] */
+export const lbAdjust = (statement, cents, description = '') => {
+  LB.open = { kind: 'adjust', id: statement };
+  LB.form = { amount: cents == null ? '' : (cents / 100).toFixed(2), description, reason: '', hire: true };
+  LB.err = null;
+};
 const can = (p) => !!LB.host?.perms?.().includes(p);
 // ---------------------------------------------------------------- data (fetched when missing or older than 15 s; the page redraws when it comes)
 function fetchInto(key, atKey, busyKey, path, ttl = 15000, pick = (d) => d) {
@@ -140,11 +166,16 @@ export const lbOffHires = () => fetchInto('offHires', 'offAt', 'offBusy', 'off-h
 /** GET /api/statement-preview for the chosen customer and day. */
 export function lbPreview() {
   if (!LB.cust) return null;
-  const key = LB.cust + '|' + LB.to;
+  const key = LB.cust + '|' + LB.to + '|' + (LB.noAdj ? 'noadj' : '');
   if (LB.previewKey !== key && LB.host && !LB.previewBusy) {
     LB.previewBusy = true;
     LB.host
-      .get('statement-preview?customer=' + encodeURIComponent(LB.cust) + (LB.to ? '&to=' + LB.to : ''))
+      .get(
+        'statement-preview?customer=' +
+          encodeURIComponent(LB.cust) +
+          (LB.to ? '&to=' + LB.to : '') +
+          (LB.noAdj ? '&adjustments=0' : ''),
+      )
       .then((d) => {
         LB.preview = d;
         LB.err = null;
@@ -294,9 +325,13 @@ export function lbCustomersHTML(v, { ops = true, finance = false, manage = ops }
       ? c.exposure?.amount
         ? '<b>' +
           lbMoney(c.exposure.amount) +
-          ' unbilled</b><small>since ' +
-          esc(lbDay(c.exposure.since)) +
-          (c.lastStatement ? ' · last ' + esc(c.lastStatement.number) : '') +
+          ' unbilled</b><small>' +
+          [
+            c.exposure.since ? 'since ' + esc(lbDay(c.exposure.since)) : '',
+            c.lastStatement ? 'last ' + esc(c.lastStatement.number) : '',
+          ]
+            .filter(Boolean)
+            .join(' · ') +
           '</small>'
         : '<b class="lb-none">Nothing unbilled</b>' +
           (c.lastStatement ? '<small>last ' + esc(c.lastStatement.number) + '</small>' : '')
@@ -372,10 +407,16 @@ export function lbCustomersHTML(v, { ops = true, finance = false, manage = ops }
             (c) =>
               '<li class="lb-cust"><div class="lb-cust-main"><span class="lb-cust-t"><b>' +
               esc(c.name) +
-              '</b><small>Removed ' +
-              esc(lbDay(String(c.removedAt ?? '').slice(0, 10))) +
+              '</b><small>Removed' +
+              (c.removedOn ? ' ' + esc(lbDay(c.removedOn)) : '') +
               (c.removedReason ? ': ' + esc(c.removedReason) : '') +
-              '</small></span>' +
+              '</small>' +
+              (finance && c.exposure?.amount
+                ? '<small><b>' +
+                  lbMoney(c.exposure.amount) +
+                  ' unbilled</b>: bring it back to issue the statement</small>'
+                : '') +
+              '</span>' +
               (manage
                 ? '<span class="lb-cust-acts"><button type="button" class="lb-link" data-lb-act="customerRestore" data-lb-id="' +
                   esc(c.id) +
@@ -466,10 +507,9 @@ export function lbSiteHTML(site, { customers, offHires, ops = true, today = null
           type: 'date',
           req: true,
           max: 0,
-          extra: today ? ' min="' + esc(today) + '"' : '',
         }) +
         field('note', 'Note', formVal('note'), { ph: 'optional', max: 300 }) +
-        '</div><p class="lb-note">Makes a pickup number and one bring-back for everything on the site’s record. When hire stops is the company’s rule (Hire settings).</p>' +
+        '</div><p class="lb-note">Makes a pickup number and one bring-back for what is on the site’s record (a bring-back already open keeps its part). A pickup day already gone is overdue on Needs you. When hire stops is the company’s rule (Hire settings).</p>' +
         errHTML(LB.err) +
         acts('Record the off-hire', 'Never mind', LB.working) +
         '</form>';
@@ -506,7 +546,17 @@ export function lbSiteHTML(site, { customers, offHires, ops = true, today = null
           extra: today ? ' max="' + esc(today) + '"' : '',
         }) +
         (site.customer ? '' : lbPickHTML(customers, formVal('customer'), { none: 'No customer' })) +
-        '</div><p class="lb-note">Hire runs from that day at the rates of that day, never from today.</p>' +
+        '</div>' +
+        (site.billedUpTo
+          ? '<label class="lb-check-line"><input type="checkbox" name="beforeBilled" value="1"' +
+            (formVal('beforeBilled') ? ' checked' : '') +
+            '><span>Hire before ' +
+            esc(lbDay(site.billedUpTo)) +
+            ' (billed on ' +
+            esc(site.lastStatement ?? 'the last statement') +
+            ') goes on an adjustment I will add</span></label>'
+          : '') +
+        '<p class="lb-note">Hire runs from that day at the rates of that day, never from today.</p>' +
         errHTML(LB.err) +
         acts('Add the lot', 'Never mind', LB.working) +
         '</form>';
@@ -526,52 +576,76 @@ const CHARGE_WORDS = {
   SITE_FINISH: 'Not returned at site finish',
   QUARANTINE: 'Quarantine',
 };
+/** The pieces column in words: what moved inside the period ('30 at start · 24 in · 54 out · 0 at end'). @param {any} l */
+export const lbPiecesWords = (l) => {
+  const m = l.moved;
+  if (!m || (!m.in && !m.out)) return l.start === l.end ? String(l.end) : l.start + ' → ' + l.end;
+  return [
+    l.start + ' at start',
+    m.in ? m.in + ' in' : '',
+    m.out ? m.out + ' out' + (m.sameDay ? ' (' + m.sameDay + ' same-day return)' : '') : '',
+    l.end + ' at end',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+};
+/** The minimum-hire top-up in words: '24 × 28 days + 30 × 17 days short of the 28-day minimum'. @param {any} t */
+export const lbTopUpWords = (t) => {
+  const parts = (t?.parts ?? []).map((p) => p.q + ' × ' + plural(p.days, 'day'));
+  return parts.length
+    ? parts.join(' + ') + ' short of the ' + t.minDays + '-day minimum'
+    : 'back before the ' + t.minDays + '-day minimum';
+};
 /** The statement body (a preview or an issued one): sites, lines, charges, adjustments, totals, the rule, the footer. @param {any} st */
 export function lbStatementBodyHTML(st) {
+  const cell = (label, html, cls = 'num') => '<td class="' + cls + '" data-l="' + label + '">' + html + '</td>';
   const line = (l) =>
     '<tr class="lb-line' +
-    (l.rate?.priced ? '' : ' is-unpriced') +
-    '"><td><b>' +
+    (l.rate?.priced || l.zero ? '' : ' is-unpriced') +
+    (l.zero ? ' is-zero' : '') +
+    '"><td class="lb-c-what"><b>' +
     esc(l.product.name) +
     '</b>' +
     (l.product.reference ? '<small>' + esc(l.product.reference) + '</small>' : '') +
     (l.split ? '<small>rate for ' + esc(lbDay(l.rateFrom)) + ' – ' + esc(lbDay(l.rateTo)) + '</small>' : '') +
+    (l.zero ? '<small>same-day return: no hire charged</small>' : '') +
     (l.offHire ?? []).map((o) => '<small class="lb-rule">' + esc(o.words) + '</small>').join('') +
-    '</td><td class="num">' +
-    (l.start === l.end ? l.end : l.start + ' → ' + l.end) +
-    '</td><td class="num">' +
-    l.pieceDays +
-    '</td><td class="num">' +
-    esc(rateWords(l.rate)) +
-    '</td><td class="num"><b>' +
-    (l.amount == null ? 'not priced' : lbMoney(l.amount)) +
-    '</b></td></tr>' +
+    '</td>' +
+    cell('Pieces', esc(lbPiecesWords(l)), 'num lb-c-pcs') +
+    cell('Piece-days', String(l.pieceDays)) +
+    cell('Rate', esc(rateWords(l.rate)), 'num lb-c-rate') +
+    cell('Amount', '<b>' + (l.amount == null ? 'not priced' : lbMoney(l.amount)) + '</b>', 'num lb-c-amt') +
+    '</tr>' +
     (l.topUp
-      ? '<tr class="lb-topup"><td>Minimum hire top-up<small>' +
+      ? '<tr class="lb-topup"><td class="lb-c-what">Minimum hire top-up<small>' +
         esc(l.product.name) +
-        ' · back before the ' +
-        l.topUp.minDays +
-        '-day minimum</small></td><td></td><td class="num">' +
-        l.topUp.pieceDays +
-        '</td><td></td><td class="num"><b>' +
-        (l.topUp.amount == null ? 'not priced' : lbMoney(l.topUp.amount)) +
-        '</b></td></tr>'
+        ' · ' +
+        esc(lbTopUpWords(l.topUp)) +
+        '</small></td>' +
+        cell('Pieces', '', 'num lb-c-pcs') +
+        cell('Piece-days', String(l.topUp.pieceDays)) +
+        cell('Rate', '', 'num lb-c-rate') +
+        cell(
+          'Amount',
+          '<b>' + (l.topUp.amount == null ? 'not priced' : lbMoney(l.topUp.amount)) + '</b>',
+          'num lb-c-amt',
+        ) +
+        '</tr>'
       : '');
   const charge = (c) =>
-    '<tr class="lb-charge"><td><b>' +
+    '<tr class="lb-charge"><td class="lb-c-what"><b>' +
     esc(CHARGE_WORDS[c.reason] ?? c.reason) +
     ': ' +
     esc(c.quantity + ' × ' + c.name) +
     '</b><small>' +
     esc(lbDay(c.occurredOn)) +
     (c.approvedBy ? ' · approved by ' + esc(c.approvedBy) : '') +
-    '</small></td><td class="num">' +
-    c.quantity +
-    '</td><td></td><td class="num">' +
-    lbMoney(c.unitValue) +
-    ' each</td><td class="num"><b>' +
-    lbMoney(c.amount) +
-    '</b></td></tr>';
+    '</small></td>' +
+    cell('Pieces', String(c.quantity), 'num lb-c-pcs') +
+    cell('Piece-days', '') +
+    cell('Rate', lbMoney(c.unitValue) + ' each', 'num lb-c-rate') +
+    cell('Amount', '<b>' + lbMoney(c.amount) + '</b>', 'num lb-c-amt') +
+    '</tr>';
   const sites = (st.sites ?? [])
     .map(
       (s) =>
@@ -581,7 +655,7 @@ export function lbStatementBodyHTML(st) {
         [s.address ? esc(s.address) : '', s.po ? 'PO ' + esc(s.po) : '', esc(lbDay(s.from)) + ' – ' + esc(lbDay(s.to))]
           .filter(Boolean)
           .join(' · ') +
-        '</small></p><div class="lb-table-wrap"><table class="lb-table"><thead><tr><th>Material</th><th class="num">Pieces</th><th class="num">Piece-days</th><th class="num">Rate (ex GST)</th><th class="num">Amount</th></tr></thead><tbody>' +
+        '</small></p><div class="lb-table-wrap"><table class="lb-table"><thead><tr><th>Material</th><th class="num lb-c-pcs">Pieces</th><th class="num">Piece-days</th><th class="num lb-c-rate">Rate (ex GST)</th><th class="num lb-c-amt">Amount</th></tr></thead><tbody>' +
         (s.lines ?? []).map(line).join('') +
         (s.charges ?? []).map(charge).join('') +
         '</tbody><tfoot><tr><td colspan="4">' +
@@ -672,10 +746,29 @@ export function lbStatementsHTML({
       )
       .join('') +
     '</select></label><label class="lb-field"><span>Up to</span><input type="date" data-lb-to value="' +
-    esc(LB.to || today || '') +
+    esc(LB.to || preview?.to || yesterday(today) || '') +
     '"' +
     (today ? ' max="' + esc(today) + '"' : '') +
     '></label></div>';
+  // why Issue is off, with the one thing that fixes it: the day before the call, or the hire without the adjustments
+  const fix =
+    preview && !preview.canIssue
+      ? preview.whyCode === 'PICKUP_OPEN' && preview.suggestedTo
+        ? '<button type="button" class="lb-btn" data-lb-act="to" data-lb-day="' +
+          esc(preview.suggestedTo) +
+          '">Up to ' +
+          esc(lbDay(preview.suggestedTo)) +
+          '</button>'
+        : preview.whyCode === 'TO_TODAY' && today
+          ? '<button type="button" class="lb-btn" data-lb-act="to" data-lb-day="' +
+            esc(yesterday(today)) +
+            '">Up to ' +
+            esc(lbDay(yesterday(today))) +
+            '</button>'
+          : preview.whyCode === 'MIXED_CREDIT' && issue
+            ? '<button type="button" class="lb-btn" data-lb-act="noAdj">Preview without the adjustments</button>'
+            : ''
+      : '';
   let body;
   if (!LB.cust)
     body =
@@ -697,8 +790,18 @@ export function lbStatementsHTML({
       esc(lbDay(preview.to)) +
       (preview.customer.abnText ? ' · ABN ' + esc(preview.customer.abnText) : '') +
       '</small></p>' +
+      (preview.why && preview.whyCode === 'PICKUP_OPEN'
+        ? '<p class="lb-warn" role="alert">' + esc(preview.why) + ' ' + fix + '</p>'
+        : '') +
+      (preview.heldAdjustments
+        ? '<p class="lb-note">' +
+          esc(plural(preview.heldAdjustments, 'open adjustment')) +
+          ' left off this statement (kept for the next one). <button type="button" class="lb-link" data-lb-act="withAdj">Put them back</button></p>'
+        : '') +
       (preview.empty ? '' : lbStatementBodyHTML(preview)) +
-      (preview.why ? '<p class="lb-why">' + esc(preview.why) + '</p>' : '') +
+      (preview.why && preview.whyCode !== 'PICKUP_OPEN'
+        ? '<p class="lb-why">' + esc(preview.why) + ' ' + fix + '</p>'
+        : '') +
       (issue && preview.canIssue
         ? '<div class="lb-acts"><button type="button" class="lb-go" data-lb-act="issue"' +
           (LB.working ? ' disabled' : '') +
@@ -742,8 +845,50 @@ export function lbStatementsHTML({
     esc(lbDay(s.issuedOn)) +
     ' by ' +
     esc(s.issuedBy) +
-    ((s.exports ?? []).length ? ' · sent to ' + esc([...new Set(s.exports.map((e) => e.format))].join(', ')) : '') +
-    '</small></span><b class="lb-st-total">' +
+    // what happened to it: 'in the Xero file for October 2026 (downloaded Thu 1 Oct)' — a file the office imports, nothing is sent
+    (s.exports ?? [])
+      .slice()
+      .reverse()
+      .filter((e, i, all) => all.findIndex((x) => x.format === e.format) === i)
+      .map(
+        (e) =>
+          ' · in the ' +
+          esc(e.words ?? e.format) +
+          ' file for ' +
+          esc(lbMonth(e.month)) +
+          (e.on ? ' (downloaded ' + esc(lbDay(e.on)) + ')' : ''),
+      )
+      .join('') +
+    '</small>' +
+    (s.reverses && s.reason
+      ? '<small class="lb-st-reason">Reverses ' + esc(s.reverses.number) + ': ' + esc(s.reason) + '</small>'
+      : '') +
+    (s.drift && !s.reversedBy
+      ? '<small class="lb-drift">' +
+        esc(
+          'Reads ' +
+            lbMoney(s.drift.now) +
+            ' now (billed ' +
+            lbMoney(s.drift.billed) +
+            (s.drift.adjusted ? ', ' + lbMoney(s.drift.adjusted) + ' adjusted' : '') +
+            '): an adjustment of ' +
+            lbMoney(s.drift.delta) +
+            ' would square it.',
+        ) +
+        (owner
+          ? ' <button type="button" class="lb-link" data-lb-act="driftAdjust" data-lb-id="' +
+            esc(s.id) +
+            '" data-lb-cents="' +
+            esc(s.drift.delta) +
+            '" data-lb-words="' +
+            esc(s.drift.description ?? '') +
+            '">Adjust ' +
+            lbMoney(s.drift.delta) +
+            '…</button>'
+          : '') +
+        '</small>'
+      : '') +
+    '</span><b class="lb-st-total">' +
     lbMoney(s.total) +
     '</b><span class="lb-st-acts"><a class="lb-link" href="/api/statement.txt?id=' +
     esc(s.id) +
@@ -781,7 +926,11 @@ export function lbStatementsHTML({
         }) +
         field('description', 'What it is for', formVal('description'), { req: true, max: 120 }) +
         field('reason', 'Why (a few words)', formVal('reason'), { req: true, max: 200 }) +
-        '</div><p class="lb-note">Goes on ' +
+        '</div><label class="lb-check-line"><input type="checkbox" name="hire" value="1"' +
+        (formVal('hire') ? ' checked' : '') +
+        '><span>This squares the hire of ' +
+        esc(s.number) +
+        ' read again (the "Billed differently" item), not a credit on top</span></label><p class="lb-note">Goes on ' +
         esc(s.customerName) +
         '’s next statement with you as the approver. The issued statement stays as it was.</p>' +
         errHTML(LB.err) +
@@ -814,7 +963,7 @@ export function lbStatementsHTML({
         (xeroReady ? '' : ' disabled') +
         '>Download for Xero</button><button type="button" class="lb-btn" data-lb-act="file" data-lb-fmt="myob"' +
         (myobReady ? '' : ' disabled') +
-        '>Download for MYOB</button><button type="button" class="lb-link" data-lb-act="file" data-lb-fmt="generic">Generic CSV</button>'
+        '>Download for MYOB</button><button type="button" class="lb-btn" data-lb-act="file" data-lb-fmt="generic">Generic CSV</button>'
       : '') +
     '</div>' +
     (settings && (!xeroReady || !myobReady)
@@ -907,7 +1056,7 @@ export function lbSettingsHTML(s, { owner = false } = {}) {
     '<div class="lb-form-acts"><button type="submit" class="lb-go"' +
     (LB.working ? ' disabled' : '') +
     '>Save hire settings</button>' +
-    (s.updatedAt ? '<small class="lb-note">Saved ' + esc(lbDay(String(s.updatedAt).slice(0, 10))) + '</small>' : '') +
+    (s.updatedOn ? '<small class="lb-note">Saved ' + esc(lbDay(s.updatedOn)) + '</small>' : '') +
     '</div></form></section>'
   );
 }
@@ -1080,6 +1229,10 @@ export function lbParallelHTML() {
             esc(x.name) +
             '"></td><td class="num' +
             (x.difference ? (x.difference > 0 ? ' is-over' : ' is-under') : '') +
+            '" data-lb-diff="' +
+            esc(x.customer) +
+            '" data-lb-app="' +
+            esc(x.app) +
             '"><b>' +
             (x.difference == null ? '–' : lbMoney(x.difference)) +
             '</b>' +
@@ -1092,7 +1245,7 @@ export function lbParallelHTML() {
       '</p>'
     : '';
   return (
-    '<div class="lb-prun"><h3 class="lb-sub">Parallel run</h3><p class="lb-note">For a period, the app’s hire per customer beside what the office invoiced. Type your figures; the difference shows.</p>' +
+    '<div class="lb-prun"><h3 class="lb-sub">Parallel run</h3><p class="lb-note">For a period, the app’s hire per customer beside what the office invoiced. Work it out, then type your figures: the difference shows as you type (app minus invoiced).</p>' +
     '<form class="lb-form lb-inline" data-lb-form="prun"><div class="lb-fields">' +
     field('from', 'From', p.from, { type: 'date', req: true, max: 0 }) +
     field('to', 'To', p.to, { type: 'date', req: true, max: 0 }) +
@@ -1121,8 +1274,11 @@ async function run(action, data, done) {
     await LB.host.refresh();
     return r;
   } catch (e) {
+    // the refusal shows under the form and as a toast; the focus leaves the form so the card is drawn again at once (a page waits
+    // for the next poll while someone is typing in a form)
     LB.err = e.message;
-    if (!LB.open) LB.host.notify(e.message);
+    LB.host.notify(e.message);
+    if (typeof document !== 'undefined') document.activeElement?.blur?.();
     return null;
   } finally {
     LB.working = false;
@@ -1145,6 +1301,15 @@ async function download(fmt) {
   const month = LB.month || (LB.host.today() ?? '').slice(0, 7);
   LB.file = null;
   try {
+    // what the file carries, said in words after the save (from the summary, not the download's headers)
+    let summary = null;
+    try {
+      summary = await LB.host.get('accounting-summary?format=' + fmt + '&month=' + encodeURIComponent(month));
+    } catch (e) {
+      LB.file = { err: e?.message ?? 'The file could not be made.' };
+      LB.host.redraw();
+      return;
+    }
     const res = await fetch('/api/accounting.csv?format=' + fmt + '&month=' + encodeURIComponent(month));
     if (!res.ok) {
       let words = 'The file could not be made.';
@@ -1166,9 +1331,9 @@ async function download(fmt) {
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       LB.file = {
         name,
-        statements: (res.headers.get('x-statements') ?? '').split(',').filter(Boolean),
-        total: Number(res.headers.get('x-total') ?? 0),
-        words: decodeURIComponent(res.headers.get('x-words') ?? ''),
+        statements: summary?.statements ?? (res.headers.get('x-statements') ?? '').split(',').filter(Boolean),
+        total: summary?.total ?? Number(res.headers.get('x-total') ?? 0),
+        words: summary?.words ?? decodeURIComponent(res.headers.get('x-words') ?? ''),
       };
       LB.stAt = 0;
     }
@@ -1269,15 +1434,40 @@ function onClick(e) {
       return openForm('openingLot', id);
     case 'issue':
       LB.issued = null;
-      run('statementIssue', { customer: LB.cust, ...(LB.to ? { to: LB.to } : {}) }, (r) => {
-        LB.issued = r.statement;
-        LB.previewKey = '';
-      });
+      run(
+        'statementIssue',
+        { customer: LB.cust, ...(LB.to ? { to: LB.to } : {}), ...(LB.noAdj ? { withAdjustments: false } : {}) },
+        (r) => {
+          LB.issued = r.statement;
+          LB.noAdj = false;
+          LB.previewKey = '';
+        },
+      );
       return;
     case 'reverse':
       return openForm('reverse', id);
     case 'adjust':
       return openForm('adjust', id);
+    case 'driftAdjust':
+      lbAdjust(id, Number(d.lbCents ?? 0), d.lbWords ?? '');
+      LB.host.redraw();
+      return;
+    case 'to':
+      LB.to = d.lbDay ?? '';
+      LB.issued = null;
+      LB.previewKey = '';
+      LB.host.redraw();
+      return;
+    case 'noAdj':
+      LB.noAdj = true;
+      LB.previewKey = '';
+      LB.host.redraw();
+      return;
+    case 'withAdj':
+      LB.noAdj = false;
+      LB.previewKey = '';
+      LB.host.redraw();
+      return;
     case 'file':
       download(d.lbFmt ?? 'generic');
       return;
@@ -1332,6 +1522,21 @@ function onInput(e) {
   }
   if (t.hasAttribute('data-lb-typed')) {
     LB.prun.typed[t.dataset.lbTyped] = t.value;
+    // the difference as the figure is typed (the app's figure is on the row already)
+    const cell = t.closest('tr')?.querySelector('[data-lb-diff]');
+    if (cell) {
+      const inv = lbCents(t.value),
+        app = Number(cell.dataset.lbApp ?? 0),
+        ok = inv != null && !Number.isNaN(inv) && inv >= 0,
+        diff = ok ? app - inv : null;
+      cell.classList.toggle('is-over', !!diff && diff > 0);
+      cell.classList.toggle('is-under', !!diff && diff < 0);
+      cell.innerHTML =
+        '<b>' +
+        (diff == null ? '–' : lbMoney(diff)) +
+        '</b>' +
+        (ok && inv ? '<small>' + (diff > 0 ? '+' : '') + Math.round((diff / inv) * 1000) / 10 + '%</small>' : '');
+    }
     return;
   }
   const f = t.closest('[data-lb-form]');
@@ -1383,6 +1588,7 @@ function onSubmit(e) {
         amount: cents,
         description: v('description'),
         reason: v('reason'),
+        ...(fd.get('hire') ? { hire: true } : {}),
       },
       () => {
         close();
@@ -1404,6 +1610,7 @@ function onSubmit(e) {
         quantity: Number(v('quantity')),
         onHireSince: v('onHireSince'),
         ...(v('customer') ? { customer: v('customer') } : {}),
+        ...(fd.get('beforeBilled') ? { beforeBilled: true } : {}),
       },
       close,
     );
@@ -1447,6 +1654,7 @@ export const __lb = {
       previewKey: '',
       cust: '',
       to: '',
+      noAdj: false,
       month: '',
       open: null,
       form: {},

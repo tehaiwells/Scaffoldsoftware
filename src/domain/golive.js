@@ -6,9 +6,11 @@
 //                  problem in plain words; the batch is refused when any row is wrong (the catalogue import's refuse-and-explain style)
 //   goLiveImport   applies a checked list, all or nothing; goLivePreview shows the check without writing
 import { requireRule, integer } from './geometry.js';
+import { cached } from '../database.js';
 import { AppError } from '../service.js';
 import { requireLive } from './mode.js';
-import { addDays } from './schedule.js';
+import { addDays, dayLabel } from './schedule.js';
+import { dayYear } from './billing.js';
 import { nameKey } from './billing.js';
 import { bdAbnValid } from './brand.js';
 export const GOLIVE_KINDS = ['customers', 'sites', 'stock', 'onHire', 'rates'];
@@ -133,10 +135,13 @@ export function goLiveWeight(v, kgColumn = false) {
   const grams = Math.round(m[2] === 'kg' || (!m[2] && kgColumn) ? num * 1000 : num);
   return { grams };
 }
-/** What a row refers to, looked up in the yard's records (built once per check). @typedef {{customers:Map<string,any>,sites:Map<string,any>,productsByRef:Map<string,any[]>,productsByName:Map<string,any[]>,today:string}} GoLiveCtx */
+/** What a row refers to, looked up in the yard's records (built once per check): sites of every status, the opening lots already
+ * brought in (site|product|day -> pieces) and the stock already brought in per product, so the same sheet pasted twice is skipped
+ * unless `again` is asked for (ADR 0011 review).
+ * @typedef {{customers:Map<string,any>,customerNames?:Map<string,string>,sites:Map<string,any>,productsByRef:Map<string,any[]>,productsByName:Map<string,any[]>,today:string,lots?:Map<string,number>,importedStock?:Map<string,number>}} GoLiveCtx */
 // The check, pure: one entry per row with its problems and the plan (what applying it would do).
-/** @param {keyof typeof GOLIVE_COLUMNS} kind @param {Record<string,unknown>[]} rows @param {GoLiveCtx} ctx */
-export function goLiveCheck(kind, rows, ctx) {
+/** @param {keyof typeof GOLIVE_COLUMNS} kind @param {Record<string,unknown>[]} rows @param {GoLiveCtx} ctx @param {{again?:boolean}} [o] */
+export function goLiveCheck(kind, rows, ctx, { again = false } = {}) {
   requireRule(GOLIVE_KINDS.includes(kind), 'Choose a list: customers, sites, stock, onHire or rates.');
   requireRule(Array.isArray(rows) && rows.length > 0, 'Paste at least one row.');
   requireRule(rows.length <= GOLIVE_MAX_ROWS, 'Up to ' + GOLIVE_MAX_ROWS + ' rows per list: split the sheet.');
@@ -218,7 +223,13 @@ export function goLiveCheck(kind, rows, ctx) {
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
         problems.push("email '" + email + "' is not an email address");
       plan = existing
-        ? { action: 'skip', words: name + ' is already a site: left as it is' }
+        ? {
+            action: 'skip',
+            words:
+              !existing.status || existing.status === 'ACTIVE'
+                ? name + ' is already a site: left as it is'
+                : name + ' is a removed site: open it again from Client sites (Removed / finished sites)',
+          }
         : {
             action: 'create',
             name,
@@ -256,16 +267,27 @@ export function goLiveCheck(kind, rows, ctx) {
           };
         }
       }
-      if (kind === 'stock')
-        plan = {
-          action: 'stock',
-          product: p?.id ?? null,
-          productName: p?.name ?? name ?? ref,
-          make,
-          quantity: q.n ?? null,
-          words: (p ? p.name : (name || ref) + ' (new part)') + ': ' + (q.n ?? '?') + ' in the yard',
-        };
-      else {
+      if (kind === 'stock') {
+        const had = p ? (ctx.importedStock?.get(p.id) ?? 0) : 0;
+        plan =
+          had && !again
+            ? {
+                action: 'skip',
+                words:
+                  p.name +
+                  ': ' +
+                  had +
+                  ' already brought in from a stock list. Tick "add these again" if this is a second lot.',
+              }
+            : {
+                action: 'stock',
+                product: p?.id ?? null,
+                productName: p?.name ?? name ?? ref,
+                make,
+                quantity: q.n ?? null,
+                words: (p ? p.name : (name || ref) + ' (new part)') + ': ' + (q.n ?? '?') + ' in the yard',
+              };
+      } else {
         const siteName = get(row, 'site'),
           site = siteName ? ctx.sites.get(nameKey(siteName)) : null,
           d = goLiveDay(get(row, 'since')),
@@ -273,6 +295,8 @@ export function goLiveCheck(kind, rows, ctx) {
           c = customer ? ctx.customers.get(nameKey(customer)) : null;
         if (!siteName) problems.push('a site is needed');
         else if (!site) problems.push("no site called '" + siteName + "': import the sites first");
+        else if (site.status && site.status !== 'ACTIVE')
+          problems.push(siteName + ' is a removed site: open it again from Client sites first');
         if (d.problem) problems.push('on hire since: ' + d.problem);
         else if (d.day && d.day > ctx.today) problems.push('on hire since ' + d.day + ' is ahead of today');
         else if (d.day && d.day < addDays(ctx.today, -3660))
@@ -286,25 +310,40 @@ export function goLiveCheck(kind, rows, ctx) {
               ', not ' +
               c.name,
           );
-        plan = {
-          action: 'onHire',
-          site: site?.id ?? null,
-          siteName: site?.name ?? siteName,
-          product: p?.id ?? null,
-          productName: p?.name ?? name ?? ref,
-          make,
-          quantity: q.n ?? null,
-          since: d.day ?? null,
-          customer: c?.id ?? null,
-          words:
-            (p ? p.name : (name || ref) + ' (new part)') +
-            ': ' +
-            (q.n ?? '?') +
-            ' at ' +
-            (site?.name ?? siteName) +
-            ' since ' +
-            (d.day ?? '?'),
-        };
+        const had = site && p && d.day ? (ctx.lots?.get(site.id + '|' + p.id + '|' + d.day) ?? 0) : 0;
+        plan =
+          had && !again
+            ? {
+                action: 'skip',
+                words:
+                  p.name +
+                  ' at ' +
+                  site.name +
+                  ': ' +
+                  had +
+                  ' already on record since ' +
+                  dayYear(/** @type {string} */ (d.day)) +
+                  '. Tick "add these again" if this is a second lot.',
+              }
+            : {
+                action: 'onHire',
+                site: site?.id ?? null,
+                siteName: site?.name ?? siteName,
+                product: p?.id ?? null,
+                productName: p?.name ?? name ?? ref,
+                make,
+                quantity: q.n ?? null,
+                since: d.day ?? null,
+                customer: c?.id ?? null,
+                words:
+                  (p ? p.name : (name || ref) + ' (new part)') +
+                  ': ' +
+                  (q.n ?? '?') +
+                  ' at ' +
+                  (site?.name ?? siteName) +
+                  ' since ' +
+                  (d.day ? dayYear(d.day) : '?'),
+              };
       }
     } else if (kind === 'rates') {
       const p = product(row, problems),
@@ -353,7 +392,7 @@ export function goLiveCheck(kind, rows, ctx) {
             .filter(Boolean)
             .join(' + ') +
           (minDays ? ', minimum ' + plural(minDays, 'day') : '') +
-          (from ? ', from ' + from : ', for every day'),
+          (from ? ', from ' + dayYear(from) : ', for every day'),
       };
     }
     return { row: i + 1, ok: !problems.length, problems, plan };
@@ -387,6 +426,22 @@ export const goLiveMethods = {
     requireRule(DAY.test(since) && addDays(since, 0) === since, 'On hire since must be a date (YYYY-MM-DD).');
     requireRule(since <= today, 'On hire since cannot be ahead of today.');
     requireRule(since >= addDays(today, -3660), 'On hire since is more than ten years back. Check the date.');
+    // a lot dated before the site's last statement: the days before billedUpTo would never reach a statement (ADR 0011 review), so
+    // the lot is refused unless the office says it knows (beforeBilled: true) and adds an adjustment for that hire
+    if (site.billedUpTo && since <= site.billedUpTo)
+      requireRule(
+        input?.beforeBilled === true,
+        site.name +
+          ' is billed up to ' +
+          dayLabel(site.billedUpTo) +
+          ' on ' +
+          site.lastStatement +
+          ': a lot on hire since ' +
+          dayLabel(since) +
+          ' would never be billed for the days up to then. Tick "hire before ' +
+          dayLabel(site.billedUpTo) +
+          ' goes on an adjustment" to add it anyway.',
+      );
     if (input?.customer) {
       const c = this.customerGet(input.customer);
       if (!site.customer) this.repo.save({ ...this.repo.get(site.id, 'site'), customer: c.id, customerFrom: 'import' });
@@ -448,7 +503,18 @@ export const goLiveMethods = {
         container: c.id,
         occurredAt: at,
       },
-      message: quantity + ' × ' + p.name + ' on hire at ' + site.name + ' since ' + since + '.',
+      message:
+        quantity +
+        ' × ' +
+        p.name +
+        ' on hire at ' +
+        site.name +
+        ' since ' +
+        dayYear(since) +
+        '.' +
+        (site.billedUpTo && since <= site.billedUpTo
+          ? ' Its hire up to ' + dayLabel(site.billedUpTo) + ' needs an adjustment on the Hire page.'
+          : ''),
     };
   },
   goLiveCtx() {
@@ -460,7 +526,22 @@ export const goLiveMethods = {
         customerNames.set(c.id, c.name);
       }
     const sites = new Map();
-    for (const s of this.repo.all('site')) if (s.status === 'ACTIVE') sites.set(nameKey(s.name), s);
+    // every site, the removed ones too: a sheet naming one is told so instead of a second site of that name being made
+    for (const s of this.repo.all('site'))
+      if (s.status === 'ACTIVE' || !sites.has(nameKey(s.name))) sites.set(nameKey(s.name), s);
+    const siteIds = new Set([...sites.values()].map((s) => s.id));
+    // what earlier imports brought in, so the same sheet twice is skipped
+    const lots = new Map(),
+      importedStock = new Map();
+    for (const r of cached(
+      this.db,
+      "SELECT product_id, destination, quantity, occurred_at, event FROM ledger WHERE company_id=? AND actor_kind='IMPORT' AND origin IN ('command:openingLot','command:goLiveImport') AND quantity>0",
+    ).all(this.repo.company)) {
+      if (r.event === 'OPENING_BALANCE' && r.destination && siteIds.has(r.destination)) {
+        const k = r.destination + '|' + r.product_id + '|' + this.planDayOfIso(r.occurred_at);
+        lots.set(k, (lots.get(k) ?? 0) + r.quantity);
+      } else importedStock.set(r.product_id, (importedStock.get(r.product_id) ?? 0) + r.quantity);
+    }
     const productsByRef = new Map(),
       productsByName = new Map();
     for (const p of this.effectiveProducts()) {
@@ -471,18 +552,27 @@ export const goLiveMethods = {
       ])
         if (k) m.set(k, [...(m.get(k) ?? []), p]);
     }
-    return { customers, customerNames, sites, productsByRef, productsByName, today: this.planNowCal().today };
+    return {
+      customers,
+      customerNames,
+      sites,
+      productsByRef,
+      productsByName,
+      today: this.planNowCal().today,
+      lots,
+      importedStock,
+    };
   },
   // POST /api/golive-preview {kind, rows}: the check, nothing written.
   goLivePreview(/** @type {any} */ input = {}) {
     requireLive(this);
     this.auth.require(this.user, 'company.manage');
-    return goLiveCheck(input.kind, input.rows, this.goLiveCtx());
+    return goLiveCheck(input.kind, input.rows, this.goLiveCtx(), { again: input.again === true });
   },
   // The command: checked, then applied all or nothing. A wrong row refuses the batch with every row's problems (409, detail.check).
   goLiveImport(/** @type {any} */ input = {}) {
     requireLive(this);
-    const check = goLiveCheck(input.kind, input.rows, this.goLiveCtx());
+    const check = goLiveCheck(input.kind, input.rows, this.goLiveCtx(), { again: input.again === true });
     if (!check.ok) {
       const e = new AppError(409, check.words);
       e.code = 'CHECK_FAILED';

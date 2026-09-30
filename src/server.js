@@ -400,6 +400,13 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
           'X-Words': encodeURIComponent(out.words),
         });
         res.end(out.body);
+      } else if (req.method === 'GET' && path === '/api/accounting-summary') {
+        // what the file would carry (statements, totals, the package's words), nothing recorded: the page says it after the save
+        const { body: _file, ...out } = simulation.accountingFile(
+          Object.fromEntries(new URL(req.url, 'http://localhost').searchParams),
+          { record: false },
+        );
+        send(200, out);
       } else if (req.method === 'POST' && path === '/api/golive-preview') send(200, simulation.goLivePreview(body));
       else if (req.method === 'POST' && path === '/api/parallel-run') send(200, simulation.parallelRun(body));
       // A driver's phone link (the office; a real yard): Copy link, Text it (sms:), and whether phones can reach this server at all.

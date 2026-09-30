@@ -40,6 +40,7 @@ export const LT_KIND_WORDS = {
   UNPRICED_ON_HIRE: 'No rate',
   OFF_HIRE_OVERDUE: 'Pickup overdue',
   UNBILLED: 'Unbilled',
+  BILLED_CHANGED: 'Billed differently',
 };
 const DOT_TONE = {
   DRAFT: 'draft',
@@ -604,11 +605,22 @@ function act(x) {
   if (a.view === 'TODAY' && a.item) return h.goItem(a.item, a.day ?? h.today());
   if (a.view === 'TODAY') return h.selectDay(a.day ?? h.today());
   if (a.view === 'TRIPS' && a.trip) return h.goTrip(a.trip);
-  // UNBILLED: the Hire page opens on that customer's statement (ADR 0011)
+  // UNBILLED: the Hire page opens on that customer's statement (ADR 0011); BILLED_CHANGED: on the Adjust form with the amount
   if (a.view === 'HIRE' && a.customer) {
     h.pickCustomer?.(a.customer);
+    if (a.statement) h.openAdjust?.(a.statement, a.amount ?? null, a.description ?? '');
     h.go('HIRE');
-    requestAnimationFrame(() => document.getElementById('lb-statements')?.scrollIntoView({ block: 'start' }));
+    requestAnimationFrame(() =>
+      document
+        .querySelector(a.statement ? '[data-lb-st="' + CSS.escape(a.statement) + '"]' : '#lb-statements')
+        ?.scrollIntoView({ block: 'start' }),
+    );
+    return;
+  }
+  // a removed customer with money owing: the Customers card on Client sites (Bring back)
+  if (a.view === 'SITES' && a.customer) {
+    h.go('SITES');
+    requestAnimationFrame(() => document.getElementById('lb-customers')?.scrollIntoView({ block: 'start' }));
     return;
   }
   if (a.view === 'SITES' && a.site) {
