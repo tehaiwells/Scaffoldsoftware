@@ -30,7 +30,7 @@ test('prepared statements are cached per connection and SQL text',t=>{
   assert.equal(a.prepare('PRAGMA synchronous').get().synchronous,1,'synchronous=NORMAL');
   const names=a.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(r=>r.name);
   for(const n of ['ledger_company_event_sequence','contents_company_product'])assert.ok(names.includes(n),n);
-  assert.equal(a.prepare('SELECT MAX(version) v FROM schema_migrations').get().v,5);
+  assert.ok(a.prepare('SELECT MAX(version) v FROM schema_migrations').get().v>=5,'the index migration (5) has run');
 });
 
 test('snapshot with the read cache equals the uncached snapshot for owner and supervisor; lean drops only the unread keys',t=>{

@@ -95,7 +95,7 @@ test('supervisors see only their own sites; other roles and bad periods are refu
 
 test('GET /api/reports: period parameter, login required',async t=>{
   const f=fixture(t);const handler=createApp(f.db).listeners('request')[0];const token=f.auth.login({email:f.user.email,password:'demonstration-password'});
-  const call=(url,cookie=true)=>new Promise(done=>{const req={method:'GET',url,headers:{host:'x',...(cookie?{cookie:'session='+token}:{})},socket:{remoteAddress:'127.0.0.1'},async *[Symbol.asyncIterator](){}};let status=200;const res={setHeader(){},writeHead(s){status=s;},end(b){done({status,body:JSON.parse(b)});}};handler(req,res);});
+  const call=(url,cookie=true)=>new Promise(done=>{const req={method:'GET',url,headers:{host:'localhost',...(cookie?{cookie:'session='+token}:{})},socket:{remoteAddress:'127.0.0.1'},async *[Symbol.asyncIterator](){}};let status=200;const res={setHeader(){},writeHead(s){status=s;},end(b){done({status,body:JSON.parse(b)});}};handler(req,res);});
   const ok=await call('/api/reports?days=90');assert.equal(ok.status,200);assert.equal(ok.body.days,90);assert.equal(ok.body.pieces.now,200);
   assert.equal((await call('/api/reports')).body.days,30);assert.equal((await call('/api/reports?days=365')).status,400);assert.equal((await call('/api/reports',false)).status,401);
 });

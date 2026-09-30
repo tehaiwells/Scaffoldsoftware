@@ -30,7 +30,7 @@ test('an SVG logo must say its size; CSS url() tricks and image() are dropped fr
 
 test('POST /api/company-logo checks the session and the role before it reads a large body',async t=>{
  const f=fixture(t);const handler=createApp(f.db).listeners('request')[0];let read=0;
- const call=token=>new Promise(done=>{const req={method:'POST',url:'/api/company-logo',headers:{host:'x','content-type':'application/json',...(token?{cookie:'session='+token}:{})},socket:{remoteAddress:'127.0.0.1'},async *[Symbol.asyncIterator](){read++;yield Buffer.from(JSON.stringify({type:'image/png',data:'A'.repeat(400000)}));}};let status=0;const res={setHeader(){},writeHead(s){status=s;},end(){done(status);}};handler(req,res);});
+ const call=token=>new Promise(done=>{const req={method:'POST',url:'/api/company-logo',headers:{host:'localhost','content-type':'application/json',...(token?{cookie:'session='+token}:{})},socket:{remoteAddress:'127.0.0.1'},async *[Symbol.asyncIterator](){read++;yield Buffer.from(JSON.stringify({type:'image/png',data:'A'.repeat(400000)}));}};let status=0;const res={setHeader(){},writeHead(s){status=s;},end(){done(status);}};handler(req,res);});
  assert.equal(await call(null),401);assert.equal(read,0,'nothing read for an anonymous upload');
  const email=randomUUID()+'@example.com';f.auth.addUser(f.user,{name:'Sup',email,password:'demonstration-password',roles:['SUPERVISOR']});
  assert.equal(await call(f.auth.login({email,password:'demonstration-password'})),403);assert.equal(read,0,'nor for a supervisor');

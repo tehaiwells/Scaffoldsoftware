@@ -33,6 +33,7 @@ export function openDatabase(path) {
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=3').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/003_memberships.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=4').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/004_manager_stock_adjust.sql',import.meta.url),'utf8')));
   if(!db.prepare('SELECT version FROM schema_migrations WHERE version=5').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/005_perf_indexes.sql',import.meta.url),'utf8')));
+  if(!db.prepare('SELECT version FROM schema_migrations WHERE version=6').get()) atomic(db,()=>db.exec(readFileSync(new URL('./migrations/006_invitations.sql',import.meta.url),'utf8')));
   return db;
 }
 
