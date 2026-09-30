@@ -1,10 +1,10 @@
 # Implemented schema and migrations
 
-SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migrations. Version 1 is the preserved baseline in database.js. Ordered migrations 002-006 migrate existing data (006_invitations.sql is additive: memberships.removed_at, invitations, server_settings, server_admins); schema_migrations records completion.
+SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migrations. Version 1 is the preserved baseline in database.js. Ordered migrations 002-007 migrate existing data (006_invitations.sql is additive: memberships.removed_at, invitations, server_settings, server_admins; 007_live_mode.sql is additive: companies.mode and time_zone, the ledger's provenance columns, two guard triggers); schema_migrations records completion.
 
 | Table | Purpose |
 |---|---|
-| companies / users | Company identity and global normalized login identity; salted password hash |
+| companies / users | Company identity (mode LIVE = the real yard or DEMO = the Practice yard, set once and never changed: trigger companies_mode_fixed; time_zone, default Australia/Sydney, for the business clock) and global normalized login identity; salted password hash |
 | memberships | Composite company/user key; one identity may join several companies; removed_at marks someone removed (the row stays for the audit history) |
 | invitations | One-time invitation: company, email, roles, inviter, SHA-256 of the link token, expiry (7 days), accepted/cancelled |
 | server_settings / server_admins | Server-wide switches (open_registration, lan_sharing; lan_notice until the first save after the update) and the one server administrator |
@@ -15,7 +15,7 @@ SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migr
 | audit_events | Membership-scoped administrative history |
 | objects | UUID, company, kind, validated JSON, optimistic version; company/kind index |
 | contents | Company/container/product key, nonnegative integer quantity, tenant composite foreign keys |
-| ledger | Append-only sequence, actor/event/product/container/quantity, source/destination, request/task, reason/key/time |
+| ledger | Append-only sequence, actor/event/product/container/quantity, source/destination, request/task, reason/key/time (created_at = recorded); provenance: occurred_at, actor_kind (PERSON, ON_BEHALF, ENGINE, IMPORT), on_behalf_of, origin (command:<action>, engine, before-provenance). A LIVE company's ledger refuses ENGINE rows (trigger ledger_live_people_only) |
 | commands | Unique company/idempotency key, fingerprint and committed result |
 | engine_lease | Singleton scheduler owner/expiry |
 

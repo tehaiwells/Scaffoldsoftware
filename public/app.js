@@ -8,6 +8,7 @@ import {
   bdClear,
 } from './operations.js';
 import { mountSprites, sprite, siMount, siImg } from './art.js';
+import { switchChoices } from './mode.js';
 const app = document.querySelector('#app'),
   message = document.querySelector('#message');
 let systems = [],
@@ -523,12 +524,19 @@ function bind(id, handler, arrays = []) {
 }
 async function refresh() {
   state = await api('me');
+  modeLabel();
   await openOperations(app, api, notify, state, openAccount);
+}
+// The small label in the page header: the Practice yard keeps "V1 · Local simulation"; the real yard says it is live.
+function modeLabel() {
+  const el = document.getElementById('mode-label');
+  if (el) el.textContent = state?.company?.mode === 'LIVE' ? 'Live · your real yard' : 'V1 · Local simulation';
 }
 // The Account page reads the company afresh (the board may have changed its scaffold systems since sign-in).
 async function openAccount() {
   try {
     state = await api('me');
+    modeLabel();
   } catch {}
   settingsHome();
 }
@@ -654,9 +662,15 @@ function settingsHome() {
   const server = state.admin
     ? `<section class="panel acct-card" id="server-card">${cardHead('ac-key', 'This computer', 'Only the person who runs Scaffold Yard sees this.')}<p class="acct-note">Loading…</p></section>`
     : '';
+  // Someone in more than one company: big choices, the Practice yard first, then the real yard (the same choices as the board's chip).
   const switcher =
     state.memberships.length > 1
-      ? `<section class="panel acct-card acct-switch">${cardHead('ac-switch', 'Company workspaces', 'You belong to ' + state.memberships.length + ' companies. Switch to open another one.')}<form id="switch-company"><label>Company workspace<select name="companyId">${state.memberships.map((c) => `<option value="${escape(c.id)}" ${c.id === state.company.id ? 'selected' : ''}>${escape(c.name)}</option>`).join('')}</select></label><div class="actions"><button>Switch company</button></div></form></section>`
+      ? `<section class="panel acct-card acct-switch acct-yards">${cardHead('ac-switch', 'Your yards', 'Pick the yard to open.')}${switchChoices(state.memberships, state.company.id)}</section>`
+      : '';
+  // "Start your real yard": an owner (or whoever runs the server) with no real yard yet. The Practice yard stays as it is.
+  const startLive =
+    state.canStartLive && !state.memberships.some((m) => m.mode === 'LIVE')
+      ? `<section class="panel acct-card acct-live" id="start-live">${cardHead('ac-cabin', 'Start your real yard', 'Your Practice yard stays exactly as it is. Your real yard starts empty and shows only what you and your team record: nothing moves or answers by itself.')}<form id="live-company"><label>Your company’s name<input name="name" required maxlength="120" autocomplete="organization" placeholder="e.g. Tee Scaffolding"></label><label>Your time<select name="timeZone">${LIVE_ZONES.map(([z, n]) => `<option value="${z}">${n}</option>`).join('')}</select></label><p class="acct-note">Next you pick the size of your yard. Then add your trucks, your team and the stock you have.</p><div class="actions"><button>Start my real yard</button></div></form></section>`
       : '';
   const catalogue = owner
     ? `<section class="panel acct-card acct-catalogue">${cardHead('spr-bundle', 'Catalogue', 'Your components, weights and pack sizes.')}${ops ? `<div class="acct-pointer"><span class="acct-pointer-art">${sprite('spr-stillage')}</span><div><strong>Import your supplier’s list on the Materials list</strong><p>Paste or upload a spreadsheet with Import materials, then fix any missing weights and pack sizes there.</p></div><button type="button" class="secondary" id="acct-materials">Open the Materials list</button></div>` : ''}<div class="acct-cat-admin">${catalogueSettings()}</div></section>`
@@ -676,20 +690,23 @@ function settingsHome() {
         .join(
           '',
         )}</ul><p class="acct-note">${ops ? 'Company settings, the team and backups are looked after by an owner.' : 'The office runs the yard; ask them for access to more sites.'}</p></section>`;
-  const left = owner ? company + members + activity + server : company + managerInvite + switcher,
-    right = owner ? backups + catalogue + switcher : access + server;
+  const left = owner ? company + members + activity + server : company + managerInvite,
+    right = owner ? backups + catalogue : access + server;
   // the same top bar as every Office page: the big Back button and the page's name
-  app.innerHTML = `<div class="office-bar acct-bar"><button type="button" class="ob-back" id="back-yard"><span aria-hidden="true">&larr;</span> ${ops ? 'Back to the yard' : 'Home'}</button><span class="ob-title">Account</span></div><div class="acct${owner ? ' is-owner' : ''}">${hero}${owner ? bdCard() : ''}<div class="acct-grid"><div class="acct-col">${left}</div><div class="acct-col">${right}</div></div></div>`;
+  app.innerHTML = `<div class="office-bar acct-bar"><button type="button" class="ob-back" id="back-yard"><span aria-hidden="true">&larr;</span> ${ops ? 'Back to the yard' : 'Home'}</button><span class="ob-title">Account</span></div><div class="acct${owner ? ' is-owner' : ''}">${hero}${switcher}${startLive}${owner ? bdCard() : ''}<div class="acct-grid"><div class="acct-col">${left}</div><div class="acct-col">${right}</div></div></div>`;
   bindCatalogue();
   if (owner) backupsPanel();
   if (state.admin) serverPanel();
   bindTeam();
   if (owner) bdBind(state.company.name);
   opsCounts(!owner);
-  if (state.memberships.length > 1)
-    bind('switch-company', async (data) => {
-      await api('switch-company', data);
+  for (const b of document.querySelectorAll('.acct [data-sy-switch]'))
+    b.onclick = () => switchTo(b.dataset.sySwitch, b.dataset.syName);
+  if (document.getElementById('live-company'))
+    bind('live-company', async (data) => {
+      await api('live-company', data);
       await refresh();
+      notify('Your real yard is ready. Pick the size of your yard to start.');
     });
   document.querySelector('#back-yard').onclick = () => refresh();
   const mat = document.querySelector('#acct-materials');
@@ -731,6 +748,33 @@ function settingsHome() {
       ['systems'],
     );
 }
+// The company time zones a real yard can pick (Account's "Start your real yard"); Sydney unless the owner says otherwise.
+const LIVE_ZONES = [
+  ['Australia/Sydney', 'Sydney, Melbourne, Canberra'],
+  ['Australia/Brisbane', 'Brisbane'],
+  ['Australia/Adelaide', 'Adelaide'],
+  ['Australia/Darwin', 'Darwin'],
+  ['Australia/Perth', 'Perth'],
+  ['Australia/Hobart', 'Hobart'],
+];
+// Open another of this person's companies (Account's big choices, or the board's chip: the 'sy:switch' event).
+async function switchTo(companyId, name) {
+  try {
+    await api('switch-company', { companyId });
+    await refresh();
+    const c = state?.company;
+    notify(
+      c?.mode === 'LIVE'
+        ? 'You are in your real yard, ' + c.name + '.'
+        : c
+          ? 'You are in the Practice yard (' + c.name + ').'
+          : 'You are in ' + (name ?? 'the other yard') + '.',
+    );
+  } catch (error) {
+    notify(error.message);
+  }
+}
+addEventListener('sy:switch', (e) => switchTo(e.detail?.companyId, e.detail?.name));
 // ---------- Team: invitations and removing someone (the invitee says yes on their own link; nobody is added without it) ----------
 const ROLE_WORDS = (roles) => roles.map((r) => ROLE_SHORT[r] ?? r).join(' + ');
 const canInvite = () => state.permissions.includes('users.manage') || state.permissions.includes('operations.manage');

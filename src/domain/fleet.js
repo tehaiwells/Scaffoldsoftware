@@ -175,6 +175,8 @@ export const fleetMethods = {
         jobRefreshMs: 1000,
         jobEffects: {},
         jobsFault: null,
+        // a real yard: no simulated yard jobs or answers (the engine never runs it anyway)
+        ...(this.live() ? { mode: 'LIVE', jobs: false, routineJobs: false, planReplies: false } : {}),
       })
     );
   },

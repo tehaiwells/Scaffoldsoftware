@@ -9,7 +9,10 @@ import { applyLive } from './domain/live.js';
 /** One product's quantity in one container. @typedef {{product_id:string,quantity:number}} ContentLine */
 /** Optional fields of a ledger row (Repository.event). Quantities are whole pieces; key is the command's idempotency key.
  * @typedef {{product?:string|null,container?:string|null,quantity?:number,source?:string|null,destination?:string|null,task?:string|null,request?:string|null,reason?:string,key?:string}} LedgerDetails */
-/** A row of the append-only ledger. @typedef {{sequence:number,id:string,company_id:string,actor:string,event:string,product_id:string|null,container_id:string|null,quantity:number,source:string|null,destination:string|null,task_id:string|null,request_id:string|null,reason:string,command_key:string,created_at:string}} LedgerRow */
+/** A row of the append-only ledger. occurred_at: when it happened (created_at: when it was recorded); actor_kind, on_behalf_of and origin
+ * say who and what wrote it (ADR 0003). @typedef {{sequence:number,id:string,company_id:string,actor:string,event:string,product_id:string|null,container_id:string|null,quantity:number,source:string|null,destination:string|null,task_id:string|null,request_id:string|null,reason:string,command_key:string,created_at:string,occurred_at:string|null,actor_kind:string,on_behalf_of:string|null,origin:string|null}} LedgerRow */
+/** Who writes the next ledger rows (Simulation.execute sets it for a command; null = the Practice yard's engine).
+ * @typedef {{kind:'PERSON'|'ON_BEHALF'|'IMPORT',onBehalfOf:string|null,origin:string}} Provenance */
 // Kinds effectiveProducts() reads: every add/save/remove of one bumps the company's catalogue revision in the same transaction.
 /** @type {Set<string>} */
 export const CATALOGUE_KINDS = new Set(['product', 'packaging', 'productSettings']);
@@ -52,6 +55,8 @@ export class Repository {
     this.company = company;
     /** @type {null|{kinds:Map<string,StoredObject[]>,ids:Map<string,StoredObject>,contents?:Map<string,ContentLine[]>}} */
     this.cache = null;
+    /** @type {Provenance|null} */
+    this.provenance = null;
   }
   // this.cache (set only while Simulation.snapshot runs): each kind parsed once, ids and contents indexed, callers get shallow copies; any write drops it.
   /** Every record of one kind in this company, oldest first. @param {string} kind @returns {StoredObject[]} */
@@ -173,11 +178,14 @@ export class Repository {
       'INSERT INTO contents VALUES(?,?,?,?) ON CONFLICT(company_id,container_id,product_id) DO UPDATE SET quantity=excluded.quantity',
     ).run(this.company, container, product, quantity);
   }
-  /** Appends one ledger row. @param {string} actor @param {string} event @param {LedgerDetails} details */
+  /** Appends one ledger row, with its provenance: a person's command (this.provenance) or, outside a command, the Practice yard's engine (a
+   * real yard's ledger refuses that: migration 007). @param {string} actor @param {string} event @param {LedgerDetails} details */
   event(actor, event, details) {
+    const p = this.provenance,
+      at = new Date().toISOString();
     cached(
       this.db,
-      'INSERT INTO ledger(id,company_id,actor,event,product_id,container_id,quantity,source,destination,task_id,request_id,reason,command_key,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO ledger(id,company_id,actor,event,product_id,container_id,quantity,source,destination,task_id,request_id,reason,command_key,created_at,occurred_at,actor_kind,on_behalf_of,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ).run(
       randomUUID(),
       this.company,
@@ -192,7 +200,11 @@ export class Repository {
       details.request ?? null,
       details.reason ?? event,
       details.key ?? randomUUID(),
-      new Date().toISOString(),
+      at,
+      at,
+      p?.kind ?? 'ENGINE',
+      p?.onBehalfOf ?? null,
+      p?.origin ?? 'engine',
     );
   }
   /** @param {string} id @param {string} kind @returns {number|bigint} rows removed */

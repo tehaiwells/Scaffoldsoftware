@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { openDatabase, cached } from './database.js';
 import { Service, AppError } from './service.js';
 import { Simulation, startScheduler } from './simulation.js';
+import { startClock } from './domain/clock.js';
 import { prepareDatabase } from './relocate.js';
 import { createBackups } from './backups.js';
 import { backupDirectory, backupName, resolveDatabasePath } from './paths.js';
@@ -131,7 +132,8 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/game-finish.js': ['game-finish.js', 'text/javascript'],
     '/game.css': ['game.css', 'text/css'],
   }); // the game board
-  Object.assign(assets, { '/plan-cal.js': ['plan-cal.js', 'text/javascript'] }); // the Today calendar's grid and chips (shared with src/domain/today.js)
+  Object.assign(assets, { '/plan-cal.js': ['plan-cal.js', 'text/javascript'] });
+  Object.assign(assets, { '/mode.js': ['mode.js', 'text/javascript'] }); // LIVE or Practice yard: the chip, the switcher, what each shows // the Today calendar's grid and chips (shared with src/domain/today.js)
   return async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -386,6 +388,12 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         service.switchCompany(user, body.companyId, token);
         send(200, { ok: true });
       }
+      // "Start your real yard" (Account, owners and the server administrator): a new LIVE company, and this session switches to it.
+      else if (req.method === 'POST' && path === '/api/live-company') {
+        const made = service.createLiveCompany(user, body);
+        service.switchCompany(user, made.id, token);
+        send(201, made);
+      }
       // Settings of the whole server, for the administrator only (changed at this PC): new companies may sign up; phones on this Wi-Fi may open it (read at the next start).
       else if (path === '/api/server-settings' && req.method === 'GET') {
         service.requireAdmin(user);
@@ -497,6 +505,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       }
     }
     prepared.release();
+    // The business clock for real yards (ADR 0002): its own timer, apart from the engine and its lease.
+    const stopEngine = stop,
+      stopClock = startClock(db, { Simulation });
+    stop = () => {
+      stopClock();
+      stopEngine();
+    };
     backups = createBackups({ databasePath, directory: backupDirectory(), name: backupName({ databasePath }) });
     backups.start();
   } catch (error) {

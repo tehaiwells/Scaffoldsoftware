@@ -159,6 +159,7 @@ export const gameMethods = {
   // A site crane and two workers, so a truck can be unloaded or loaded there. Only when the site has no crane at all yet (one the Office switched
   // off counts: the board never adds a second).
   gameCrew(site) {
+    if (this.live()) return false; // a real yard's cranes and crew are records people add, never invented (ADR 0001)
     const all = this.repo.all('resource').filter((r) => r.location === site.id),
       here = all.filter((r) => r.enabled);
     if (all.some((r) => r.type === 'CRANE')) return false;
@@ -200,6 +201,11 @@ export const gameMethods = {
       gate: { x: w - 5500, y: d - 3000 },
       fixtures: [{ kind: 'OFFICE', name: 'Yard office', x: w - 6500, y: 500, w: 6000, h: 3000 }],
     });
+    // A real yard starts with its yard only: its trucks, forklifts and people are added by the owner (Office), never invented.
+    if (this.live()) {
+      this.ensureConfig();
+      return { yard, message: 'Your yard is ready. Add your trucks and your team in the Office.' };
+    }
     this.resources({ location: yard.id, workers: 4, machines: 2 });
     for (let i = 0; i < 2; i++) this.quickAdjust({ kind: 'TRUCK', delta: 1, location: yard.id, payload: 12500000 });
     return { yard, message: 'Your yard is ready. The crew is waiting for work.' };
@@ -217,6 +223,7 @@ export const gameMethods = {
         if (!e.status) throw e;
       }
     }
+    if (this.live()) return { site, message: site.name + ' is on the map.' };
     this.gameCrew(site);
     return { site, message: site.name + ' is on the map. Its crane and crew are ready.' };
   },

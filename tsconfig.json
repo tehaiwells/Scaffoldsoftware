@@ -13,5 +13,13 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "files": ["src/repository.js", "src/domain/hire.js", "src/domain/logistics.js", "src/domain/plan.js"]
+  "files": [
+    "src/repository.js",
+    "src/domain/hire.js",
+    "src/domain/logistics.js",
+    "src/domain/plan.js",
+    "src/domain/zonetime.js",
+    "src/domain/mode.js",
+    "src/domain/clock.js"
+  ]
 }

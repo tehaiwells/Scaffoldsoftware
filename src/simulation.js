@@ -29,6 +29,8 @@ import { planMethods, PLAN_OPS, PAPERWORK_OPS } from './domain/plan.js';
 import { teamMethods } from './domain/team.js';
 import { paperworkMethods } from './domain/paperwork.js';
 import { todayMethods } from './domain/today.js';
+import { clockMethods } from './domain/clock.js';
+import { companyMode, LIVE_OPS, IMPORT_OPS, COMING_NEXT } from './domain/mode.js';
 const operational = [
   'rotate',
   'loadTruck',
@@ -85,6 +87,10 @@ export class Simulation {
     this.auth = new Service(db);
     this.repo = new Repository(db, user.company_id);
   }
+  // Is this company the real yard (LIVE) rather than the Practice yard (DEMO)? Set when the company was made and never changes (ADR 0001).
+  live() {
+    return (this.modeMemo ??= companyMode(this.db, this.user.company_id)) === 'LIVE';
+  }
   assertSite(id) {
     if (this.auth.permissions(this.user).includes('operations.manage')) return;
     const object = this.repo.get(id);
@@ -125,6 +131,8 @@ export class Simulation {
     else if (['hireRate', 'hireSiteRate'].includes(action)) {
       if (!this.auth.permissions(this.user).includes('finance.view')) this.auth.require(this.user, 'company.manage');
     } else throw new AppError(404, 'Unknown command.');
+    // The hard wall (ADR 0001): a real yard takes only the commands that record what people did (mode.js LIVE_OPS).
+    if (this.live() && !LIVE_OPS.has(action)) throw new AppError(409, COMING_NEXT);
     const fingerprint = createHash('sha256')
       .update(JSON.stringify({ actor: this.user.id, action, input }))
       .digest('hex');
@@ -138,10 +146,22 @@ export class Simulation {
         requireRule(previous.fingerprint === fingerprint, 'This idempotency key was used for a different action.');
         return JSON.parse(previous.result);
       }
-      const result = this[action](input);
-      this.repo.event(this.user.id, 'COMMAND', { reason: action, key });
-      this.rtSync();
-      this.alCheck();
+      // Provenance (ADR 0003): every ledger row this command writes is a person's (opening stock: brought in by a person); rows written outside
+      // a command (the Practice yard's engine) stay ENGINE, which a real yard's ledger refuses.
+      this.repo.provenance = {
+        kind: IMPORT_OPS.has(action) ? 'IMPORT' : 'PERSON',
+        onBehalfOf: null,
+        origin: 'command:' + action,
+      };
+      let result;
+      try {
+        result = this[action](input);
+        this.repo.event(this.user.id, 'COMMAND', { reason: action, key });
+        this.rtSync();
+        this.alCheck();
+      } finally {
+        this.repo.provenance = null;
+      }
       cached(this.db, 'INSERT INTO commands VALUES(?,?,?,?)').run(
         this.user.company_id,
         key,
@@ -266,7 +286,8 @@ export class Simulation {
     const products = this.effectiveProducts();
     const nameOf = new Map(allContainers.map((o) => [o.id, o.name]));
     const result = {
-      mode: 'SIMULATION / DEMONSTRATION',
+      mode: this.live() ? 'LIVE' : 'SIMULATION / DEMONSTRATION',
+      companyMode: this.live() ? 'LIVE' : 'DEMO',
       yards: operations ? this.repo.all('yard') : [],
       sites: sites.map((s) => ({
         ...s,
@@ -307,9 +328,13 @@ export class Simulation {
         .filter((l) => l.condition === 'SERVICEABLE')
         .reduce((s, l) => s + l.quantity - l.reserved, 0),
     };
+    // a real yard draws no people on the map (nobody has signed on: that comes later), so its team gets no invented spot to stand on
+    const drawPeople = !this.live();
     result.resources = result.resources.map((r) =>
       r.type === 'WORKER'
-        ? { ...r, ...this.workerPosition(r) }
+        ? drawPeople
+          ? { ...r, ...this.workerPosition(r) }
+          : r
         : r.type === 'FORKLIFT'
           ? { ...r, ...this.forkliftPosition(r), cargoPreview: r.cargo ? this.repo.get(r.cargo, 'container') : null }
           : r,
@@ -643,9 +668,18 @@ Object.assign(
   teamMethods,
   paperworkMethods,
   todayMethods,
+  clockMethods,
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 installGame(Simulation.prototype); // the game board: one-tap commands, the truck autopilot after every tick, result.game
+// The engine's two entry points do nothing for a real yard (ADR 0001): whoever calls them, nothing there moves, completes or answers by itself.
+for (const name of ['tick', 'tickJobs']) {
+  const run = Simulation.prototype[name];
+  Simulation.prototype[name] = function (...args) {
+    if (this.live()) return undefined;
+    return run.apply(this, args);
+  };
+}
 function csv(rows) {
   return rows
     .map((row) =>
@@ -679,6 +713,7 @@ const PROBE = `SELECT (SELECT data FROM objects WHERE company_id=?1 AND kind='co
  OR EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='truck' AND json_extract(data,'$.status')='IN_TRANSIT')
  OR EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='resource' AND ${SET('$.enabled')} AND (${SET('$.walk')} OR ${SET('$.drive')} OR (json_extract(data,'$.type') IN ('WORKER','FORKLIFT') AND NOT (${FINITE('$.x')} AND ${FINITE('$.y')})))) moving`;
 function tickCompany(db, row, elapsed) {
+  if (companyMode(db, row.company_id) === 'LIVE') return 'live'; // never the engine's (the scheduler does not pick it either)
   const probe = cached(db, PROBE).get(row.company_id),
     config = probe.config === null ? null : JSON.parse(probe.config);
   if (!config || config.paused) return 'paused';
@@ -730,7 +765,7 @@ export function startScheduler(db) {
       renew();
       for (const row of cached(
         db,
-        'SELECT ur.company_id,ur.user_id id FROM user_roles ur WHERE ur.role=? GROUP BY ur.company_id',
+        "SELECT ur.company_id,ur.user_id id FROM user_roles ur JOIN companies c ON c.id=ur.company_id AND c.mode='DEMO' WHERE ur.role=? GROUP BY ur.company_id",
       ).all('OWNER')) {
         if (stopped) return;
         if (paused(db, row.company_id)) continue; // tick() returns at once for these: no transaction needed

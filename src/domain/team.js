@@ -354,8 +354,9 @@ export const teamMethods = {
     return {
       people: rows,
       roles: TEAM_ROLES.map((r) => ({ code: r, words: ROLE_WORDS[r] })),
-      needsStart: !s?.demoDriversAdded && !this.repo.all('driver').length,
-      needsNames: !s?.demoNamesGiven && rows.some((r) => r.kind === 'worker' && DEMO_NAME.test(r.name)),
+      // the Practice yard's demo drivers and names (a real yard's people are only the ones the owner adds)
+      needsStart: !this.live() && !s?.demoDriversAdded && !this.repo.all('driver').length,
+      needsNames: !this.live() && !s?.demoNamesGiven && rows.some((r) => r.kind === 'worker' && DEMO_NAME.test(r.name)),
     };
   },
 };

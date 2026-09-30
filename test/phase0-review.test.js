@@ -121,7 +121,9 @@ test('Account stays calm: This computer sits in the left column, the sign-up swi
     hasCode('const left=owner?company+members+activity+server:'),
     'This computer under Recent activity (the right column was ~600 px taller)',
   );
-  assert.ok(hasCode('right=owner?backups+catalogue+switcher:access+server'));
+  assert.ok(hasCode('right=owner?backups+catalogue:access+server'));
+  // Phase 1A: the yards switcher (two big choices) and "Start your real yard" sit under the hero, before the columns
+  assert.ok(hasCode('${hero}${switcher}${startLive}'));
   const more = appCode.indexOf(squash('<details class="acct-fold server-more"'));
   assert.ok(more > 0);
   assert.ok(

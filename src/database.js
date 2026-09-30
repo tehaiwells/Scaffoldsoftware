@@ -68,6 +68,8 @@ export function openDatabase(path, { backupDirectory, backupName = 'scaffold' } 
     atomic(db, () => db.exec(readFileSync(new URL('./migrations/005_perf_indexes.sql', import.meta.url), 'utf8')));
   if (!db.prepare('SELECT version FROM schema_migrations WHERE version=6').get())
     atomic(db, () => db.exec(readFileSync(new URL('./migrations/006_invitations.sql', import.meta.url), 'utf8')));
+  if (!db.prepare('SELECT version FROM schema_migrations WHERE version=7').get())
+    atomic(db, () => db.exec(readFileSync(new URL('./migrations/007_live_mode.sql', import.meta.url), 'utf8')));
   return db;
 }
 

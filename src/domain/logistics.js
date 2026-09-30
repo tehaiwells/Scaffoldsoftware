@@ -131,7 +131,12 @@ export const logisticsMethods = {
       );
     return this.repo.add('site', {
       name: label(input.name),
-      address: label(input.address ?? 'Demonstration site'),
+      // a real yard's site has only the address someone typed (none yet: empty), never the demo placeholder
+      address: this.live()
+        ? input.address
+          ? label(input.address)
+          : null
+        : label(input.address ?? 'Demonstration site'),
       supervisor,
       status: 'ACTIVE',
       ...this.siteDetailFields(input),
@@ -144,7 +149,7 @@ export const logisticsMethods = {
       height: 10000,
       loading: { x: 1000, y: 1000 },
       gate: { x: 3500, y: 1000 },
-      mode: 'DEMO ONLY',
+      mode: this.live() ? 'LIVE' : 'DEMO ONLY',
     });
   },
   archive(input) {
@@ -186,7 +191,7 @@ export const logisticsMethods = {
       height: integer(input.height ?? 3000, 'Load height', 1),
       stackLimit: integer(input.stackLimit ?? 2, 'Truck stack limit', 1, 2),
       destination: null,
-      mode: 'DEMO ONLY',
+      mode: this.live() ? 'LIVE' : 'DEMO ONLY',
     });
   },
   resources(input) {

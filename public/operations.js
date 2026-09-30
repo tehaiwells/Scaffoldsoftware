@@ -50,6 +50,12 @@ import {
   OFFICE_TILES,
 } from './game.js'; // the game board (the main screen) and the Office drawer
 import { sfFinishedHTML, sfOfficeActs, sfClick } from './game-finish.js'; // Client sites: Remove site, Removed sites, Open again
+import { isLive, LIVE_STRIP } from './mode.js'; // the real yard (LIVE) or the Practice yard
+// The real yard: no simulation strip, Pause, demo answers, re-stack by the simulated crew or synthetic catalogue on its pages.
+const liveMode = () => isLive(account);
+const SIM_STRIP =
+  '<div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div>';
+const modeStrip = () => (liveMode() ? LIVE_STRIP : SIM_STRIP);
 // Remove site's one fix button for an open stocktake: the stock page opens at that stocktake, marked for a moment.
 function sfFocus(id) {
   requestAnimationFrame(() => {
@@ -755,7 +761,7 @@ function morph(a, b) {
   for (let i = 0; i < bc.length; i++) morph(ac[i], bc[i]);
 }
 const pauseButton = () =>
-  state.config && isOps()
+  state.config && isOps() && !liveMode()
     ? `<button class="secondary${state.config.paused ? ' is-paused' : ''}" id="pause">${state.config.paused ? 'Resume simulation' : 'Pause simulation'}</button>`
     : '';
 // ----- Home hero: the yard name over a small diorama drawn with the plan's own sprites, and live counters (a part, so the poll refreshes only them). -----
@@ -779,14 +785,17 @@ const homeHero = () =>
   part('due', '.home-hero .hero-due', homeDue) +
   '</div></div>' +
   part('hud', '.home-hero .hud-stats', hudStats) +
-  '<div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div></div>';
+  modeStrip() +
+  '</div>';
 // The live state in words next to the Pause button (the button is the control, this pill is the status).
 const heroLive = () =>
-  '<span class="hero-live' +
-  (state.config?.paused ? ' paused' : '') +
-  '">' +
-  (state.config?.paused ? 'Simulation paused' : 'Live simulation') +
-  '</span>';
+  liveMode()
+    ? '<span class="hero-live live-real">Live &middot; your real yard</span>'
+    : '<span class="hero-live' +
+      (state.config?.paused ? ' paused' : '') +
+      '">' +
+      (state.config?.paused ? 'Simulation paused' : 'Live simulation') +
+      '</span>';
 // Page heroes (Overview, Workers, Equipment, both truck pages, Stock) open the way Home does: the eyebrow, the page's one h1, the live pill with the Pause button, and the simulation strip along the bottom. A view that draws one calls heroActions(), and render() then leaves out the generic header.
 let pageHeroShown = false;
 const heroEyebrow = () =>
@@ -799,8 +808,7 @@ const heroActions = (extra = '') => {
   pageHeroShown = true;
   return '<div class="hero-actions">' + heroLive() + part('pause', '#pause', pauseButton) + '</div>' + extra;
 };
-const heroBanner = () =>
-  '<div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div>';
+const heroBanner = () => modeStrip();
 const share = (a, b) => (b ? Math.round((a * 100) / b) : 0);
 // Four counters that add to the Fleet column rather than repeat it: stock, storage in use, crew working (the same words as Fleet and the crew panel) and moves, with blocked moves flagged.
 function hudStats() {
@@ -962,9 +970,12 @@ function renderGame() {
   document.body.classList.add('in-game');
   const ctx = gameCtx(),
     want = state.yards.length ? 'board' : 'start',
-    have = app.querySelector(':scope>.game-mode > [data-gm]')?.dataset.gm;
-  if (have !== want) {
-    app.innerHTML = '<div class="workspace game-mode">' + gmShell(ctx) + '</div>';
+    have = app.querySelector(':scope>.game-mode > [data-gm]')?.dataset.gm,
+    // another company (switched from the board's chip): built again, so its top bar says which yard it is
+    other = app.querySelector(':scope>.game-mode')?.dataset.company !== account.company.id;
+  if (have !== want || other) {
+    app.innerHTML =
+      '<div class="workspace game-mode" data-company="' + esc(account.company.id) + '">' + gmShell(ctx) + '</div>';
     applyStyles(app);
   }
   gmUpdate(ctx);
@@ -1095,7 +1106,7 @@ function render() {
                                 : view === 'CREW'
                                   ? cwView()
                                   : overviewView();
-  app.innerHTML = `<div class="workspace office-mode">${officeBar()}<section class="content${heroOn() ? ' is-home' : ''}">${heroOn() ? homeHero() : pageHeroShown ? '' : `<div class="row"><div><div class="eyebrow">SCAFFOLD / ${esc(NAV.find((n) => n[0] === view)?.[1] ?? view)}</div><h1>${{ CONTROL: 'Your yard. Run it from here.', OVERVIEW: 'Your yard at a glance.', SCHEDULE: 'Every load, on the day it is needed.', WORKERS: 'Your crew.', EQUIPMENT: 'Forklifts, cranes and trucks.', TRUCK12: '12.5 tonne trucks. Ready for the next load.', TRUCK2: '2 tonne trucks. Quick runs and returns.', STOCK: 'Every piece accounted for.', MATERIALS: 'Every component you can order.', SITES: 'From yard to site.', YARD: 'A place for everything.' }[view] ?? ''}</h1></div>${part('pause', '#pause', pauseButton)}</div><div class="simulation-banner"><span class="status-dot"></span> SIMULATION / DEMONSTRATION <span>Not real lifting operations or certified load engineering.</span></div>`}${ops && !state.yards.length ? '<p class="notice">Start here: draw your yard → configure resources → add starting stock → open your yard.</p>' : ''}<div id="view">${viewHTML}</div>${part('detailOut', '.selected-detail', detailOutside)}${view === 'TODAY' ? '' : (activityHTML = part('activity', 'section.activity', activityPanel)) + part('notes', 'details:has(> #notifications-summary)', notificationsPanel)}</section>${officeHTML({ state, account, hire: hrOK(), view })}</div>`;
+  app.innerHTML = `<div class="workspace office-mode">${officeBar()}<section class="content${heroOn() ? ' is-home' : ''}">${heroOn() ? homeHero() : pageHeroShown ? '' : `<div class="row"><div><div class="eyebrow">SCAFFOLD / ${esc(NAV.find((n) => n[0] === view)?.[1] ?? view)}</div><h1>${{ CONTROL: 'Your yard. Run it from here.', OVERVIEW: 'Your yard at a glance.', SCHEDULE: 'Every load, on the day it is needed.', WORKERS: 'Your crew.', EQUIPMENT: 'Forklifts, cranes and trucks.', TRUCK12: '12.5 tonne trucks. Ready for the next load.', TRUCK2: '2 tonne trucks. Quick runs and returns.', STOCK: 'Every piece accounted for.', MATERIALS: 'Every component you can order.', SITES: 'From yard to site.', YARD: 'A place for everything.' }[view] ?? ''}</h1></div>${part('pause', '#pause', pauseButton)}</div>${modeStrip()}`}${ops && !state.yards.length ? '<p class="notice">Start here: draw your yard → configure resources → add starting stock → open your yard.</p>' : ''}<div id="view">${viewHTML}</div>${part('detailOut', '.selected-detail', detailOutside)}${view === 'TODAY' ? '' : (liveMode() ? '' : (activityHTML = part('activity', 'section.activity', activityPanel))) + part('notes', 'details:has(> #notifications-summary)', notificationsPanel)}</section>${officeHTML({ state, account, hire: hrOK(), view })}</div>`;
   alSync();
   if (parts) part('rkey', null, () => String(rKeyActive()));
   applyStyles(app);
@@ -2538,6 +2549,8 @@ function workersView() {
         .join('') +
       '</ol><p class="wk-ladder-note">P2 = yard lists needed today or overdue. P3 = needed by the next working day; later dates wait. Lists with no date: P2 once packs are reserved on a truck, P3 until then. NEXT and THEN are likely, not promised: the forklift engine always has first pick.</p></div>'
     : '';
+  // the real yard: the Workers page is its team (names, jobs, mobiles); yard jobs and crew orders are the Practice yard's
+  if (liveMode()) return '<div class="page-workers">' + wkDefs() + tmTeam() + '</div>';
   const waiting = openJobs.length;
   const hero =
     wkHero(
@@ -6229,7 +6242,7 @@ function sgActions(x) {
     b.push(sgBtn('add5:STILLAGE', '+5 stillages'), sgBtn('add:STILLAGE', '+1 stillage', 'secondary sg-go'));
   if (x.id === 'materials') {
     b.push(sgBtn('import', 'Import materials'), sgBtn('go:MATERIALS', 'Open Materials list', 'secondary sg-go'));
-    if (!state.products.length)
+    if (!state.products.length && !liveMode())
       b.push(
         sgBtn(
           'seed',
@@ -11350,7 +11363,7 @@ function bindViews() {
 }
 
 export function catalogueSettings() {
-  return `<section class="panel"><h2>Catalogue & provenance</h2><p>The synthetic demo catalogue is made up, for trying the yard out. The supplier parts lists (in <code>catalogues/verified/</code>) were copied from supplier documents: Turbo Scaffolding product sheets and the AT-PAC North America 2020 catalogue. Their weights are as the supplier prints them, not checked against real parts: check them before you rely on them.</p><button id="seed-demo" ${state?.products.length ? 'disabled' : ''}>Add synthetic demo catalogue</button></section>${state ? purgeButton() : ''}${account?.permissions.includes('operations.manage') ? `<details class="panel"><summary>Import reviewed catalogue batches</summary><p>Choose one or more reviewed JSON batch files (for example the supplier batches in <code>catalogues/verified/</code>). Each file imports atomically: a duplicate or invalid row rejects that whole file. Imports add products only — no stock is created.</p><label>Batch files<input type="file" id="import-batches" accept=".json,application/json" multiple></label><div class="actions"><button type="button" id="import-run">Import selected files</button></div><div id="import-log" class="muted"></div></details>` : ''}${
+  return `<section class="panel"><h2>Catalogue & provenance</h2><p>${liveMode() ? '' : 'The synthetic demo catalogue is made up, for trying the yard out. '}The supplier parts lists (in <code>catalogues/verified/</code>) were copied from supplier documents: Turbo Scaffolding product sheets and the AT-PAC North America 2020 catalogue. Their weights are as the supplier prints them, not checked against real parts: check them before you rely on them.</p>${liveMode() ? '' : `<button id="seed-demo" ${state?.products.length ? 'disabled' : ''}>Add synthetic demo catalogue</button>`}</section>${state ? purgeButton() : ''}${account?.permissions.includes('operations.manage') ? `<details class="panel"><summary>Import reviewed catalogue batches</summary><p>Choose one or more reviewed JSON batch files (for example the supplier batches in <code>catalogues/verified/</code>). Each file imports atomically: a duplicate or invalid row rejects that whole file. Imports add products only — no stock is created.</p><label>Batch files<input type="file" id="import-batches" accept=".json,application/json" multiple></label><div class="actions"><button type="button" id="import-run">Import selected files</button></div><div id="import-log" class="muted"></div></details>` : ''}${
     state
       ? form(
           'override-product',
@@ -22174,7 +22187,7 @@ function tdhAdds(sel) {
     b('TRUCK', 'spr-truck12', 'Truck', 'Book one, with a driver') +
     b('MATERIALS', 'spr-stillage', 'Materials', 'A list for a site') +
     b('WORKERS', 'spr-worker', 'Workers', 'People to a site') +
-    b('RESTACK', 'spr-forklift', 'Re-stack', 'Tidy the yard') +
+    (liveMode() ? '' : b('RESTACK', 'spr-forklift', 'Re-stack', 'Tidy the yard')) +
     '</div>'
   );
 }
@@ -23853,7 +23866,7 @@ function tmGo() {
   );
 }
 const tdhRepliesButton = () =>
-  (tdBindOnce(), state.config && isOps())
+  (tdBindOnce(), state.config && isOps() && !liveMode())
     ? '<button type="button" class="secondary tdh-replies' +
       (state.config.planReplies !== false ? ' on' : '') +
       '" id="tdh-replies" aria-pressed="' +

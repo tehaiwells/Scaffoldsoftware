@@ -1,5 +1,6 @@
 import { randomUUID, randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { atomic, cached } from './database.js';
+import { validZone, DEFAULT_ZONE } from './domain/zonetime.js';
 
 export class AppError extends Error {
   constructor(status, message) {
@@ -39,6 +40,14 @@ function matches(password, hash) {
   return timingSafeEqual(scryptSync(password, salt, 64), Buffer.from(key, 'hex'));
 }
 let dummyHash;
+const modeOf = (v) =>
+  v === undefined || v === null || v === 'DEMO'
+    ? 'DEMO'
+    : v === 'LIVE'
+      ? 'LIVE'
+      : fail(400, 'Choose the Practice yard or a real yard.');
+const zoneOf = (v) =>
+  v === undefined || v === null || v === '' ? DEFAULT_ZONE : validZone(v) ? v : fail(400, 'Choose a valid time zone.');
 export class Service {
   constructor(db) {
     this.db = db;
@@ -84,13 +93,22 @@ export class Service {
     cached(this.db, 'INSERT INTO memberships(company_id,user_id) VALUES(?,?)').run(companyId, id);
     return { id, company_id: companyId };
   }
+  // A new company signs up as the Practice yard (DEMO) unless it asks to be a real yard (mode 'LIVE'): set now, never changed (ADR 0001).
   register(input) {
     const name = text(input.companyName, 'Company name'),
-      ids = this.systems(input.systems);
+      ids = this.systems(input.systems),
+      mode = modeOf(input.mode),
+      zone = zoneOf(input.timeZone);
     return atomic(this.db, () => {
       const companyId = randomUUID(),
         now = new Date().toISOString();
-      cached(this.db, 'INSERT INTO companies VALUES(?,?,?)').run(companyId, name, now);
+      cached(this.db, 'INSERT INTO companies(id,name,created_at,mode,time_zone) VALUES(?,?,?,?,?)').run(
+        companyId,
+        name,
+        now,
+        mode,
+        zone,
+      );
       const user = this.createUser(companyId, input);
       cached(this.db, 'INSERT INTO user_roles VALUES(?,?,?)').run(companyId, user.id, 'OWNER');
       // Whoever creates the first company on this server runs it (the server administrator, audit D6).
@@ -101,8 +119,38 @@ export class Service {
           now,
         );
       this.saveSystems(user, ids);
-      this.audit(user, 'company.created');
+      this.audit(user, 'company.created', mode === 'LIVE' ? { mode } : {});
       return this.session(user.id);
+    });
+  }
+  // "Start your real yard" (Account): an owner of this company, or the person who runs the server, makes a new LIVE company and is its owner.
+  // It starts empty (its yard size is the board's first step) with the scaffold systems of the company it was made from. The Practice yard is
+  // left exactly as it was. Returns the new company's id; the caller switches the session to it.
+  createLiveCompany(user, input = {}) {
+    if (!this.permissions(user).includes('company.manage') && !this.isAdmin(user))
+      fail(403, 'Only an owner can start a real yard.');
+    const name = text(input.name, 'Company name'),
+      zone = zoneOf(input.timeZone);
+    return atomic(this.db, () => {
+      const companyId = randomUUID(),
+        now = new Date().toISOString();
+      cached(this.db, 'INSERT INTO companies(id,name,created_at,mode,time_zone) VALUES(?,?,?,?,?)').run(
+        companyId,
+        name,
+        now,
+        'LIVE',
+        zone,
+      );
+      cached(this.db, 'INSERT INTO memberships(company_id,user_id) VALUES(?,?)').run(companyId, user.id);
+      cached(this.db, 'INSERT INTO user_roles VALUES(?,?,?)').run(companyId, user.id, 'OWNER');
+      cached(
+        this.db,
+        'INSERT INTO company_systems(company_id,system_id,enabled) SELECT ?,system_id,1 FROM company_systems WHERE company_id=? AND enabled=1',
+      ).run(companyId, user.company_id);
+      const owner = { ...user, company_id: companyId };
+      this.audit(owner, 'company.created', { mode: 'LIVE', from: user.company_id });
+      this.audit(user, 'company.live.started', { companyId });
+      return { id: companyId, name, mode: 'LIVE', timeZone: zone };
     });
   }
   // Signs in to the user's own company, or (after they were removed from it) to another company they still belong to. None left: no session.
@@ -495,9 +543,11 @@ export class Service {
       admin: this.isAdmin(user),
       memberships: cached(
         this.db,
-        'SELECT c.id,c.name FROM companies c JOIN memberships m ON m.company_id=c.id AND m.removed_at IS NULL WHERE m.user_id=?',
+        'SELECT c.id,c.name,c.mode FROM companies c JOIN memberships m ON m.company_id=c.id AND m.removed_at IS NULL WHERE m.user_id=? ORDER BY c.created_at,c.rowid',
       ).all(user.id),
-      company: cached(this.db, 'SELECT id,name FROM companies WHERE id=?').get(user.company_id),
+      company: cached(this.db, 'SELECT id,name,mode,time_zone timeZone FROM companies WHERE id=?').get(user.company_id),
+      // Who may start a real yard (Account's card): an owner here, or the person who runs the server.
+      canStartLive: permissions.includes('company.manage') || this.isAdmin(user),
       systems: cached(
         this.db,
         'SELECT s.id,s.name,COALESCE(cs.enabled,0) enabled FROM scaffold_systems s LEFT JOIN company_systems cs ON cs.system_id=s.id AND cs.company_id=? ORDER BY s.name',

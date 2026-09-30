@@ -94,8 +94,6 @@ const DAY_ITEMS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='planItem' AND json_extract(data,'$.day')=? ORDER BY rowid";
 const ITEM_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.item')=? ORDER BY rowid";
-const DUE_MSGS =
-  "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.status')='WAITING_TO_SEND' ORDER BY rowid";
 const SENT_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.status')='SENT' AND coalesce(json_type(data,'$.closedAt'),'null')='null' ORDER BY rowid";
 const PERSON_MSGS =
@@ -106,7 +104,14 @@ const PROBE = `SELECT EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind=
  OR EXISTS(SELECT 1 FROM objects WHERE company_id=?1 AND kind='truck' AND json_type(data,'$.hired')='object' AND coalesce(json_extract(data,'$.retired'),0)=0) busy`;
 export const planMethods = {
   planNowCal() {
-    return calendarNow(new Date(this.planNow()));
+    return this.live() ? this.clockCal(this.planNow()) : calendarNow(new Date(this.planNow()));
+  },
+  // Today and a day's time of day: the process's local time in the Practice yard (as before), the company's time zone in a real yard.
+  planToday(now = this.planNow()) {
+    return this.live() ? this.clockDay(now) : localDay(new Date(now));
+  },
+  planAt(day, hm) {
+    return this.live() ? this.clockAt(day, hm) : atLocal(day, hm);
   },
   planDay(v, cal) {
     requireRule(typeof v === 'string' && DAY.test(v) && addDays(v, 0) === v, 'Choose a day on the calendar.');
@@ -117,9 +122,9 @@ export const planMethods = {
   // Today, a time already gone is refused (the calendar only offers what is still ahead): a truck or workers need a time still to come (people
   // answer before it), a list or a re-stack may start in the current half hour; nothing is booked for today once the day has ended at 5 pm.
   planWhen(type, day, time, now = this.planNow()) {
-    if (day !== localDay(new Date(now))) return;
-    requireRule(now < atLocal(day, DAY_END), 'Today is nearly over. Choose tomorrow or a later day.');
-    const at = atLocal(day, time);
+    if (day !== this.planToday(now)) return;
+    requireRule(now < this.planAt(day, DAY_END), 'Today is nearly over. Choose tomorrow or a later day.');
+    const at = this.planAt(day, time);
     requireRule(
       type === 'TRUCK' || type === 'WORKERS' ? at > now : at + SLOT_MS > now,
       'That time has passed. Choose a later time or tomorrow.',
@@ -384,21 +389,13 @@ export const planMethods = {
       );
     return m;
   },
+  // Sending is the business clock's (clock.js clockDeliverDue), in the Practice yard too.
   planDeliverDue(now) {
-    for (const m of this.planRows(DUE_MSGS)) {
-      if (Date.parse(m.sendAt) > now) continue;
-      let it = null;
-      try {
-        it = this.repo.get(m.item, 'planItem');
-      } catch {}
-      if (!it || !PLAN_OPEN.includes(it.status)) {
-        this.planCallOff(m.id, 'The plan changed', now);
-        continue;
-      }
-      this.planDeliver(m, it, now);
-    }
+    this.clockDeliverDue(now);
   },
+  // Simulated answers: the Practice yard only (a real yard's people answer themselves, or the office records their answer).
   planSimReplies(now) {
+    if (this.live()) return;
     const cfg = this.repo.all('config')[0];
     if (cfg?.planReplies === false) return;
     for (const m of this.planRows(SENT_MSGS)) {
@@ -415,6 +412,7 @@ export const planMethods = {
   },
   // ---------- the engine ----------
   planTick(elapsed = 0) {
+    if (this.live()) return false; // a real yard has the business clock (clock.js), never the engine
     const now = this.planNow();
     let byCompany = runs.get(this.db);
     if (!byCompany) runs.set(this.db, (byCompany = new Map()));
@@ -440,6 +438,7 @@ export const planMethods = {
     }
   },
   planPass(now = this.planNow()) {
+    if (this.live()) return this.clockPass(now); // a real yard: asks and flags only
     this.planDeliverDue(now);
     this.planSimReplies(now);
     const items = this.planRows(OPEN_ITEMS)
@@ -468,6 +467,7 @@ export const planMethods = {
     this.planHireSweep(now);
   },
   planStep(id, now = this.planNow()) {
+    if (this.live()) return this.planEdit(id, (it) => this.clockStep(it, now, this.clockDay(now))); // a real yard: asks and flags only
     return this.planEdit(id, (it) => {
       if (!PLAN_OPEN.includes(it.status)) return;
       const today = localDay(new Date(now));
@@ -1677,6 +1677,7 @@ export const planMethods = {
   // The crew packs whole stillages (planPack, as the board's Send): what would go from the yard now for each line, said at booking when it is
   // more than was asked. " You asked for 30 Kwikstage standard 3.0 m. They come in stillages of 145, so 145 will go." ('' when every line is exact)
   planSnapWords(lines, yard) {
+    if (this.live()) return ''; // a real yard's crew packs what people decide; nothing is snapped for them
     const { got } = gpChoose(this.gameItems([yard.id]).get(yard.id), lines),
       lift = this.gameLift(yard),
       out = [];
@@ -1987,7 +1988,7 @@ export const planMethods = {
       };
     if (it.type === 'TRUCK')
       requireRule(
-        it.status === 'MISSED' || (now < atLocal(it.day, DAY_START) && it.status === 'PLANNED'),
+        it.status === 'MISSED' || (now < this.planAt(it.day, DAY_START) && it.status === 'PLANNED'),
         'The truck day has started. Cancel it instead.',
       );
     if (day !== it.day || time !== it.time) this.planWhen(it.type, day, time, now);
@@ -2143,7 +2144,7 @@ export const planMethods = {
     );
     if (it.type === 'TRUCK') {
       const d = this.planDriver(input.person, it.day, it.id);
-      requireRule(!(dayOf(now) > it.day || now >= atLocal(it.day, DAY_END)), 'That day is over.');
+      requireRule(!(this.planToday(now) > it.day || now >= this.planAt(it.day, DAY_END)), 'That day is over.');
       this.planEdit(it.id, (x) => {
         if (x.message) this.planCallOff(x.message, x.driver === d.id ? 'Asked again' : 'Another driver was asked', now);
         x.driver = d.id;
@@ -2226,7 +2227,7 @@ export const planMethods = {
     const it = this.planItemFor(m.item),
       now = this.planNow();
     requireRule(PLAN_OPEN.includes(it.status) && !m.closedAt, 'This is already finished.');
-    if (via === 'PHONE_VIEW') requireRule(now < atLocal(m.day, m.time), 'Too late to answer, call the office.');
+    if (via === 'PHONE_VIEW') requireRule(now < this.planAt(m.day, m.time), 'Too late to answer, call the office.');
     if (it.type === 'WORKERS') {
       const row = it.people.find((p) => p.message === m.id);
       if (row?.moved && !row.homeAt)

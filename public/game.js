@@ -35,6 +35,7 @@ import {
   sfBelowTiles,
   sfNewSiteList,
 } from './game-finish.js'; // Remove site, and Undo (Site undo and finish)
+import { isLive, LIVE_CHIP, LIVE_NEXT, LIVE_SITE_NEXT, LIVE_HIDDEN_TILES, switchChoices } from './mode.js'; // the real yard or the Practice yard
 const byName = new Intl.Collator(undefined, { numeric: true }).compare;
 const SYS_CLASS = { quickstage: 'qs', 'at-pac': 'at', 'tube-clip': 'tc' },
   SYS_NAME = { quickstage: 'Quickstage', 'at-pac': 'AT-PAC', 'tube-clip': 'Tube & Clip' };
@@ -119,6 +120,8 @@ function resetFor(ctx) {
 }
 const phone = () => typeof matchMedia === 'function' && matchMedia('(max-width:760px)').matches;
 const ops = () => !!G.ctx?.account?.permissions?.includes('operations.manage');
+// The real yard (LIVE): the board shows what people recorded, where it was last confirmed; nothing is sent or driven from it yet.
+const live = () => isLive(G.ctx?.account);
 // ---------------------------------------------------------------- reading the state
 const yardOf = (s) => s?.yards?.[0] ?? null;
 const products = (s) => (s?.products ?? []).filter((p) => !p.retired);
@@ -219,10 +222,24 @@ const sortKey = (a, b) =>
   (gaLength(a.p) ?? 0) - (gaLength(b.p) ?? 0) ||
   byName(a.p.name, b.p.name);
 // ---------------------------------------------------------------- the skeleton
-// Honest labels: this company is the Practice yard. The crew, trucks and deliveries on the board are simulated, so the top bar always says so,
-// quietly (no banner). A real-records mode is a later piece of work; until then every company is a Practice yard.
+// Honest labels: a Practice yard (DEMO) says its crew, trucks and deliveries are simulated; the real yard (LIVE) says it is live. Quietly, in the
+// top bar (no banner). Someone in both taps the chip to switch between them (two big choices).
 const PRACTICE_CHIP =
   '<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice<span class="gm-practice-yard"> yard</span><span class="gm-practice-more"> &middot; simulated</span></span>';
+const modeChip = (ctx) => {
+  const chip = isLive(ctx.account) ? LIVE_CHIP : PRACTICE_CHIP;
+  return (ctx.account?.memberships?.length ?? 0) > 1
+    ? '<button type="button" class="gm-switch-btn" data-gm-switch aria-haspopup="true" aria-expanded="false" title="Switch between your yards">' +
+        chip +
+        '<span class="gm-switch-caret" aria-hidden="true">&#9662;</span></button>'
+    : chip;
+};
+const switchPop = (ctx) =>
+  (ctx.account?.memberships?.length ?? 0) > 1
+    ? '<div class="gm-switch-pop" data-gm-switch-pop hidden><p>Which yard?</p>' +
+      switchChoices(ctx.account.memberships, ctx.account.company?.id) +
+      '</div>'
+    : '';
 export function gmShell(ctx) {
   resetFor(ctx);
   G.ctx = ctx;
@@ -234,11 +251,12 @@ export function gmShell(ctx) {
     '</span><b>' +
     company +
     '</b>' +
-    PRACTICE_CHIP +
+    modeChip(ctx) +
     '</div>' +
     '<div class="gm-top-right"><button type="button" class="gm-office-btn" data-gm-office aria-haspopup="dialog" aria-expanded="false">' +
     gaImg(GA_BUTTONS.office(), 'gm-office-img') +
-    '<span>Office</span></button></div></header>';
+    '<span>Office</span></button></div></header>' +
+    switchPop(ctx);
   if (!yardOf(s)) return '<div class="gm" data-gm="start">' + top + startHTML(ctx) + officeHTML(ctx) + '</div>';
   return (
     '<div class="gm" data-gm="board">' +
@@ -251,8 +269,10 @@ export function gmShell(ctx) {
     '</button></div>' +
     '<div class="gm-win2" data-gm-win2 hidden></div>' +
     '<nav class="gm-bar" aria-label="What do you want to do?">' +
-    bigBtn('send', 'Send', 'Send scaffolding to a site') +
-    bigBtn('back', 'Bring back', 'Bring scaffolding back from a site') +
+    (isLive(ctx.account)
+      ? ''
+      : bigBtn('send', 'Send', 'Send scaffolding to a site') +
+        bigBtn('back', 'Bring back', 'Bring scaffolding back from a site')) +
     bigBtn('add', 'Add stock', 'Add stock arriving at the yard') +
     bigBtn('stock', 'Stock', 'See the yard stock', ' gm-phone-only') +
     '</nav></section>' +
@@ -354,7 +374,13 @@ export function officeHTML(ctx) {
     );
   };
   const groups = OFFICE_GROUPS.map(([g, name]) => {
-    let list = OFFICE_TILES.filter((t) => t[4] === g && (t[0] !== 'HIRE' || hire) && (can || t[0] !== 'CONTROL'))
+    let list = OFFICE_TILES.filter(
+      (t) =>
+        t[4] === g &&
+        (t[0] !== 'HIRE' || hire) &&
+        (can || t[0] !== 'CONTROL') &&
+        !(isLive(ctx.account) && LIVE_HIDDEN_TILES.includes(t[0])),
+    )
       .map(tile)
       .join('');
     if (g === 'biz')
@@ -748,6 +774,8 @@ function actsHTML(s) {
       gaImg(GA_BUTTONS.stock(), 'gm-go-img') +
       'Load my parts list</button></div>'
     );
+  if (G.mode === 'site' && live())
+    return '<div class="gm-acts"><p class="gm-foot gm-live-next">' + esc(LIVE_SITE_NEXT) + '</p></div>';
   if (G.mode === 'site')
     return sfActs(
       s,
@@ -931,6 +959,7 @@ function hintOf(s) {
       text: 'Now open your first client site: tap an empty block on the map.',
       act: ['Open a site', 'newsite'],
     };
+  else if (live()) h = { id: 'live-next', text: LIVE_NEXT };
   else if (moving && !delivered)
     h = { id: 'watch', text: 'In the Practice yard the crew and trucks are simulated. Watch them work.' };
   else if (!delivered)
@@ -1357,6 +1386,11 @@ const sfApi = () => ({
 }); // soft: being removed (its site window shows Removing)
 const openSheet = () => document.querySelector('.gm-body')?.classList.add('sheet');
 function setMode(mode, site) {
+  // the real yard: nothing is sent or brought back from the board yet (a person confirms each step, next)
+  if (live() && (mode === 'send' || mode === 'back')) {
+    pop(LIVE_NEXT, 'tick');
+    return;
+  }
   hideCard();
   G.mode = mode;
   G.picks = new Map();
@@ -1482,6 +1516,20 @@ function onClick(e) {
   }
   if (b.hasAttribute('data-gm-office')) {
     gmOfficeToggle();
+    return;
+  }
+  // the chip of someone in two yards: the two big choices; picking one switches the whole app (app.js listens)
+  if (b.hasAttribute('data-gm-switch')) {
+    const pop2 = document.querySelector('[data-gm-switch-pop]');
+    if (pop2) {
+      pop2.hidden = !pop2.hidden;
+      b.setAttribute('aria-expanded', String(!pop2.hidden));
+      if (!pop2.hidden) pop2.querySelector('.sy-choice:not([disabled])')?.focus({ preventScroll: true });
+    }
+    return;
+  }
+  if (b.dataset.sySwitch) {
+    dispatchEvent(new CustomEvent('sy:switch', { detail: { companyId: b.dataset.sySwitch, name: b.dataset.syName } }));
     return;
   }
   if (b.hasAttribute('data-gm-office-x')) {

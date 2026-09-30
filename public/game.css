@@ -2432,3 +2432,168 @@ body.in-game #app {
   outline-offset: 3px;
   transition: outline-color 0.6s;
 }
+/* ---- The real yard (LIVE) and the Practice yard: the chip, the switcher's two big choices, the Office strip (public/mode.js) ---- */
+.gm-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: #b9ef4b66;
+  color: #e2f3d2;
+}
+.gm-live:before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b9ef4b;
+  box-shadow: 0 0 0 3px #b9ef4b2e;
+}
+.gm-switch-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #ffffffb0;
+  font: inherit;
+  cursor: pointer;
+}
+.gm-switch-btn .gm-practice {
+  cursor: pointer;
+}
+.gm-switch-btn:hover .gm-practice,
+.gm-switch-btn:focus-visible .gm-practice {
+  border-color: #ffffff80;
+  color: #fff;
+}
+.gm-switch-caret {
+  font-size: 11px;
+}
+.gm-switch-pop {
+  position: fixed;
+  top: 58px;
+  left: 12px;
+  z-index: 60;
+  width: min(460px, calc(100vw - 24px));
+  padding: 14px;
+  border-radius: 18px;
+  background: #fff;
+  color: #1d2f24;
+  box-shadow:
+    0 18px 40px #0b1a1340,
+    0 1px 0 #0b1a1312;
+}
+.gm-switch-pop[hidden] {
+  display: none;
+}
+.gm-switch-pop > p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4f6250;
+}
+.sy-switch {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.sy-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 3px;
+  min-height: 84px;
+  padding: 14px 16px;
+  border: 2px solid #dfe6d6;
+  border-radius: 16px;
+  background: #f7f9f2;
+  color: #1d2f24;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.sy-choice b {
+  font-size: 17px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.sy-choice small {
+  grid-column: 2;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: #5f6f5a;
+}
+.sy-choice:hover:not([disabled]),
+.sy-choice:focus-visible {
+  border-color: #6e9a4a;
+  background: #f0f6e6;
+}
+.sy-choice.current,
+.sy-choice[disabled] {
+  cursor: default;
+  border-style: dashed;
+  background: #fff;
+  color: #1d2f24;
+  opacity: 1;
+}
+.sy-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #b7c49a;
+}
+.sy-choice.is-live .sy-dot {
+  background: #5aa02c;
+  box-shadow: 0 0 0 4px #5aa02c24;
+}
+.gm-live-next {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f1f6ea;
+  color: #3f5a33;
+  text-align: left;
+}
+.simulation-banner.live-banner {
+  background: #eef6e4;
+  border-left-color: #5aa02c;
+  color: #3d5a2a;
+}
+.simulation-banner.live-banner .status-dot {
+  background: #5aa02c;
+}
+:is(.home-hero, .page-hero) .simulation-banner.live-banner {
+  background: #0d241b8c;
+  color: #cdeeb0;
+}
+.hero-live.live-real {
+  border-color: #b9ef4b66;
+}
+.acct .acct-yards,
+.acct .acct-live {
+  margin-top: 20px;
+}
+.acct-live form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px 16px;
+  align-items: start;
+}
+.acct-live form .acct-note,
+.acct-live form .actions {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .acct-live form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gm-switch-pop {
+    top: 54px;
+    left: 8px;
+    width: calc(100vw - 16px);
+  }
+}
