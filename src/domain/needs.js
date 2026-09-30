@@ -14,7 +14,8 @@ import { paperState } from './paperwork.js';
 import { timeWords } from './plantime.js';
 export const NEEDS_CAP = 5,
   NEEDS_DAYS = 14,
-  NEEDS_YES_BY = '17:00';
+  NEEDS_YES_BY = '17:00',
+  NEEDS_GRACE_MS = 60 * 60 * 1000;
 export const NEEDS_RANK = {
   UNCONFIRMED_TRIP: 0,
   RETURN_SHORT: 1,
@@ -62,7 +63,17 @@ export const needsMethods = {
         });
       else if (f.code === 'RETURN_SHORT')
         push({
-          id: 'RETURN_SHORT:' + t.id + ':' + f.since,
+          // the id says which fact: not counted, or how many are missing; a count that comes up short is a new item (a dismissal lapses)
+          id:
+            'RETURN_SHORT:' +
+            t.id +
+            ':' +
+            (t.countPending
+              ? 'count'
+              : 'short' +
+                (t.notBack ?? []).reduce((/** @type {number} */ n, /** @type {any} */ l) => n + l.quantity, 0)) +
+            ':' +
+            f.since,
           kind: 'RETURN_SHORT',
           words: this.tripLabel(t) + ' from ' + this.planSiteName(t.site) + ': ' + f.words,
           action: { label: t.countPending ? 'Count' : 'Sort it out', view: 'TRIPS', trip: t.id },
@@ -100,6 +111,9 @@ export const needsMethods = {
           continue;
         const m = this.planMsg(it.message);
         if (m?.status === 'YES') continue;
+        // a calm chip, not an alarm: an ask that went out after 5 pm gets an hour before "no yes" is worth a call
+        const askedAt = Date.parse(m?.sentAt ?? it.sentAt ?? it.createdAt ?? '') || 0;
+        if (askedAt >= this.clockAt(today, NEEDS_YES_BY) && now - askedAt < NEEDS_GRACE_MS) continue;
         const name = it.driver ? this.planName(it.driver) : null;
         push({
           id: 'NO_DRIVER_YES:' + it.id + ':' + it.day + ':' + (m?.id ?? 'none'),
@@ -245,8 +259,14 @@ export const needsMethods = {
           since: today,
         });
     } catch {}
+    // one item per booking: the clock's own flag on a truck booking (can't make it, no answer, not asked) says it better than NO_DRIVER_YES
+    const flagged = new Set(
+      items
+        .filter((x) => ['CANT_MAKE_IT', 'NO_ANSWER', 'NOT_ASKED', 'NOT_CONFIRMED'].includes(x.kind))
+        .map((x) => x.item),
+    );
     const dismissed = new Set(this.repo.all('needsDismissal').map((/** @type {any} */ d) => d.key));
-    const live = items.filter((x) => !dismissed.has(x.id));
+    const live = items.filter((x) => !dismissed.has(x.id) && !(x.kind === 'NO_DRIVER_YES' && flagged.has(x.item)));
     live.sort(
       (a, b) =>
         a.rank - b.rank || String(a.since ?? '').localeCompare(String(b.since ?? '')) || a.id.localeCompare(b.id),

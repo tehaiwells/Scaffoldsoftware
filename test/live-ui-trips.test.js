@@ -110,8 +110,11 @@ test('the phone: "Received by" is never filled in; last time\'s name is a chip; 
 });
 
 test("the phone groups a trip by the day it was done: booked for tomorrow, done today, is today's", (t) => {
-  const { dave, book, me } = setup(t);
+  const { f, dave, book, me } = setup(t);
   const trip = book(3, { day: addDays(D0, 1) });
+  assert.equal(crewDay(me().trips[0]), addDays(D0, 1));
+  // packed tonight for tomorrow (the office, for the yard): still tomorrow's on the driver's phone
+  f.cmd('packConfirmed', { trip: trip.id });
   assert.equal(crewDay(me().trips[0]), addDays(D0, 1));
   dave('tripLoaded', { trip: trip.id });
   assert.equal(crewDay(me().trips[0]), D0);

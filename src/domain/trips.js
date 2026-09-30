@@ -185,8 +185,9 @@ export const tripMethods = {
     const counts = this.tripRows('count', "json_extract(data,'$.state')='OPEN'");
     if (counts.some((/** @type {any} */ n) => n.scope === place)) return [];
     const locked = new Set(counts.map((/** @type {any} */ n) => n.scope));
+    // never the quarantine container, whatever its condition says (ADR 0010: damaged gear waits for repair, scrap or a charge)
     return this.tripContainersAt(place).filter(
-      (/** @type {any} */ c) => c.condition === 'SERVICEABLE' && !locked.has(c.id),
+      (/** @type {any} */ c) => c.condition === 'SERVICEABLE' && !c.quarantine && !locked.has(c.id),
     );
   },
   // Exact pieces of one product at a place, fewest splits first: a container holding exactly what is left, then whole containers (only this
@@ -782,6 +783,7 @@ export const tripMethods = {
             delivered: 0,
             collected: 0,
             returned: 0,
+            packed: null, // what the yard confirmed packed (the PACKED confirmation's lines), once it has
             pack: null,
           }),
         );
@@ -805,8 +807,33 @@ export const tripMethods = {
         l.pack = x.pack ?? l.pack;
       }
     }
+    // the yard's own count when it packed (ADR 0010, the count everyone downstream starts from: the driver's Loaded, the docket, the run sheet)
+    if (trip.steps?.PACKED?.id) {
+      const row = cached(this.db, 'SELECT lines FROM trip_confirmation WHERE company_id=? AND id=?').get(
+        this.repo.company,
+        trip.steps.PACKED.id,
+      );
+      for (const x of JSON.parse(row?.lines ?? '[]')) {
+        const l = line(x.product);
+        l.packed = (l.packed ?? 0) + x.quantity;
+      }
+      for (const l of m.values()) if (l.packed === null) l.packed = 0;
+    }
     const onTruck = this.tripOnTruck(trip);
     return [...m.values()].map((l) => ({ ...l, onTruck: onTruck.get(l.product) ?? 0 }));
+  },
+  // Who packs a trip's lists (the Today list's packer), for the office's PACKED entry recorded on their behalf.
+  /** @param {any} trip @returns {string|null} */
+  tripPacker(trip) {
+    for (const id of trip.orders ?? [])
+      try {
+        const o = this.repo.get(id, 'order');
+        if (o.planItem) {
+          const it = this.repo.get(o.planItem, 'planItem');
+          if (it.packer) return it.packer;
+        }
+      } catch {}
+    return null;
   },
   // Pieces of this trip on its truck now (the containers it loaded or collected that are still there).
   /** @param {any} trip @returns {Map<string,number>} */
@@ -1185,7 +1212,13 @@ export const tripMethods = {
     const step = STEP_OF[action],
       trip = this.repo.get(input.trip, 'trip'),
       tp = this.tripPlan(trip),
-      who = step === 'PACKED' ? { kind: 'PERSON', onBehalfOf: null } : this.tripWho(trip, tp),
+      // one rule (ADR 0010): a phone's tap is the person's own; the office records it on their behalf (the packer for a pack, the driver else)
+      who =
+        step === 'PACKED'
+          ? this.user.crew
+            ? { kind: 'PERSON', onBehalfOf: null }
+            : { kind: 'ON_BEHALF', onBehalfOf: this.tripPacker(trip) }
+          : this.tripWho(trip, tp),
       now = this.planNow();
     if (trip.steps?.[step]) {
       const s = trip.steps[step];
@@ -1438,7 +1471,10 @@ export const tripMethods = {
       return this.tripInputLines(input, new Map(lines.map((/** @type {any} */ l) => [l.product, l.asked])));
     if (step === 'LOADED' || step === 'COLLECTED') {
       const from = step === 'LOADED' ? trip.yard : trip.site,
-        want = this.tripInputLines(input, new Map(lines.map((/** @type {any} */ l) => [l.product, l.asked])));
+        want = this.tripInputLines(
+          input,
+          new Map(lines.map((/** @type {any} */ l) => [l.product, l.packed ?? l.asked])), // a packed count is what goes, unless changed
+        );
       requireRule(want.size, 'Nothing to confirm: say what went on the truck.');
       this.tripTruckFree(truckId, trip);
       const picks = this.tripTake(trip, from, want);
@@ -1901,7 +1937,8 @@ export const tripMethods = {
           unconfirmedAt: null,
           why: null,
         });
-      else if (last) {
+      else if (last && last[0] !== 'PACKED') {
+        // packed is still in the yard: the booking stays planned (it can still move with the day); a load leaving makes it under way
         x.status = 'ACTIVE';
         x.stage = 'ON';
         if (x.unconfirmedAt) Object.assign(x, { unconfirmedAt: null, problem: null, why: null });

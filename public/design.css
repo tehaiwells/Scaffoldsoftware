@@ -30935,11 +30935,23 @@ body.tdh-sheet-open {
   font-size: 13px;
   color: #5b7466;
 }
+.lo-docket-wrap {
+  overflow-x: auto; /* the docket scrolls inside its card on a phone, never the page */
+  -webkit-overflow-scrolling: touch;
+}
 .lo-docket {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+.lo-docket td small {
+  display: block;
+  font-size: 11px;
+  color: #5b7466;
+}
+.lr-onrecord .lr-account b {
+  font-weight: 600;
 }
 .lo-docket th,
 .lo-docket td {
@@ -31255,7 +31267,7 @@ body.tdh-sheet-open {
   color: #5b7466;
 }
 .lo-reach {
-  margin: 0;
+  margin: 0 0 10px;
   font-size: 12.5px;
   color: #5b7466;
 }

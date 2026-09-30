@@ -2288,8 +2288,10 @@ export function cardHTML(s, p) {
 // gmPlanPicker(host, {state, lift}, {title, lines, onDone(lines), onCancel}) draws into host (the Today page's sheet) and keeps its own state.
 const PP = { host: null, ctx: null, opts: null, picks: new Map(), sel: null, tab: null, sys: null, asked: null };
 const ppLift = () => (PP.ctx?.lift > 0 ? PP.ctx.lift : 1500000);
-const ppPer = (p) => gpPerStillage(p, ppLift());
-const ppAll = () => products(PP.ctx?.state).filter((p) => ppPer(p) > 0);
+// a real yard's list is exact pieces (ADR 0009): the number typed is what goes, and a tap adds one; the Practice yard packs whole stillages
+const ppExact = () => !!PP.ctx?.exact;
+const ppPer = (p) => (ppExact() ? 1 : gpPerStillage(p, ppLift()));
+const ppAll = () => products(PP.ctx?.state).filter((p) => gpPerStillage(p, ppLift()) > 0);
 const ppHave = () => rowsAt(PP.ctx?.state, yardOf(PP.ctx?.state)?.id);
 function ppList() {
   const all = ppAll(),
@@ -2382,15 +2384,18 @@ function ppAmount() {
       ? ' They come in stillages of ' + num(per) + '; the crew sends whole stillages when it is packed.'
       : '';
   const words = q
-    ? (asked
-        ? 'You asked for ' + num(asked) + '. They come in stillages of ' + num(per) + ', so ' + num(q) + ' will go.'
-        : packs
-          ? num(q) + ' pieces.' + packs
-          : num(q) + ' pieces &middot; about ' + n + ' ' + (n === 1 ? 'stillage' : 'stillages')) +
+    ? (ppExact()
+        ? num(q) + (q === 1 ? ' piece' : ' pieces') + ' &middot; exactly what you type goes'
+        : asked
+          ? 'You asked for ' + num(asked) + '. They come in stillages of ' + num(per) + ', so ' + num(q) + ' will go.'
+          : packs
+            ? num(q) + ' pieces.' + packs
+            : num(q) + ' pieces &middot; about ' + n + ' ' + (n === 1 ? 'stillage' : 'stillages')) +
       (q > have
         ? ' &middot; <span class="pp-over">more than you have: ' + num(have) + ' free in the yard now</span>'
         : '')
     : num(have) + ' free in the yard now';
+  const unit = ppExact() ? 'piece' : 'stillage';
   return (
     '<div class="gm-amt pp-amt"><div class="gm-amt-top">' +
     gaItem(p, 'gm-amt-pic') +
@@ -2401,14 +2406,20 @@ function ppAmount() {
     '</small></div>' +
     (q ? '<button type="button" class="gm-chip" data-pp-unpick>Remove</button>' : '') +
     '</div>' +
-    '<div class="pp-amt-row"><button type="button" class="gm-step" data-pp-step="-1" aria-label="One stillage less">&minus;</button><input type="number" class="gm-num" data-pp-num min="0" max="100000" step="1" value="' +
+    '<div class="pp-amt-row"><button type="button" class="gm-step" data-pp-step="-1" aria-label="One ' +
+    unit +
+    ' less">&minus;</button><input type="number" class="gm-num" data-pp-num min="0" max="100000" step="1" value="' +
     q +
     '" inputmode="numeric" aria-label="How many ' +
     esc(p.name) +
-    '"><button type="button" class="gm-step" data-pp-step="1" aria-label="One stillage more">+</button></div>' +
-    '<p class="pp-per">+ and &minus; add or take away one stillage (' +
-    num(per) +
-    ' pieces). A number you type goes up to whole stillages, as on the yard board.</p></div>'
+    '"><button type="button" class="gm-step" data-pp-step="1" aria-label="One ' +
+    unit +
+    ' more">+</button></div>' +
+    (ppExact()
+      ? '<p class="pp-per">+ and &minus; add or take away one piece. The number you type is what the yard packs, as on the board.</p></div>'
+      : '<p class="pp-per">+ and &minus; add or take away one stillage (' +
+        num(per) +
+        ' pieces). A number you type goes up to whole stillages, as on the yard board.</p></div>')
   );
 }
 // A typed amount goes up to whole stillages at once, as the board's amount box does (the crew packs whole stillages: game-pick.js), and the

@@ -163,7 +163,7 @@ test('Loaded & left moves exact pieces yard -> truck (a part split into a bundle
     [
       [
         'PACKED',
-        'PERSON',
+        'ON_BEHALF', // the office packed it for the yard (one rule: a phone's tap is PERSON, the office's entry ON_BEHALF)
         f.db.prepare('SELECT occurred_at FROM trip_confirmation WHERE step=?').get('PACKED').occurred_at,
       ],
       ['LOADED', 'ON_BEHALF', new Date(f.at(D0, '09:40')).toISOString()],

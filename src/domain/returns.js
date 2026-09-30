@@ -92,17 +92,28 @@ export const returnsMethods = {
       return null;
     }
   },
-  // The value a charge line uses: typed on the line (the owner's call for this one), else the product's replacement value; never silent.
+  // The value a charge line uses: the product's replacement value (the owner's, in the Materials catalogue), or a value typed on the line,
+  // which is the owner's call too (company.manage) and is recorded with them as the approver. Never silent, never anyone else's number.
   /** @param {string} productId @param {any} typed */
   chargeValue(productId, typed) {
-    if (typed !== undefined && typed !== null && typed !== '') return integer(typed, 'Value (cents)', 0, 100000000);
+    if (this.chargeTyped(typed)) {
+      requireRule(
+        this.auth.permissions(this.user).includes('company.manage'),
+        'Only the owner can type a value here. Ask them to set a replacement value in the Materials catalogue.',
+      );
+      return integer(typed, 'Value (cents)', 0, 100000000);
+    }
     const v = this.replacementValueOf(productId);
     requireRule(
       v !== null,
       this.planName(productId, 'That part') +
-        ' has no replacement value yet. Set one in the Materials catalogue (the owner), or type a value on this line.',
+        ' has no replacement value yet. Set one in the Materials catalogue (the owner), or the owner types a value on this line.',
     );
     return v;
+  },
+  /** @param {any} typed */
+  chargeTyped(typed) {
+    return typed !== undefined && typed !== null && typed !== '';
   },
   // ---------- charge lines ----------
   /** @param {{site:string,product:string,quantity:number,unitValue:number,reason:'LOST'|'DAMAGED'|'SITE_FINISH',source?:string|null,occurredAt?:string|null,approvedBy?:string|null}} c */
@@ -229,10 +240,13 @@ export const returnsMethods = {
       lines: [...want].map(([product, quantity]) => ({ product, quantity })),
     };
     fresh.notBack = [...left].map(([product, quantity]) => ({ product, quantity }));
-    if (!fresh.notBack.length) fresh.flag = null;
-    this.repo.save(fresh);
     const counted = [...want.values()].reduce((s, n) => s + n, 0),
       short = [...left.values()].reduce((s, n) => s + n, 0);
+    // the fact changed: a flag that said "not counted" now says what is missing (a new item on Needs you; a dismissal of the old one lapses)
+    if (!fresh.notBack.length) fresh.flag = null;
+    else if (fresh.flag?.code === 'RETURN_SHORT')
+      fresh.flag = { code: 'RETURN_SHORT', words: this.returnShortWords(fresh), since: iso(now) };
+    this.repo.save(fresh);
     return {
       trip: this.tripView(fresh, { crew: !!this.user.crew }),
       message:
@@ -240,6 +254,11 @@ export const returnsMethods = {
         plural(counted, 'piece') +
         (short ? ' · ' + plural(short, 'piece') + ' not back. Say what happened to them.' : '. All there.'),
     };
+  },
+  /** The clock's words for a return still short. @param {any} t */
+  returnShortWords(t) {
+    const n = (t.notBack ?? []).reduce((/** @type {number} */ s, /** @type {any} */ l) => s + l.quantity, 0);
+    return plural(n, 'piece') + ' not back from ' + this.planSiteName(t.site) + ': say what happened to them';
   },
   // The containers on the truck for this trip that hold pieces of each product, largest first (a whole container goes as it is).
   /** @param {any} trip @param {string} truckId @param {Map<string,number>} want */
@@ -320,6 +339,8 @@ export const returnsMethods = {
       left = this.tripOnTruck(fresh);
     fresh.notBack = [...left].map(([product, quantity]) => ({ product, quantity }));
     if (!fresh.notBack.length) fresh.flag = null;
+    else if (fresh.flag?.code === 'RETURN_SHORT')
+      fresh.flag = { code: 'RETURN_SHORT', words: this.returnShortWords(fresh), since: iso(now) };
     this.repo.save(fresh);
     const rest = [...left.values()].reduce((s, n) => s + n, 0);
     return {
@@ -339,7 +360,10 @@ export const returnsMethods = {
       siteName = this.planSiteName(trip.site);
     let unitValue = null,
       approvedBy = null;
-    if (l.outcome === 'LOST') unitValue = this.chargeValue(l.product, l.unitValue);
+    if (l.outcome === 'LOST') {
+      unitValue = this.chargeValue(l.product, l.unitValue);
+      if (this.chargeTyped(l.unitValue)) approvedBy = this.user.id; // the owner typed it (chargeValue checked)
+    }
     if (l.outcome === 'OUR_LOSS') approvedBy = this.user.id;
     const reasonWords = l.reason ? ' · ' + l.reason : '';
     for (const p of picks) {
@@ -348,15 +372,24 @@ export const returnsMethods = {
       if (l.outcome === 'STILL_ON_SITE') {
         const pile = this.returnSitePile(trip.site, trip);
         this.repo.balance(pile.id, p.product, p.quantity);
-        this.repo.event(this.user.id, 'STILL_ON_SITE', {
-          container: holder.id,
-          product: p.product,
-          quantity: p.quantity,
-          source: tp.truck,
-          destination: trip.site,
-          reason: 'Still at ' + siteName + ' · ' + this.tripLabel(trip) + reasonWords,
-          key: this.key,
-        });
+        // a send that was delivered after all: on hire from the day it was delivered, not from today
+        const prov = this.repo.provenance,
+          deliveredAt = trip.direction === 'OUT' ? (trip.steps?.DELIVERED?.at ?? null) : null;
+        if (deliveredAt)
+          this.repo.provenance = { ...(prov ?? { kind: 'PERSON', onBehalfOf: null }), occurredAt: deliveredAt };
+        try {
+          this.repo.event(this.user.id, 'STILL_ON_SITE', {
+            container: holder.id,
+            product: p.product,
+            quantity: p.quantity,
+            source: tp.truck,
+            destination: trip.site,
+            reason: 'Still at ' + siteName + ' · ' + this.tripLabel(trip) + reasonWords,
+            key: this.key,
+          });
+        } finally {
+          if (deliveredAt) this.repo.provenance = prov;
+        }
       } else if (l.outcome === 'LOST') {
         this.repo.event(this.user.id, 'LOST', {
           container: holder.id,
@@ -408,6 +441,7 @@ export const returnsMethods = {
         reason: 'LOST',
         source: trip.id,
         occurredAt: iso(now),
+        approvedBy,
       });
     const t = this.repo.get(trip.id, 'trip');
     t.resolutions = [
@@ -432,6 +466,18 @@ export const returnsMethods = {
         const line = o.lines.find((/** @type {any} */ x) => x.product === l.product);
         if (line && line.collected >= l.quantity) {
           line.collected -= l.quantity; // they were never collected: the record says so now
+          this.repo.save(o);
+          break;
+        }
+      }
+    if (l.outcome === 'STILL_ON_SITE' && trip.direction === 'OUT')
+      for (const id of trip.orders) {
+        const o = this.repo.get(id, 'order');
+        const line = o.lines.find((/** @type {any} */ x) => x.product === l.product);
+        if (line && line.loaded - line.delivered >= l.quantity) {
+          line.delivered += l.quantity; // delivered after all: the record says so now
+          if (o.status === 'SHORT' && o.lines.every((/** @type {any} */ x) => x.delivered >= x.requested))
+            o.status = 'DELIVERED';
           this.repo.save(o);
           break;
         }
@@ -530,10 +576,17 @@ export const returnsMethods = {
         key: this.key,
       });
       if (outcome === 'CHARGED') {
-        const unitValue = this.chargeValue(product.id, input.unitValue);
-        const sites = input.site ? new Map([[input.site, quantity]]) : from;
-        requireRule(sites.size, 'Say which site these came from.');
-        for (const [site, n] of sites) {
+        const unitValue = this.chargeValue(product.id, input.unitValue),
+          approvedBy = this.chargeTyped(input.unitValue) ? this.user.id : null;
+        // each lot is charged to the site it came back from (the records say which); a site named on the tap must be one of them
+        requireRule(from.size, 'These pieces have no site on record. Scrap them instead.');
+        requireRule(
+          !input.site || from.has(input.site),
+          'Those pieces did not come from ' +
+            this.planSiteName(input.site) +
+            '. They are charged to the site they came back from.',
+        );
+        for (const [site, n] of from) {
           this.repo.get(site, 'site');
           charges.push(
             this.chargeLine({
@@ -544,6 +597,7 @@ export const returnsMethods = {
               reason: 'DAMAGED',
               source: q.id,
               occurredAt: iso(now),
+              approvedBy,
             }),
           );
         }
@@ -593,8 +647,8 @@ export const returnsMethods = {
         siteId,
         step,
       );
-    const sent = sum(conf('DELIVERED')),
-      collected = sum(conf('COLLECTED'));
+    let sent = sum(conf('DELIVERED'));
+    const collected = sum(conf('COLLECTED'));
     const trips = this.tripRows(
       'trip',
       "json_extract(data,'$.site')=? AND json_extract(data,'$.direction')='BACK' AND json_extract(data,'$.state')='RETURNED'",
@@ -605,6 +659,18 @@ export const returnsMethods = {
       writtenOff = 0,
       damaged = 0;
     const unresolvedTrips = [];
+    // a send that came back short and was resolved: those pieces count as sent to the site (delivered after all, lost on the way to it,
+    // damaged or written off), so the account stays whole; what is still unresolved on a send is the trip's, not the site's
+    for (const t of this.tripRows(
+      'trip',
+      "json_extract(data,'$.site')=? AND json_extract(data,'$.direction')='OUT' AND json_extract(data,'$.state')='RETURNED' AND json_array_length(coalesce(json_extract(data,'$.resolutions'),'[]'))>0",
+      siteId,
+    ))
+      for (const r of t.resolutions ?? []) {
+        sent += r.quantity;
+        if (r.outcome === 'DAMAGED') damaged += r.quantity;
+        if (r.outcome === 'OUR_LOSS') writtenOff += r.quantity;
+      }
     for (const t of trips) {
       for (const l of t.steps?.RETURNED
         ? JSON.parse(
@@ -637,11 +703,14 @@ export const returnsMethods = {
     try {
       site = this.repo.get(siteId, 'site');
     } catch {}
-    writtenOff += site?.finish?.writtenOff ?? 0;
+    writtenOff += site?.finish?.writtenOffSite ?? 0; // the site's own record at finish (trip shortfalls are counted above, once)
     // K in the question: what the site never brought back and nobody has settled (on its record, or missing from a trip). The integrity
     // number: sent - back - on site - charged - written off, 0 at every closed site.
     const missing = onSite + unresolved,
-      unaccounted = sent - (back + damaged) - onSite - charged - writtenOff;
+      unaccounted = sent - (back + damaged) - onSite - charged - writtenOff,
+      active = site?.status === 'ACTIVE';
+    const tail =
+      (charged ? ' · ' + charged + ' charged' : '') + (writtenOff ? ' · ' + writtenOff + ' written off' : '');
     return {
       site: siteId,
       siteName: site?.name ?? 'The site',
@@ -658,6 +727,17 @@ export const returnsMethods = {
       missing,
       unaccounted,
       words: 'sent ' + sent + ' · back ' + (back + damaged) + ' · ' + missing + ' missing',
+      // the same numbers as an active site's card says them: gear on site is on hire, not missing, until the site finishes
+      summary: active
+        ? 'sent ' +
+          sent +
+          ' · back ' +
+          (back + damaged) +
+          (onSite ? ' · ' + onSite + ' on site (hire running)' : '') +
+          (unresolved ? ' · ' + unresolved + ' not back, not sorted' : '') +
+          tail
+        : 'sent ' + sent + ' · back ' + (back + damaged) + tail,
+      active,
       looking: site?.looking ?? null,
       finish: site?.finish ?? null,
     };
@@ -713,11 +793,13 @@ export const returnsMethods = {
         else writtenOff += l.quantity;
     }
     // what the site's record still holds: gone from it, charged or written off
+    let writtenOffSite = 0;
     for (const c of this.tripContainersAt(site.id)) {
       for (const l of this.repo.lines(c.id)) {
         this.repo.balance(c.id, l.product_id, -l.quantity);
         if (outcome === 'CHARGE') {
-          const unitValue = this.chargeValue(l.product_id, values[l.product_id]);
+          const unitValue = this.chargeValue(l.product_id, values[l.product_id]),
+            approvedBy = this.chargeTyped(values[l.product_id]) ? this.user.id : null;
           this.repo.event(this.user.id, 'LOST', {
             container: c.id,
             product: l.product_id,
@@ -735,6 +817,7 @@ export const returnsMethods = {
             reason: 'SITE_FINISH',
             source: site.id,
             occurredAt: iso(now),
+            approvedBy,
           });
           charged += l.quantity;
         } else {
@@ -748,6 +831,7 @@ export const returnsMethods = {
             key: this.key,
           });
           writtenOff += l.quantity;
+          writtenOffSite += l.quantity;
         }
       }
       const emptied = this.repo.get(c.id, 'container');
@@ -771,6 +855,7 @@ export const returnsMethods = {
       back: before.back,
       charged,
       writtenOff,
+      writtenOffSite, // the site's own record; trip shortfalls are on their trips' resolutions
       reason,
       approvedBy: outcome === 'WRITE_OFF' ? this.user.id : null,
     };
@@ -807,10 +892,9 @@ export const returnsMethods = {
       let due = this.clockAt(day, DAY_END);
       if (at >= due) due = this.clockAt(addDays(day, 1), DAY_END);
       if (now < due) continue;
-      const n = (t.notBack ?? []).reduce((/** @type {number} */ s, /** @type {any} */ l) => s + l.quantity, 0);
       const words = t.countPending
         ? 'Not counted yet: ' + this.tripLabel(t) + ' came back ' + this.tripHm(at)
-        : plural(n, 'piece') + ' not back from ' + this.planSiteName(t.site) + ': say what happened to them';
+        : this.returnShortWords(t);
       t.flag = { code: 'RETURN_SHORT', words, since: iso(now) };
       this.repo.save(t);
       this.notify('Return short', this.tripLabel(t) + ': ' + words + '.', t.site);

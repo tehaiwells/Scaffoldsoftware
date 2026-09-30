@@ -77,6 +77,10 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await page.getByRole('button', { name: /^\+ Materials/ }).click();
   await page.locator('[data-tdh-pick]').click();
   await page.locator(`.tdh-layer [data-pp-slot="${part.id}"]`).click();
+  // a real yard's picker keeps the number typed (exact pieces): 24, not a whole stillage
+  await page.locator('.tdh-layer [data-pp-num]').fill('24');
+  await page.locator('.tdh-layer [data-pp-num]').press('Enter');
+  await expect(page.locator('.tdh-layer [data-pp-words]')).toContainText('24 pieces');
   await page.locator('.tdh-layer [data-pp-done]').click();
   await expect(page.locator('.tdh-layer')).toHaveCount(0);
   await expect(page.locator('[data-tdh-form="MATERIALS"] select[name=truckPlan]')).toContainText('Dave');
@@ -95,7 +99,8 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   const trips = await api('trips?day=' + day);
   const trip = trips.trips.find((t) => t.label === 'Trip 1');
   expect(trip.state).toBe('BOOKED');
-  const asked = trip.lines[0].asked; // what the picker put on the list: all of it is delivered below
+  const asked = trip.lines[0].asked; // what the picker put on the list (exactly 24): all of it is delivered below
+  expect(asked).toBe(24);
 
   // ---- the phones: Dave says yes, Jo can't make it (Crook), Lee can, Kev packs with the counts
   const dPhone = await phoneOf(dave);
@@ -131,6 +136,8 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await expect(page.locator('.tdh-item.tone-crew')).toContainText('Can’t make it: Crook');
   await expect(page.locator('.tdh-item.tone-crew')).toContainText('1 of 2 said yes');
   await expect(page.locator('.lo-trip').first()).toContainText('Packed', { timeout: 30000 });
+  await expect(page.locator('.lo-trip').first().locator('.lo-docket')).toContainText('packed'); // the yard's count, on the docket
+  await expect(page.locator('.tdh-item.tone-mat')).toContainText('Packed by Kev');
   await page.locator('[data-lt-mode="lanes"]').click();
   const lane = page.locator('.lt-lane').first();
   await expect(lane).toBeVisible({ timeout: 30000 });
@@ -190,6 +197,10 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await page.getByRole('button', { name: 'Office', exact: true }).first().click();
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Client sites' }).click();
   const finish = page.locator(`[data-lr-finish="${site.id}"]`);
+  // an active site's card says what is on record; the question comes on "Finish this site…"
+  await expect(finish).toContainText('on site (hire running)', { timeout: 30000 });
+  await expect(finish).not.toContainText('missing');
+  await finish.locator('[data-lr-finish-ask]').click();
   await expect(finish).toContainText('sent ' + asked + ' · back 10 · ' + (asked - 11) + ' missing', { timeout: 30000 });
   await finish.locator('[data-lr-finish-go="STILL_LOOKING"]').click();
   await finish.locator('[data-lr-finish-form] button[type=submit]').click();

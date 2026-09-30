@@ -211,8 +211,9 @@ export function loDocket(t) {
       const sent = back ? l.collected : l.loaded,
         got = back ? l.returned : l.delivered,
         endedHere = back ? !!t.steps?.RETURNED : !!t.steps?.DELIVERED;
-      const off1 = started && sent !== l.asked,
+      const off1 = started ? sent !== l.asked : l.packed != null && l.packed !== l.asked,
         off2 = endedHere && got !== sent;
+      // before it leaves, the Sent column shows what the yard packed (its own count), marked when it differs from what was asked
       return (
         '<tr><th scope="row">' +
         esc(l.name) +
@@ -222,7 +223,7 @@ export function loDocket(t) {
         '</td><td' +
         (off1 ? ' class="off"' : '') +
         '>' +
-        (started ? sent : '–') +
+        (started ? sent : l.packed != null ? l.packed + '<small>packed</small>' : '–') +
         '</td><td' +
         (off2 ? ' class="off"' : '') +
         '>' +
@@ -238,13 +239,13 @@ export function loDocket(t) {
         .map((l) => ({ l, n: l.asked - (t.steps?.DELIVERED ? l.delivered : t.steps?.LOADED ? l.loaded : l.asked) }))
         .filter((x) => x.n > 0);
   return (
-    '<table class="lo-docket"><thead><tr><th scope="col">' +
+    '<div class="lo-docket-wrap"><table class="lo-docket"><thead><tr><th scope="col">' +
     (back ? 'Bring back' : 'Docket') +
     '</th>' +
     cols.map((c) => '<th scope="col">' + c + '</th>').join('') +
     '</tr></thead><tbody>' +
     rows +
-    '</tbody></table>' +
+    '</tbody></table></div>' +
     (owed.length && !t.undelivered
       ? '<p class="lo-warn">Short ' + esc(owed.map((x) => x.n + ' × ' + x.l.name).join(', ')) + ': still to send.</p>'
       : '')
@@ -277,7 +278,11 @@ export function loExpected(t, action) {
   return new Map(
     (t.lines ?? []).map((l) => [
       l.product,
-      ['tripLoaded', 'tripCollected', 'packConfirmed'].includes(action) ? l.asked : (l.onTruck ?? 0),
+      action === 'packConfirmed'
+        ? l.asked
+        : ['tripLoaded', 'tripCollected'].includes(action)
+          ? (l.packed ?? l.asked) // what the yard packed is what goes, unless changed
+          : (l.onTruck ?? 0),
     ]),
   );
 }
@@ -403,7 +408,7 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
       t.label +
         ' · ' +
         (day && t.day && t.day !== day ? dayShort(t.day) + ' ' : '') +
-        (t.time ?? '') +
+        (t.time ? loTimeWords(t.time) : '') +
         arrow +
         t.siteName,
     ) +
@@ -537,6 +542,9 @@ export function loBookHTML(o, day) {
 }
 // ---------------------------------------------------------------- a driver's phone link (Your team)
 /** "Phone link" beside a driver on Your team, and what it made. @param {{id:string,name:string}} driver */
+/** The one line about reaching phones, said once above the team (not under every person). */
+export const LO_REACH =
+  '<p class="lo-reach">Phones reach Scaffold Yard only while Wi-Fi sharing is on (Account, This computer), or once it is hosted.</p>';
 export function loPhoneHTML(driver) {
   const dev = loDevices(),
     phones = (dev?.devices ?? []).filter((d) => d.driver === driver.id),
@@ -556,9 +564,6 @@ export function loPhoneHTML(driver) {
       ? '<span class="lo-dot ok" aria-hidden="true"></span>' + esc(plural(phones.length, 'phone') + ' signed in')
       : 'No phone signed in yet') +
     '</span></div>';
-  if (!made)
-    h +=
-      '<p class="lo-reach">Phones reach Scaffold Yard only while Wi-Fi sharing is on (Account, This computer), or once it is hosted.</p>';
   if (made)
     h +=
       '<div class="lo-link-box"><p class="lo-link-h">' +

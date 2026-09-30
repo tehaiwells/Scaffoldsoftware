@@ -321,9 +321,13 @@ test('RESTACK in a real yard is a dated task: begun on its day, done only by a D
     jo = phone(f, f.team.Jo);
   assert.equal(kev.me().person.role, 'YARDSMAN');
   assert.equal(kev.me().can.packs, true);
+  // today's task with its Done, and tomorrow's to see it coming (read-only until the day)
   assert.deepEqual(
-    kev.me().tasks.map((x) => x.id),
-    [a.id],
+    kev.me().tasks.map((x) => [x.id, x.dayWords, x.canDone]),
+    [
+      [a.id, 'Today', true],
+      [b.id, 'Tomorrow', false],
+    ],
   );
   assert.throws(() => jo.cmd('planDone', { id: a.id }), /Only a yard hand/);
   const done = kev.cmd('planDone', { id: a.id });

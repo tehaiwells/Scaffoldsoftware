@@ -2043,9 +2043,11 @@ export const planMethods = {
       what = this.planWhat(it);
     const hasLines = input.lines !== undefined && input.lines !== null,
       hasTruck = input.truckPlan !== undefined;
+    // a real yard's packed list may still change truck with its day (Move the day): its trip is booked again and the yard packs again
     if (hasLines || hasTruck)
       requireRule(
-        it.type === 'MATERIALS' && it.stage === 'WAITING',
+        it.type === 'MATERIALS' &&
+          (it.stage === 'WAITING' || (this.live() && !hasLines && ['PACKED', 'PACKING'].includes(it.stage))),
         "The list can only be changed before it's packed.",
       );
     const yard = this.planYard(),
@@ -2064,12 +2066,14 @@ export const planMethods = {
     const unconfirmed = it.stage === 'UNCONFIRMED',
       draft = it.status === 'DRAFT';
     if (unconfirmed) requireRule(day !== it.day, 'That day is over. Pick a new day for it.');
+    // a real yard's truck booking moves while nothing has left on it (planLiveMoveCheck: every trip still booked or packed), rain at 6 am
+    // included; the Practice yard's truck day starts by itself at DAY_START
     if (it.type === 'TRUCK')
       requireRule(
         unconfirmed ||
           draft ||
           it.status === 'MISSED' ||
-          (now < this.planAt(it.day, DAY_START) && it.status === 'PLANNED'),
+          ((this.live() || now < this.planAt(it.day, DAY_START)) && it.status === 'PLANNED'),
         'The truck day has started. Cancel it instead.',
       );
     if (day !== it.day || time !== it.time) this.planWhen(it.type, day, time, now);

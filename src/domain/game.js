@@ -288,8 +288,18 @@ export const gameMethods = {
       lines = lineList(input?.lines),
       done = [];
     const lift = this.gameLift(yard);
+    // a real yard may give a cost per line (a mixed delivery); lineList merges lines by product, so the costs are read off the input first
+    const costs = new Map(
+      (Array.isArray(input?.lines) ? input.lines : [])
+        .filter(
+          (l) =>
+            l && typeof l.product === 'string' && l.unitCost !== undefined && l.unitCost !== null && l.unitCost !== '',
+        )
+        .map((l) => [l.product, l.unitCost]),
+    );
     for (const line of lines) {
       const p = this.effective(line.product);
+      if (costs.has(p.id)) line.unitCost = costs.get(p.id);
       requireRule(!p.retired, p.name + ' has been removed from the catalogue.');
       requireRule(
         cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
@@ -307,8 +317,9 @@ export const gameMethods = {
       requireRule(per > 0, p.name + ' is too heavy for the forklift, even one at a time.');
       let left = line.quantity,
         used = 0;
+      const intake = this.live() ? this.intakeWords(line, input) : '';
       const put = (c, q) => {
-        this.purchase({ container: c.id, product: p.id, quantity: q, reason: 'Stock added to the yard' });
+        this.purchase({ container: c.id, product: p.id, quantity: q, reason: 'Stock added to the yard' + intake });
         left -= q;
         used++;
       };
@@ -332,9 +343,24 @@ export const gameMethods = {
       }
       done.push({ product: p.id, name: p.name, quantity: line.quantity, stillages: used });
       // a real yard keeps what it paid and where it came from (ADR 0010, audit H3): unit cost (cents), supplier, reference, received on
-      if (this.live()) this.intakeRecord(p.id, line.quantity, input);
+      if (this.live())
+        this.intakeRecord(p.id, line.quantity, {
+          ...input,
+          ...(line.unitCost !== undefined ? { unitCost: line.unitCost } : {}),
+        });
     }
     return { added: done, message: done.map((x) => x.quantity + ' × ' + x.name).join(', ') + ' added to the yard.' };
+  },
+  // What the Stock ledger's Added stock row says beside the add: the supplier, the invoice and the cost each (a cost per line wins over the
+  // add's one cost, so a mixed delivery can be recorded right).
+  intakeWords(line, input) {
+    const has = (v) => v !== undefined && v !== null && v !== '';
+    const cost = has(line?.unitCost) ? line.unitCost : input?.unitCost;
+    const parts = [];
+    if (has(input?.supplier) && typeof input.supplier === 'string') parts.push(input.supplier.trim());
+    if (has(input?.reference) && typeof input.reference === 'string') parts.push(input.reference.trim());
+    if (has(cost) && Number.isFinite(Number(cost))) parts.push('$' + (Number(cost) / 100).toFixed(2) + ' each');
+    return parts.length ? ' · ' + parts.join(' · ') : '';
   },
   // One intake record per product added in a real yard (kind 'intake'): the cost side of stock, read by nothing yet but kept from day one.
   intakeRecord(product, quantity, input) {

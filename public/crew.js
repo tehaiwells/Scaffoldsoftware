@@ -69,13 +69,13 @@ export function crewButtons(trip) {
     return { main: null, soft: 'tripReturned', softLabel: 'Truck back at yard' };
   return { main: next[0] ?? null, soft: null, softLabel: null };
 }
-// The day a trip belongs to on the phone: the day its first step happened (a trip booked for tomorrow but done today is today's), else its
-// booked day.
+// The day a trip belongs to on the phone: the day it left (a trip booked for tomorrow but driven today is today's), else its booked day.
+// Packed alone does not move it: a list packed tonight for tomorrow is still tomorrow's.
 /** @param {any} trip */
 export const crewDay = (trip) => {
-  const first = Object.values(trip.steps ?? {})
-    .map((x) => x?.at)
-    .filter(Boolean)
+  const first = Object.entries(trip.steps ?? {})
+    .filter(([k, x]) => k !== 'PACKED' && x?.at)
+    .map(([, x]) => x.at)
     .sort()[0];
   if (!first) return trip.day;
   const d = new Date(first);
@@ -118,9 +118,10 @@ export function expected(trip, action) {
   const earlier = (trip.waiting ?? []).at(-1);
   for (const l of trip.lines ?? []) {
     let q;
-    if (action === 'tripLoaded' || action === 'tripCollected') q = l.asked;
+    // Loaded starts from what the yard packed (its own count), else what was asked
+    if (action === 'tripLoaded' || action === 'tripCollected') q = l.packed ?? l.asked;
     else if (earlier && (earlier.action === 'tripLoaded' || earlier.action === 'tripCollected'))
-      q = earlier.lines ? (earlier.lines.find((x) => x.product === l.product)?.quantity ?? 0) : l.asked;
+      q = earlier.lines ? (earlier.lines.find((x) => x.product === l.product)?.quantity ?? 0) : (l.packed ?? l.asked);
     else q = l.onTruck;
     m.set(l.product, Math.max(0, q ?? 0));
   }
@@ -135,8 +136,8 @@ const shown = (trip, l) => {
     return l.asked;
   }
   if (['DELIVERED', 'DELIVERED_SHORT', 'RETURNED'].includes(trip.state)) return l.delivered;
-  if (trip.state === 'LOADED' || w === 'tripLoaded') return l.loaded || l.asked;
-  return l.asked;
+  if (trip.state === 'LOADED' || w === 'tripLoaded') return l.loaded || l.packed || l.asked;
+  return l.packed ?? l.asked;
 };
 const TRUCK =
   '<svg class="cr-truck" viewBox="0 0 64 36" aria-hidden="true"><rect x="2" y="8" width="36" height="18" rx="2" fill="#d2ea83"/><path d="M38 12h13l9 9v5H38z" fill="#fff"/><path d="M42 15h8l5 6H42z" fill="#16382c"/><circle cx="14" cy="28" r="5" fill="#16382c"/><circle cx="50" cy="28" r="5" fill="#16382c"/><circle cx="14" cy="28" r="2" fill="#fff"/><circle cx="50" cy="28" r="2" fill="#fff"/></svg>';
@@ -479,9 +480,10 @@ export function packCard(trip, v) {
           (l) =>
             '<li><span class="cr-name">' +
             esc(l.name) +
-            (l.held < l.asked ? '<small>' + l.held + ' held in the yard</small>' : '') +
+            (!packed && l.held < l.asked ? '<small>' + l.held + ' held in the yard</small>' : '') +
+            (packed && l.packed != null && l.packed !== l.asked ? '<small>Asked ' + l.asked + '</small>' : '') +
             '</span><b class="cr-n">' +
-            l.asked +
+            (packed ? (w?.lines?.find((x) => x.product === l.product)?.quantity ?? l.packed ?? l.asked) : l.asked) +
             '</b></li>',
         )
         .join('') +
@@ -607,7 +609,7 @@ export function gangCard(g, v) {
       '<button type="submit" class="cr-big">On site</button><button type="button" class="cr-link" data-cr-cancel>Not yet</button></form>';
   } else if (done) body += '<p class="cr-state st-yes">Day done · ' + sending(v) + '</p>';
   else if (on) body += '<p class="cr-state st-wait">On site · ' + sending(v) + '</p>';
-  else
+  else if (g.canSignOn || (g.canDone && here))
     body +=
       '<div class="cr-two">' +
       (g.canSignOn ? '<button type="button" class="cr-big" data-cr-on="' + esc(g.item) + '">On site</button>' : '') +
@@ -615,6 +617,7 @@ export function gangCard(g, v) {
         ? '<button type="button" class="cr-big cr-soft" data-cr-done="' + esc(g.item) + '">Day done</button>'
         : '') +
       '</div>';
+  else if (g.dayWords === 'Tomorrow') body += '<p class="cr-state st-off">On site is a tap on the day.</p>';
   return (
     '<article class="cr-card' +
     (open ? ' is-open' : '') +
@@ -625,7 +628,12 @@ export function gangCard(g, v) {
     '</span><span class="cr-where"><b>' +
     esc('Your gang at ' + g.siteName) +
     '</b><small>' +
-    esc(here + ' of ' + (g.people ?? []).length + ' on site') +
+    esc(
+      (g.dayWords ? g.dayWords + ' · ' : '') +
+        (g.dayWords === 'Tomorrow'
+          ? (g.people ?? []).filter((p) => p.answer === 'YES').length + ' of ' + (g.people ?? []).length + ' said yes'
+          : here + ' of ' + (g.people ?? []).length + ' on site'),
+    ) +
     '</small></span></div>' +
     body +
     '</article>'
@@ -643,10 +651,14 @@ export function taskCard(x, v) {
     esc(x.time ?? '') +
     '</span><span class="cr-where"><b>' +
     esc(x.words) +
-    '</b><small>Top up the part-full stillages, stack the empties. Nothing leaves the yard.</small></span></div>' +
+    '</b><small>' +
+    (x.dayWords ? esc(x.dayWords) + ' · ' : '') +
+    'Top up the part-full stillages, stack the empties. Nothing leaves the yard.</small></span></div>' +
     (w
       ? '<p class="cr-state st-yes">Done · ' + sending(v) + '</p>'
-      : '<button type="button" class="cr-big" data-cr-done="' + esc(x.id) + '">Done</button>') +
+      : x.canDone === false
+        ? '<p class="cr-state st-off">Done is a tap on the day.</p>'
+        : '<button type="button" class="cr-big" data-cr-done="' + esc(x.id) + '">Done</button>') +
     '</article>'
   );
 }

@@ -102,6 +102,7 @@ export const fleetMethods = {
   },
   retireContainer(c) {
     requireRule(!c.retired, 'This stillage is already removed.');
+    this.assertNotQuarantine(c);
     this.assertNotHeld(c);
     requireRule(
       ['yard', 'site'].includes(this.repo.get(c.location).kind),
@@ -124,6 +125,7 @@ export const fleetMethods = {
   scrapContainer(input) {
     const c = this.repo.get(input.id, 'container');
     requireRule(!c.retired, 'This stillage is already removed.');
+    this.assertNotQuarantine(c);
     requireRule(
       ['yard', 'site'].includes(this.repo.get(c.location).kind),
       'Unload it from the truck or forklift first.',

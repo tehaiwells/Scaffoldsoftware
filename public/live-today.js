@@ -503,7 +503,7 @@ export function ltSheetHTML(r) {
         esc(r.dayLabel ?? r.day) +
         ' · from ' +
         esc(s.timeWords ?? s.time) +
-        (s.driver?.mobile ? ' · ' + esc(s.driver.mobile) : '') +
+        (s.driver?.mobileWords || s.driver?.mobile ? ' · ' + esc(s.driver.mobileWords ?? s.driver.mobile) : '') +
         '</p></div><p class="lt-sheet-n">' +
         esc(plural((s.trips ?? []).length, 'trip')) +
         '</p></div>' +
@@ -525,9 +525,15 @@ export function ltSheetHTML(r) {
                 : '') +
               (t.notes?.length ? '<br><small>' + esc(t.notes.join(' · ')) + '</small>' : '') +
               '</td><td>' +
-              (t.lines ?? []).map((l) => esc(l.quantity + ' × ' + l.name)).join('<br>') +
+              (t.lines ?? [])
+                .map(
+                  (l) =>
+                    esc(l.quantity + ' × ' + l.name) +
+                    (l.asked != null && l.asked !== l.quantity ? ' <small>(asked ' + l.asked + ')</small>' : ''),
+                )
+                .join('<br>') +
               '<br><small>' +
-              esc(plural(t.pieces ?? 0, 'piece')) +
+              esc(plural(t.pieces ?? 0, 'piece') + (t.state === 'PACKED' ? ' · packed' : '')) +
               '</small></td><td class="lt-sheet-sign">' +
               (t.receivedBy ? esc(t.receivedBy) : '') +
               '</td></tr>',

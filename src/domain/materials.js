@@ -453,11 +453,17 @@ export const materialsMethods = {
         site: 0,
         truck: 0,
         containers: 0,
+        yardReserved: 0,
+        yardUnserviceable: 0,
       };
       row.quantity += l.quantity;
       row.reserved += l.reserved;
       row.unserviceable += unserviceableOf(l);
       row[kind] = (row[kind] ?? 0) + l.quantity;
+      if (kind === 'yard') {
+        row.yardReserved += l.reserved;
+        row.yardUnserviceable += unserviceableOf(l);
+      }
       row.containers++;
       rows.set(l.product_id, row);
     }
@@ -472,7 +478,9 @@ export const materialsMethods = {
           system: p?.system ?? null,
           category: p?.category ?? null,
           unitWeight: p?.unitWeight ?? null,
-          available: availableOf(r), // one definition (stock-math.js): the same number as every "free" on every page
+          // one definition (stock-math.js), applied to the yard: what can be sent now, the same number as the board's "free to send"
+          // (pieces at sites are on hire, not available; the whole-company figure is quantity)
+          available: availableOf({ quantity: r.yard, reserved: r.yardReserved, unserviceable: r.yardUnserviceable }),
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));

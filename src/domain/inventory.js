@@ -938,8 +938,16 @@ export const inventoryMethods = {
     count.state = 'CANCELLED';
     return this.repo.save(count);
   },
+  // The yard's quarantine (ADR 0010) is never flipped, removed or scrapped like a stillage: its pieces leave only by Quarantine's own taps.
+  assertNotQuarantine(c) {
+    requireRule(
+      !c?.quarantine,
+      'That is the quarantine. Use Quarantine on the Stock page: repaired, scrapped or charged.',
+    );
+  },
   condition(input) {
     const c = this.repo.get(input.id, 'container');
+    this.assertNotQuarantine(c);
     this.assertFree(c);
     requireRule(['SERVICEABLE', 'DAMAGED', 'QUARANTINED'].includes(input.condition), 'Choose a condition.');
     c.condition = input.condition;

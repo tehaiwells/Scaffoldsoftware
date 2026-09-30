@@ -112,11 +112,14 @@ test('the phones: a driver sees his ask with I’ll be there / Can’t make it; 
   assert.match(html, /value="12"/);
   html = packCard(km.packs[0], { me: km, pending: [{ action: 'packConfirmed', input: { trip: trip.id } }] });
   assert.match(html, /Packed · sending…/);
-  // the leading hand: the gang on its day only (tomorrow is not yet), then On site and Day done
-  assert.equal(leeP.me().gang.length, 0, 'the gang shows on the day');
+  // the leading hand: tomorrow's gang to see who said yes (no taps yet), then on the day On site and Day done
+  const lt = leeP.me();
+  assert.equal(lt.gang.length, 1, 'tomorrow shows the evening before');
+  assert.deepEqual([lt.gang[0].dayWords, lt.gang[0].canSignOn, lt.gang[0].canDone], ['Tomorrow', false, false]);
   f.clock(D1, '06:50');
   const lm = leeP.me();
   assert.equal(lm.gang.length, 1);
+  assert.deepEqual([lm.gang[0].dayWords, lm.gang[0].canSignOn, lm.gang[0].canDone], ['Today', true, true]);
   html = gangCard(lm.gang[0], { pending: [] });
   assert.match(html, /Your gang at Bondi/);
   assert.match(html, /data-cr-on="/);
@@ -381,6 +384,13 @@ test('Back & counted on the trip card: Count later, the count, then an outcome f
   const a = f.sim.siteAccount(f.site.id);
   assert.equal(a.words, 'sent 12 · back 11 · 1 missing');
   __lr.reset();
+  // an active site's card says what is on record (gear on site is on hire, not missing); the question is asked on a tap
+  html = lrFinishHTML({ id: f.site.id, name: 'Bondi' }, a, { ops: true });
+  assert.match(html, /On record/);
+  assert.match(html, /sent 12 · back 11 · 1 on site \(hire running\)/);
+  assert.doesNotMatch(html, /Charge for/);
+  assert.match(html, /data-lr-finish-ask="[^"]+">Finish this site…</);
+  __lr.ask(f.site.id);
   html = lrFinishHTML({ id: f.site.id, name: 'Bondi' }, a, { ops: true });
   assert.match(html, /Finish this site/);
   assert.match(html, /sent 12 · back 11 · 1 missing/);

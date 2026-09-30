@@ -177,6 +177,12 @@ body {
 .cr-state.st-collected {
   background: #fff1c9;
 }
+.cr-state.st-off {
+  background: transparent;
+  padding-left: 0;
+  font-weight: 500;
+  color: #5b7466;
+}
 .cr-state.st-delivered,
 .cr-state.st-returned {
   background: #d6efd9;

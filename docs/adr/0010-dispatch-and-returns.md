@@ -129,3 +129,35 @@ there / Can't make it, the lists to pack and returns to count (a yardsman), the 
   clock), `test/live-returns.test.js` (count later, every shortfall one outcome, LOST at replacement value, DAMAGED quarantined and never
   picked, hire continues for STILL_ON_SITE, the site-finish question and 0 unaccounted at a closed site, one "available", intake and
   owner-only values), `test/live-needs.test.js` (each rule, the cap, dismissal, permissions), and the e2e specs the UI builder writes.
+
+## Review (30 September 2026): what the records review and the first-timer walkthrough changed
+
+- **Hire settles by the piece.** A load's transit record (`hire.js`) is per container and product with the pieces still on the truck under
+  each tag, and follows a `SPLIT` row (pieces moved between containers on the truck). A partial return settles only what came back
+  (collected, with its minimum-hire top-up), a loss (`LOST`, `WRITTEN_OFF`, `SCRAPPED`) removes only what was lost (never a top-up), and
+  `STILL_ON_SITE` reopens the same lots from the container they were collected in, in one command or in separate commands days apart.
+- **The site account stays whole.** `siteFinish WRITE_OFF` records only the site's own pieces in `finish.writtenOffSite` (trip shortfalls
+  are on their trips' resolutions, counted once); a send that came back short and was resolved counts its resolved pieces as sent
+  (`STILL_ON_SITE` on a send is "delivered after all": the order's delivered line moves and hire runs from the delivery day); what is
+  still unresolved on a send is the trip's, not the site's. `siteAccount.summary` says an active site's numbers as they are ("on site
+  (hire running)"), and the finish question is asked only when someone taps *Finish this site…* (or the site is already still looking).
+- **Quarantine is not a stillage.** `condition`, `scrapContainer` and `retire` refuse the quarantine container; `tripStockAt` never picks
+  from it whatever its condition says; a `quarantineResolve CHARGED` charges each lot's own site (a site named on the tap must be one of them).
+- **Money is the owner's.** A value typed on a line (`unitValue`, `unitValues`) needs `company.manage` and is recorded as `approved_by`;
+  anyone else gets the product's replacement value or a refusal that names the Materials catalogue.
+- **Needs you says the fact.** A `RETURN_SHORT` item's id carries its state (not counted, or how many missing), and `returnCount` /
+  `returnResolve` rewrite the flag's words and `since` when pieces are still missing, so a dismissal made while it was "not counted" lapses
+  when the count comes up short. One item per booking: the clock's own flag (can't make it, no answer, not asked) wins over `NO_DRIVER_YES`,
+  which also waits an hour after an ask sent after 5 pm. No alert bell, strip or drawer in a real yard; the Who's-in and Paperwork cards
+  carry no red or amber strips (the one card and the one chip say it).
+- **Dispatch.** The yard's PACKED count is on every line (`lines[].packed`) and is what everything downstream starts from: the driver's
+  Loaded & left, the office docket's Sent column, the lanes' piece count and the run sheet (asked beside it when different). PACKED keeps
+  a truck booking planned (still in the yard), so *Move the day* moves a packed day (rain at 6 am included: a real yard's booking moves
+  while nothing has left on it) and says packed lists pack again. The office's PACKED entry is `ON_BEHALF` of the list's packer. A
+  driver's "can't make it" puts the lane first before the day starts. A fully held list is never "short" of itself. The phones show
+  tomorrow's re-stack and gang read-only (taps on the day), and a driver's packed trip stays under Tomorrow. The Today picker in a real
+  yard keeps the number typed and a tap adds one piece (exact orders, ADR 0009).
+- **Stock.** The register's *Free in yard* is `availableOf` applied to the yard's own rows (pieces at sites are on hire, not available);
+  the board's "free to send" is the same number. Add stock keeps a cost per line and writes the supplier, invoice and cost each on the
+  ledger row people read.
+- Tests: `test/live-review3.test.js` pins each of these.

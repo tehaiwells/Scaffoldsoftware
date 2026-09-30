@@ -358,6 +358,7 @@ async function keyedPost(url, data) {
 async function command(action, data) {
   const { res, out: result } = await keyedPost(`/api/commands/${action}`, data);
   if (!res.ok) throw new Error(result.error);
+  LTM?.ltForget?.(); // a real yard's Needs you and lanes are read again after anything changes
   return result;
 }
 function bind(id, action, transform = (x) => x, after = null) {
@@ -8535,7 +8536,7 @@ function registerPanel() {
       'Total stock the company owns right now, per product, across the yard, sites and trucks. This is the original list of stock plus everything added, minus everything removed.',
       stkExport('register', 'Export register CSV'),
     ) +
-    '<div class="table-scroll"><table class="stk-table stk-register"><thead><tr><th>Product</th><th>System</th><th class="num">In yard</th><th class="num">At sites</th><th class="num">On trucks</th><th class="num">Total</th><th class="num">Reserved</th><th class="num">Available</th></tr></thead><tbody>' +
+    '<div class="table-scroll"><table class="stk-table stk-register"><thead><tr><th>Product</th><th>System</th><th class="num">In yard</th><th class="num">At sites</th><th class="num">On trucks</th><th class="num">Total</th><th class="num">Reserved</th><th class="num">Free in yard</th></tr></thead><tbody>' +
     rows
       .map(
         (r) =>
@@ -8560,7 +8561,7 @@ function registerPanel() {
           ) +
           '</td>' +
           stkRes(r.reserved) +
-          '<td class="num stk-avail" data-label="Available"><strong>' +
+          '<td class="num stk-avail" data-label="Free in yard"><strong>' +
           num(r.available) +
           '</strong></td></tr>',
       )
@@ -17041,6 +17042,7 @@ function alItemHTML(a) {
 export function alBellHTML(s = state) {
   const d = alData(s),
     n = d.count;
+  if (liveMode()) return ''; // a real yard has one calm chip ("Needs you · N") and one card on Today, nothing else
   return (
     '<button type="button" id="al-bell" class="al-bell' +
     (n ? ' has sev-' + alTop(d) : '') +
@@ -17058,7 +17060,7 @@ export function alBellHTML(s = state) {
 // Home / Overview: the most urgent few under the hero; nothing at all (an empty, hidden section) when all is well.
 export function alStripHTML(s = state) {
   const d = alData(s);
-  if (!d.count) return '<section class="al-strip" hidden></section>';
+  if (!d.count || liveMode()) return '<section class="al-strip" hidden></section>';
   const top = d.items.slice(0, 4);
   return (
     '<section class="al-strip panel sev-' +
@@ -22168,7 +22170,9 @@ function tdhPerson(r, v, kind) {
             : 'I’ll be there';
   } else if (r.answer === 'WAITING') {
     cls = 'wait';
-    words = 'Waiting for an answer';
+    words = liveMode()
+      ? 'Waiting for ' + (r.name ?? 'their') + '’s own answer on their phone'
+      : 'Waiting for an answer';
   } else if (r.answer === 'NO') {
     cls = 'no';
     words = 'Can’t make it' + (r.reason ? ': ' + r.reason : '');
@@ -22187,9 +22191,13 @@ function tdhPerson(r, v, kind) {
     open = !r.moved && !r.gone;
   if (open && r.canConfirm && r.answer !== 'YES')
     btns.push(
-      '<button type="button" class="tdh-btn tdh-yes" data-tdh-yes="' +
-        esc(r.message) +
-        '">They said yes on the phone</button>',
+      liveMode()
+        ? '<button type="button" class="secondary tdh-btn" data-tdh-yes="' +
+            esc(r.message) +
+            '" title="Recorded by the office for them">Took the call: yes</button>'
+        : '<button type="button" class="tdh-btn tdh-yes" data-tdh-yes="' +
+            esc(r.message) +
+            '">They said yes on the phone</button>',
     );
   if (open && r.smsHref && r.answer !== 'YES')
     btns.push('<a class="secondary tdh-btn tdh-sms" href="' + esc(r.smsHref) + '">Text them</a>');
@@ -22468,7 +22476,10 @@ function tdhNewForm(kind, day, extra = {}) {
     sites = (p?.sites ?? []).filter((s) => !s.finishing),
     f = { time: '07:00' };
   if (kind === 'TRUCK') {
-    const t = (p?.trucks ?? []).find((x) => !taken.trucks.includes(x.id)),
+    // the biggest free truck first (a big load is the usual day), then by name
+    const t = (p?.trucks ?? [])
+        .filter((x) => !taken.trucks.includes(x.id))
+        .sort((a, b) => Number(!!b.big) - Number(!!a.big))[0],
       d = (p?.drivers ?? []).find((x) => !taken.drivers.includes(x.id));
     f.truck = t ? 'T:' + t.id : 'HIRE:BIG';
     f.driver = d?.id ?? '';
@@ -22676,13 +22687,19 @@ function tdhForm(p, day) {
     go = 'Plan the list for ' + siteName + ' on ' + dl;
     ok = !!f.site && f.lines.length > 0;
     const packer = yardsmen.find((w) => w.id === f.packer)?.name ?? yardsmen[0]?.name ?? 'The yardsman';
-    note =
-      packer +
-      ' gets a message to pack it ' +
-      (f.pack === 'DAY_BEFORE' ? 'the day before' : 'that morning') +
-      '. When the truck comes, the crew loads it and it drives to ' +
-      esc(siteName) +
-      '.';
+    note = liveMode()
+      ? packer +
+        ' packs it ' +
+        (f.pack === 'DAY_BEFORE' ? 'the day before' : 'that morning') +
+        ' and taps Packed with the counts; the driver taps Loaded & left, then Delivered at ' +
+        esc(siteName) +
+        '.'
+      : packer +
+        ' gets a message to pack it ' +
+        (f.pack === 'DAY_BEFORE' ? 'the day before' : 'that morning') +
+        '. When the truck comes, the crew loads it and it drives to ' +
+        esc(siteName) +
+        '.';
   } else if (k === 'WORKERS') {
     icon = 'spr-worker';
     head = 'Send workers to a site';
@@ -23038,18 +23055,22 @@ function tdhWho(t, p, today) {
   let body = '';
   if (r?.waiting?.length)
     body +=
-      '<ul class="tdh-people tdh-flags">' +
+      '<ul class="tdh-people' +
+      (liveMode() ? '' : ' tdh-flags') +
+      '">' +
       r.waiting
         .map((x) =>
           row(
             x,
             x.answer === 'WAITING' ? 'wait' : 'no',
             x.words + ' · ' + x.what,
-            '<span class="tdh-person-acts"><button type="button" class="secondary tdh-btn" data-tdh-goto="' +
-              esc(x.item) +
-              '" data-tdh-day="' +
-              esc(today ?? '') +
-              '">Sort it</button></span>',
+            liveMode()
+              ? '' // a real yard: Needs you carries the one action; the row just says where they are
+              : '<span class="tdh-person-acts"><button type="button" class="secondary tdh-btn" data-tdh-goto="' +
+                  esc(x.item) +
+                  '" data-tdh-day="' +
+                  esc(today ?? '') +
+                  '">Sort it</button></span>',
           ),
         )
         .join('') +
@@ -23141,17 +23162,17 @@ function tdhWho(t, p, today) {
   if (r?.tomorrow?.words)
     body +=
       '<p class="tdh-tomorrow' +
-      (r.tomorrow.cantMake ? ' no' : '') +
+      (r.tomorrow.cantMake && !liveMode() ? ' no' : '') +
       '">' +
-      (r.tomorrow.cantMake ? tdhDot('red') : '') +
+      (r.tomorrow.cantMake && !liveMode() ? tdhDot('red') : '') +
       '<span>' +
       esc(r.tomorrow.words) +
       '</span> <button type="button" class="' +
-      (r.tomorrow.cantMake ? 'tdh-btn tdh-soft' : 'tdh-link') +
+      (r.tomorrow.cantMake && !liveMode() ? 'tdh-btn tdh-soft' : 'tdh-link') +
       '" data-tdh-day="' +
       esc(t.tomorrow) +
       '">' +
-      (r.tomorrow.cantMake ? 'Sort it' : 'See tomorrow') +
+      (r.tomorrow.cantMake && !liveMode() ? 'Sort it' : 'See tomorrow') +
       '</button></p>';
   if (!t) body += tdhWait;
   else if (!body) body = '<p class="tdh-quiet">Nobody is booked today.</p>';
@@ -23252,7 +23273,7 @@ function tdhPaper(t, p) {
       '">' +
       (all ? 'Show only what needs doing' : 'All good: ' + good.length + ' more') +
       '</button>';
-  if (pw.missing?.length)
+  if (pw.missing?.length && !liveMode())
     body +=
       '<p class="tdh-missing">' +
       tdhDot('amber') +
@@ -23602,7 +23623,7 @@ function tdPick(title, lines, done) {
   });
   gmPlanPicker(
     sheet,
-    { state, lift: tdhP()?.pickerLift ?? null },
+    { state, lift: tdhP()?.pickerLift ?? null, exact: liveMode() }, // a real yard's list is exact pieces (the board's rule)
     {
       title,
       lines,
@@ -24103,6 +24124,7 @@ function tmTeam() {
     );
   };
   if (liveMode()) lo();
+  const reach = liveMode() && LOM ? LOM.LO_REACH : '';
   const add =
     '<form class="tm-add" data-tm-add><b class="tm-add-title">Add a person</b><label class="tm-f"><span>Name</span><input name="name" maxlength="60" value="' +
     esc(tmAddDraft.name) +
@@ -24125,6 +24147,7 @@ function tmTeam() {
   return (
     '<section class="panel tm-team" id="tm-team" aria-labelledby="tm-team-h">' +
     head +
+    reach +
     '<ul class="tm-list">' +
     d.people.map(row).join('') +
     '</ul>' +

@@ -287,21 +287,10 @@ function quarantineForm(l) {
         '<option value="' + k + '"' + (q.outcome === k ? ' selected' : '') + '>' + esc(w + ' · ' + sub) + '</option>',
     ).join('') +
     '</select></label>' +
-    (q.outcome === 'CHARGED' && l.from.length > 1
-      ? '<label class="lo-field"><span>Which site</span><select name="site">' +
-        l.from
-          .map(
-            (x) =>
-              '<option value="' +
-              esc(x.id) +
-              '"' +
-              (q.site === x.id ? ' selected' : '') +
-              '>' +
-              esc(x.name) +
-              '</option>',
-          )
-          .join('') +
-        '</select></label>'
+    (q.outcome === 'CHARGED' && l.from.length
+      ? '<p class="lo-note">' +
+        esc('Charged to the site each piece came back from: ' + l.from.map((x) => x.name).join(', ') + '.') +
+        '</p>'
       : '') +
     (q.outcome === 'CHARGED'
       ? needValue
@@ -340,7 +329,25 @@ export function lrAccount(site) {
 export function lrFinishHTML(site, a, { ops = true, why = null } = {}) {
   if (!a) return '<p class="lo-quiet">Adding up what was sent and what came back…</p>';
   const open = LR.finish?.site === site.id,
-    k = a.missing ?? 0;
+    k = a.missing ?? 0,
+    // the question is asked only when the site is finishing (a tap, or it is already "still looking"); an active site's card just says
+    // what is on record: gear on site is on hire, not missing
+    asking = open || !!a.looking || LR.ask === site.id || a.active === false;
+  if (!asking)
+    return (
+      '<div class="lr-finish lr-onrecord" data-lr-finish="' +
+      esc(site.id) +
+      '"><p class="lr-finish-h">On record</p><p class="lr-account"><b>' +
+      esc(a.summary ?? a.words) +
+      '</b></p>' +
+      (why ? '<p class="lo-warn">' + esc(why) + '</p>' : '') +
+      (ops
+        ? '<div class="lo-acts"><button type="button" class="lo-link" data-lr-finish-ask="' +
+          esc(site.id) +
+          '">Finish this site…</button></div>'
+        : '') +
+      '</div>'
+    );
   let h =
     '<div class="lr-finish" data-lr-finish="' +
     esc(site.id) +
@@ -350,6 +357,9 @@ export function lrFinishHTML(site, a, { ops = true, why = null } = {}) {
     (a.charged ? '<small>' + esc(plural(a.charged, 'piece') + ' charged') + '</small>' : '') +
     (a.writtenOff ? '<small>' + esc(plural(a.writtenOff, 'piece') + ' written off') + '</small>' : '') +
     (a.looking ? '<small>Still looking since ' + esc(String(a.looking.since).slice(0, 10)) + '</small>' : '') +
+    (k && a.onSite
+      ? '<small>' + esc(a.onSite + ' on the site’s record: charge, write off, or keep looking') + '</small>'
+      : '') +
     '</p>' +
     (why ? '<p class="lo-warn">' + esc(why) + '</p>' : '');
   if (a.unresolvedTrips?.some((t) => t.pending))
@@ -358,7 +368,7 @@ export function lrFinishHTML(site, a, { ops = true, why = null } = {}) {
     h +=
       '<div class="lo-acts">' +
       (k
-        ? '<button type="button" class="lo-btn" data-lr-finish-go="CHARGE" data-site="' +
+        ? '<button type="button" class="lo-btn soft" data-lr-finish-go="CHARGE" data-site="' +
           esc(site.id) +
           '">Charge for ' +
           k +
@@ -375,6 +385,7 @@ export function lrFinishHTML(site, a, { ops = true, why = null } = {}) {
         : '<button type="button" class="lo-btn" data-lr-finish-go="CHARGE" data-site="' +
           esc(site.id) +
           '">Finish the site</button>') +
+      (a.looking ? '' : '<button type="button" class="lo-link" data-lr-finish-ask="">Not now</button>') +
       '</div>';
   if (open) {
     const o = LR.finish.outcome,
@@ -588,6 +599,13 @@ function onClick(e) {
     LR.host.redraw();
     return;
   }
+  if (d.lrFinishAsk !== undefined) {
+    LR.ask = d.lrFinishAsk || null;
+    LR.finish = null;
+    LR.err = null;
+    LR.host.redraw();
+    return;
+  }
   if (d.lrFinishGo !== undefined) {
     LR.finish = { site: d.site, outcome: d.lrFinishGo, reason: '' };
     LR.err = null;
@@ -733,6 +751,7 @@ export const __lr = {
       err: null,
       accounts: new Map(),
       finish: null,
+      ask: null,
       q: null,
       values: { draft: {}, paste: '', err: null, saved: 0 },
     });
@@ -743,6 +762,9 @@ export const __lr = {
   },
   finish(site, outcome) {
     LR.finish = site ? { site, outcome, reason: '' } : null;
+  },
+  ask(site) {
+    LR.ask = site ?? null;
   },
   q(product, outcome = 'REPAIRED') {
     LR.q = product ? { product, outcome, quantity: '', site: '', reason: '', unitValue: '' } : null;

@@ -63,7 +63,9 @@ const ADD = new Set(['OPENING_BALANCE', 'PURCHASE']),
     'DAMAGED',
     'REPAIRED',
   ]);
-const EVENTS = [...ADD, ...REMOVE, ADJUST, ...MOVE];
+// pieces moved between containers on the same truck (a partial return or resolution takes only some of a load): the transit record follows them
+const SPLIT = 'SPLIT';
+const EVENTS = [...ADD, ...REMOVE, ADJUST, ...MOVE, SPLIT];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 // Closures that charge a minimum hire: collected (no reason recorded) or still on the truck that loaded them. 'counted', 'removed' and 'transfer' do not.
 const TOPUP = new Set([undefined, null, 'collected', 'transit']);
@@ -157,6 +159,31 @@ export function hireSettle(book, site, product, tag, why = null) {
     if (why) c.why = why;
     else delete c.why;
     out.push({ q: c.q, start: c.start, first: c.first ?? null });
+  }
+  return out;
+}
+// Settles n pieces of the lots one truck load took (tag), oldest closed first, and leaves the rest tagged (a partial return: only what came
+// back is collected; only what was lost is removed). Splits a lot when part of it settles. Returns the settled pieces as lots.
+/** @param {HireBook} book @param {string} site @param {string} product @param {string} tag @param {number} n @param {CloseReason} [why] @returns {OpenLot[]} */
+export function hireSettleSome(book, site, product, tag, n, why = null) {
+  const s = slot(book, site, product),
+    out = [];
+  let left = n;
+  for (let i = 0; i < s.closed.length && left > 0; i++) {
+    const c = s.closed[i];
+    if (c.tag !== tag) continue;
+    let rec = c;
+    if (c.q > left) {
+      rec = { ...c, q: left };
+      c.q -= left;
+      s.closed.splice(i, 0, rec);
+      i++;
+    }
+    delete rec.tag;
+    if (why) rec.why = why;
+    else delete rec.why;
+    left -= rec.q;
+    out.push({ q: rec.q, start: rec.start, first: rec.first ?? null });
   }
   return out;
 }
@@ -441,38 +468,89 @@ function apply(st, db, company, r) {
       st.bv++;
     }
   };
-  // A container's pieces that left a site on a truck, settled where they are set down (to: a site id, or null for the yard / anywhere else).
-  const settle = (why, to = null, n = 0) => {
+  // A container's pieces that left a site on a truck (st.transit: {site, parts: [{tag, q}]} per container and product), settled where they
+  // are set down (to: a site id, or null for the yard / anywhere else). n pieces only (ADR 0010: a partial return collects what came back,
+  // a loss removes what was lost, and the rest stays in transit); n null settles everything under the key.
+  const settle = (why, to = null, n = null) => {
     const t = st.transit.get(tkey);
     if (!t) return false;
-    st.transit.delete(tkey);
     st.bv++;
+    const have = t.parts.reduce((k, p) => k + p.q, 0),
+      take = n == null ? have : Math.min(n, have);
+    /** @type {{tag:string,q:number}[]} */
+    const taken = [];
+    let left = take;
+    while (left > 0 && t.parts.length) {
+      const p = t.parts[0],
+        k = Math.min(p.q, left);
+      taken.push({ tag: p.tag, q: k });
+      p.q -= k;
+      left -= k;
+      if (!p.q) t.parts.shift();
+    }
+    if (!t.parts.length) st.transit.delete(tkey);
+    // a tag whose last pieces are set down now: whatever is still tagged (pieces the ledger never matched) settles the same way
+    const spent = [...new Set(taken.map((x) => x.tag))].filter(
+      (tag) => ![...st.transit.values()].some((v) => v.parts.some((p) => p.tag === tag)),
+    );
     if (to && to === t.site) {
-      const back = hireReopen(book, t.site, pid, n, (c) => c.tag === t.tag);
-      hireSettle(book, t.site, pid, t.tag);
-      if (n > back) arrive('site:' + to, n - back);
+      let back = 0;
+      for (const p of taken) back += hireReopen(book, t.site, pid, p.q, (c) => c.tag === p.tag);
+      for (const tag of spent) hireSettle(book, t.site, pid, tag);
+      const want = n ?? take;
+      if (want > back) arrive('site:' + to, want - back);
       return true;
     }
-    const lots = hireSettle(book, t.site, pid, t.tag, to ? 'transfer' : why);
+    const lots = [];
+    for (const p of taken) lots.push(...hireSettleSome(book, t.site, pid, p.tag, p.q, to ? 'transfer' : why));
+    for (const tag of spent) lots.push(...hireSettle(book, t.site, pid, tag, to ? 'transfer' : why));
     if (to) {
-      let left = n;
+      let rest = n ?? take;
       for (const l of lots) {
-        const k = Math.min(l.q, left);
+        const k = Math.min(l.q, rest);
         if (k > 0) hireArrive(book, to, pid, k, day, l.first ?? l.start);
-        left -= k;
+        rest -= k;
       }
-      if (left > 0) hireArrive(book, to, pid, left, day);
+      if (rest > 0) hireArrive(book, to, pid, rest, day);
       if (!st.first || day < st.first) st.first = day;
     }
     return true;
   };
+  if (r.event === SPLIT) {
+    // pieces moved from one container to another on the truck: their share of the transit record moves with them
+    const fromKey = r.source + '|' + pid,
+      t = st.transit.get(fromKey);
+    if (!t || !r.container_id || r.container_id === r.source) return;
+    const have = t.parts.reduce((k, p) => k + p.q, 0),
+      take = Math.min(q, have);
+    if (!(take > 0)) return;
+    const moved = [];
+    let left = take;
+    while (left > 0 && t.parts.length) {
+      const p = t.parts[0],
+        k = Math.min(p.q, left);
+      moved.push({ tag: p.tag, q: k });
+      p.q -= k;
+      left -= k;
+      if (!p.q) t.parts.shift();
+    }
+    if (!t.parts.length) st.transit.delete(fromKey);
+    const dest = st.transit.get(tkey);
+    if (dest && dest.site === t.site) dest.parts.push(...moved);
+    else {
+      if (dest) settle(null); // another site's load in the same container: set down here, collected
+      st.transit.set(tkey, { site: t.site, parts: moved });
+    }
+    st.bv++;
+    return;
+  }
   if (ADD.has(r.event)) {
     arrive(at(r.destination ?? r.container_id), q);
     if (r.container_id && r.destination) st.locOf.set(r.container_id, r.destination);
     return;
   }
   if (REMOVE.has(r.event)) {
-    if (r.container_id && settle('removed')) return;
+    if (r.container_id && settle('removed', null, q)) return;
     leave(at(r.source ?? r.container_id), q, 'removed');
     return;
   }
@@ -498,7 +576,7 @@ function apply(st, db, company, r) {
   if (to === 'truck' && site(from) && r.container_id) {
     settle(null);
     const tag = 't' + r.sequence;
-    st.transit.set(tkey, { site: site(from), tag });
+    st.transit.set(tkey, { site: site(from), parts: [{ tag, q }] });
     leave(from, q, 'transit', tag);
     return;
   }

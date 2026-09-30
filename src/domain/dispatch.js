@@ -11,6 +11,7 @@ import { addDays, dayLabel } from './schedule.js';
 import { DAY_END, timeWords } from './plantime.js';
 import { PLAN_OPEN, PLAN_FIXABLE } from './plan.js';
 import { TRIP_CONFIRM_OPS, PACK_OPS } from './trips.js';
+import { mobileWords } from './team.js';
 /** Office commands of this file (operations.manage). @type {string[]} */
 export const DISPATCH_OPS = ['planSend', 'planMoveDay', 'planCopyCrews'];
 /** Taps a person may make from their own phone as well as the office (asks.answer; scoped inside each command). @type {string[]} */
@@ -274,6 +275,11 @@ export const dispatchMethods = {
       items.filter((/** @type {any} */ i) => i.type === 'TRUCK').map((/** @type {any} */ i) => i.id),
     );
     const moved = [];
+    // a list already packed for a truck that moves: its trip is booked again on the new day, so the yard packs it again (the count starts over)
+    const repack = items.filter(
+      (/** @type {any} */ i) =>
+        i.type === 'TRUCK' && this.planLiveTrips(i).some((/** @type {any} */ t) => t.state === 'PACKED'),
+    ).length;
     for (const it of items) {
       const tp = onTruck.get(it.id);
       const r = this.planMove({
@@ -294,7 +300,8 @@ export const dispatchMethods = {
         dayLabel(from) +
         ' to ' +
         dayLabel(to) +
-        '. Everyone is asked again.',
+        '. Everyone is asked again.' +
+        (repack ? ' Packed lists need packing again on the new day.' : ''),
     };
   },
   // Copy yesterday's crews: every Workers booking of one day made again on another, the same people, site, time and count. All or nothing.
@@ -407,10 +414,13 @@ export const dispatchMethods = {
         )
         .map((/** @type {any} */ t) => {
           const dot = this.tripDot(t, b);
+          // a known problem comes first: the driver said no, or the day has started and nothing is confirmed
           const unconfirmed =
             !!t.flag ||
+            (answer === 'NO' && !['LOADED', 'DELIVERED', 'BACK'].includes(dot)) ||
             (['BOOKED', 'ASKED'].includes(dot) && started(t, b)) ||
             (t.state === 'RETURNED' && (t.countPending || (t.notBack ?? []).length > 0));
+          const lines = this.tripLines(t);
           return {
             id: t.id,
             label: this.tripLabel(t),
@@ -422,15 +432,21 @@ export const dispatchMethods = {
             state: t.state,
             stateWords: this.tripStateWords(t),
             dot,
-            dotWords: DOT_WORDS[dot],
+            dotWords: dot === 'ASKED' && answer === 'NO' ? "Asked · can't make it" : DOT_WORDS[dot],
             unconfirmed,
             flag: t.flag ?? null,
-            pieces: this.tripLines(t).reduce((/** @type {number} */ n, /** @type {any} */ l) => n + l.asked, 0),
+            // what is really on it: packed (the yard's count) once packed, else what was asked
+            pieces: lines.reduce((/** @type {number} */ n, /** @type {any} */ l) => n + (l.packed ?? l.asked), 0),
+            asked: lines.reduce((/** @type {number} */ n, /** @type {any} */ l) => n + l.asked, 0),
+            packed: t.steps?.PACKED
+              ? lines.reduce((/** @type {number} */ n, /** @type {any} */ l) => n + (l.packed ?? 0), 0)
+              : null,
             orders: t.orders,
           };
         });
       const laneUnconfirmed =
         rows.some((r) => r.unconfirmed) ||
+        (b.status !== 'DRAFT' && b.status !== 'DONE' && b.driver && answer === 'NO') ||
         (b.status !== 'DRAFT' && b.status !== 'DONE' && b.driver && answer !== 'YES' && started({ time: b.time }, b));
       return {
         booking: b.id,
@@ -585,13 +601,16 @@ export const dispatchMethods = {
           address: v.address,
           contact: v.contact,
           phone: v.phone,
+          // the load: what left (loaded or collected), else what the yard packed, else what was asked; asked beside it when different
           lines: v.lines.map((/** @type {any} */ l) => ({
             product: l.product,
             name: l.name,
-            quantity: l.loaded || l.collected || l.asked,
+            quantity: l.loaded || l.collected || l.packed || l.asked,
+            asked: l.asked,
+            packed: l.packed ?? null,
           })),
           pieces: v.lines.reduce(
-            (/** @type {number} */ n, /** @type {any} */ l) => n + (l.loaded || l.collected || l.asked),
+            (/** @type {number} */ n, /** @type {any} */ l) => n + (l.loaded || l.collected || l.packed || l.asked),
             0,
           ),
           receivedBy: t.steps?.DELIVERED?.receivedBy ?? null,
@@ -604,7 +623,12 @@ export const dispatchMethods = {
       booking: b.id,
       day: d,
       dayLabel: dayLabel(d),
-      driver: { id: b.driver, name: dr?.name ?? 'Driver', mobile: dr?.mobile ?? null },
+      driver: {
+        id: b.driver,
+        name: dr?.name ?? 'Driver',
+        mobile: dr?.mobile ?? null,
+        mobileWords: dr?.mobile ? mobileWords(dr.mobile) : null,
+      },
       answer,
       truck: { id: b.truck ?? null, name: b.truck ? this.planName(b.truck, 'Truck') : 'Hire truck' },
       time: b.time,
@@ -648,39 +672,49 @@ export const dispatchMethods = {
         'trip',
         "json_extract(data,'$.state')='RETURNED' AND json_extract(data,'$.countPending')=1",
       ).map((/** @type {any} */ t) => this.tripView(t));
-      tasks = this.planDayItems(today, 'RESTACK')
-        .filter((/** @type {any} */ x) => PLAN_OPEN.includes(x.status))
-        .map((/** @type {any} */ x) => ({
-          id: x.id,
-          type: 'RESTACK',
-          time: x.time,
-          timeWords: timeWords(x.time),
-          words: 'Re-stack the yard',
-          canDone: true,
-        }));
+      // today's re-stack (Done), and tomorrow's so the yard knows what is coming (read-only until the day)
+      tasks = [today, tomorrow].flatMap((day) =>
+        this.planDayItems(day, 'RESTACK')
+          .filter((/** @type {any} */ x) => PLAN_OPEN.includes(x.status))
+          .map((/** @type {any} */ x) => ({
+            id: x.id,
+            type: 'RESTACK',
+            day,
+            dayWords: day === today ? 'Today' : 'Tomorrow',
+            time: x.time,
+            timeWords: timeWords(x.time),
+            words: 'Re-stack the yard',
+            canDone: day === today,
+          })),
+      );
     }
     let gang = [];
     if (phone.role === 'LEADING_HAND')
-      gang = this.planDayItems(today, 'WORKERS')
-        .filter(
-          (/** @type {any} */ x) =>
-            PLAN_OPEN.includes(x.status) && x.people.some((/** @type {any} */ p) => p.person === phone.id),
-        )
-        .map((/** @type {any} */ x) => ({
-          item: x.id,
-          site: x.site,
-          siteName: this.planSiteName(x.site),
-          time: x.time,
-          timeWords: timeWords(x.time),
-          people: x.people.map((/** @type {any} */ p) => ({
-            person: p.person,
-            name: this.planName(p.person),
-            answer: this.planAnswerOf(this.planMsg(p.message), this.planNow()),
-            onSite: !!p.moved && !p.homeAt,
+      // today's gang (On site, Day done), and tomorrow's to see who said yes (read-only until the day)
+      gang = [today, tomorrow].flatMap((day) =>
+        this.planDayItems(day, 'WORKERS')
+          .filter(
+            (/** @type {any} */ x) =>
+              PLAN_OPEN.includes(x.status) && x.people.some((/** @type {any} */ p) => p.person === phone.id),
+          )
+          .map((/** @type {any} */ x) => ({
+            item: x.id,
+            day,
+            dayWords: day === today ? 'Today' : 'Tomorrow',
+            site: x.site,
+            siteName: this.planSiteName(x.site),
+            time: x.time,
+            timeWords: timeWords(x.time),
+            people: x.people.map((/** @type {any} */ p) => ({
+              person: p.person,
+              name: this.planName(p.person),
+              answer: this.planAnswerOf(this.planMsg(p.message), this.planNow()),
+              onSite: !!p.moved && !p.homeAt,
+            })),
+            canSignOn: day === today && x.people.some((/** @type {any} */ p) => !p.moved),
+            canDone: day === today,
           })),
-          canSignOn: x.people.some((/** @type {any} */ p) => !p.moved),
-          canDone: true,
-        }));
+      );
     return {
       ...base,
       person: { id: phone.id, name: phone.person.name, kind: phone.kind, role: phone.role },

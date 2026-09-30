@@ -280,6 +280,26 @@ export const todayMethods = {
         packer = it.packer ? person(it.packer) : null;
       const lastTrip = (it.trips ?? []).at(-1),
         delivered = (it.trips ?? []).filter((x) => x.delivered).reduce((n, x) => n + (x.pieces ?? 0), 0);
+      // a real yard: the yard's own Packed tap (who, when, the counts) is what the card says once it is packed
+      let packedWords = null;
+      if (this.live() && it.order && it.stage === 'PACKED')
+        try {
+          const o = this.repo.get(it.order, 'order'),
+            trip = o.trip ? this.repo.get(o.trip, 'trip') : null,
+            st = trip?.steps?.PACKED;
+          if (st) {
+            const lines = this.tripLines(trip),
+              n = lines.reduce((k, l) => k + (l.packed ?? 0), 0);
+            packedWords =
+              'Packed by ' +
+              (st.kind === 'ON_BEHALF' && st.onBehalfOf ? nameOf(st.onBehalfOf) + ' (the office)' : st.byName) +
+              ', ' +
+              this.tripHm(Date.parse(st.at)) +
+              ' · ' +
+              (lines.length > 1 ? lines.map((l) => l.packed ?? 0).join(' + ') + ' = ' : '') +
+              plural(n, 'piece');
+          }
+        } catch {}
       Object.assign(v, {
         lines: it.lines.map((l) => ({
           product: l.product,
@@ -325,12 +345,18 @@ export const todayMethods = {
       let low = [];
       if (open && ['WAITING', 'PACKING'].includes(it.stage) && !(it.held ?? []).length) {
         const free = (ctx.free ??= this.planFree());
+        // a real yard's list holds exact pieces on its order: what it holds is in the yard for it (not "short" of itself)
+        const mine = this.live() && it.order ? this.orderHeld(it.order) : null;
+        const have = (l) => (free.get(l.product) ?? 0) + (mine?.get(l.product) ?? 0);
         low = it.lines
-          .filter((l) => (free.get(l.product) ?? 0) < l.quantity)
-          .map((l) => {
-            const have = free.get(l.product) ?? 0;
-            return { product: l.product, name: pname(l.product), want: l.quantity, have, missing: l.quantity - have };
-          });
+          .filter((l) => have(l) < l.quantity)
+          .map((l) => ({
+            product: l.product,
+            name: pname(l.product),
+            want: l.quantity,
+            have: have(l),
+            missing: l.quantity - have(l),
+          }));
       }
       warn = low.length > 0;
       v.low = low;
@@ -352,7 +378,7 @@ export const todayMethods = {
           WAITING:
             (packer?.name ?? 'The crew') + ' packs it ' + (it.pack === 'DAY_BEFORE' ? 'the day before' : 'on the day'),
           PACKING: 'Being packed',
-          PACKED: 'Packed: ' + plural((it.held ?? []).length, 'stillage') + ' set aside',
+          PACKED: packedWords ?? 'Packed: ' + plural((it.held ?? []).length, 'stillage') + ' set aside',
           LOADING: (lastTrip?.truckName ?? 'The truck') + ' is loading',
           ON_THE_WAY: 'On the way to ' + (siteName ?? 'the site'),
           DELIVERED: 'Delivered',
