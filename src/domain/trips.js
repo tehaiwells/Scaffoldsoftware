@@ -23,8 +23,10 @@ import { DAY_END, PLAN_TIMES, parseTime, timeWords } from './plantime.js';
 // Who may run what (simulation.js execute): orders need requests.create (a supervisor only for their own sites); booking and packing need
 // operations.manage; the four confirmations need trips.confirm, and then the trip's own driver or the office (for the driver: ON_BEHALF).
 export const ORDER_OPS = ['orderCreate', 'bringBackCreate', 'orderCancel'];
-export const TRIP_OFFICE_OPS = ['tripBook', 'tripCancel', 'packConfirmed'];
+export const TRIP_OFFICE_OPS = ['tripBook', 'tripCancel'];
 export const TRIP_CONFIRM_OPS = ['tripLoaded', 'tripDelivered', 'tripCollected', 'tripReturned'];
+// Packing and counting are the yard's (ADR 0010): a yard hand's phone (the YARD role) or the office (packs.confirm).
+export const PACK_OPS = ['packConfirmed', 'returnCount'];
 /** @type {Record<string,TripStep>} */
 export const STEP_OF = {
   packConfirmed: 'PACKED',
@@ -591,6 +593,7 @@ export const tripMethods = {
     if (input.truckPlan) {
       tp = this.repo.get(input.truckPlan, 'planItem');
       requireRule(tp.type === 'TRUCK' && tp.status !== 'CANCELLED', 'Choose a truck booked on Today.');
+      requireRule(tp.status !== 'DRAFT', 'That truck booking is still a draft. Send it first.');
     } else {
       const truck = this.repo.get(input.truck, 'truck');
       requireRule(!truck.retired, truck.name + ' has been removed.');
@@ -604,6 +607,7 @@ export const tripMethods = {
       tp = this.planDayItems(day, 'TRUCK').find(
         (/** @type {any} */ x) => x.truck === truck.id && x.status !== 'CANCELLED',
       );
+      requireRule(tp?.status !== 'DRAFT', truck.name + "'s booking that day is still a draft. Send it first.");
       if (tp) {
         if (input.driver)
           requireRule(
@@ -882,6 +886,9 @@ export const tripMethods = {
       steps: trip.steps,
       notBack: trip.notBack ?? [],
       undelivered: !!trip.undelivered,
+      countPending: !!trip.countPending,
+      count: trip.count ?? null,
+      resolutions: trip.resolutions ?? [],
       next,
     };
   },
@@ -890,6 +897,7 @@ export const tripMethods = {
   tripStateWords(trip) {
     if (trip.flag?.code === 'UNCONFIRMED_TRIP') return 'Not confirmed';
     const notBack = (trip.notBack ?? []).reduce((/** @type {number} */ n, /** @type {any} */ l) => n + l.quantity, 0);
+    if (trip.state === 'RETURNED' && trip.countPending) return 'Back at yard, not counted yet';
     if (trip.state === 'RETURNED' && trip.undelivered)
       return UNDELIVERED_WORDS + (notBack ? ', ' + plural(notBack, 'piece') + ' not counted back' : '');
     if (trip.state === 'RETURNED' && notBack) return 'Back at yard, ' + plural(notBack, 'piece') + ' not counted back';
@@ -926,7 +934,7 @@ export const tripMethods = {
       "json_extract(data,'$.status') IN ('OPEN','BOOKED','LOADED','COLLECTED')",
     )
       .filter((/** @type {any} */ o) => sites.has(o.site))
-      .map((/** @type {any} */ o) => this.orderView(o));
+      .map((/** @type {any} */ o) => ({ ...this.orderView(o), suggestedTruck: this.tripSuggestTruck(o) })); // a suggestion only (dispatch.js)
     // the earliest time a step can be dated now (the Office's "Earlier" starts no further back)
     // booked for a later day and not gone yet: a truck's page shows its next trips too
     const upcoming = cached(
@@ -1210,12 +1218,20 @@ export const tripMethods = {
       );
     requireRule(tp?.truck, 'This trip has no truck. Book one on Today.');
     if (step === 'LOADED' || step === 'COLLECTED') {
+      // nothing leaves without a named driver (ADR 0010): the office picks one on Today first
+      requireRule(
+        tp.driver,
+        'No driver is named on this truck booking. Pick one on Today: nothing leaves without a driver.',
+      );
       let site = null;
       try {
         site = this.repo.get(trip.site, 'site');
       } catch {}
       requireRule(site?.status === 'ACTIVE', (site?.name ?? 'That site') + ' was removed. Cancel this trip.');
     }
+    // Back at yard with "count later" (ADR 0010): nothing is counted now; the yard counts with returnCount, and the clock flags it
+    const countLater = step === 'RETURNED' && input.countLater === true;
+    if (countLater) input = { ...input, lines: [] };
     const when = this.tripWhen(trip, step, input, now, tp),
       receivedBy = step === 'DELIVERED' ? optText(input.receivedBy, 'Received by', 80) : null;
     if (step === 'DELIVERED') requireRule(receivedBy, 'Who received it? Type their name.');
@@ -1277,6 +1293,7 @@ export const tripMethods = {
       },
     };
     fresh.flag = null;
+    if (countLater) fresh.countPending = true;
     this.tripAfter(fresh, tp, step, done, when, now);
     this.repo.save(fresh);
     if (step === 'LOADED' || step === 'COLLECTED') this.tripDriverYes(tp, now);
@@ -1985,7 +2002,7 @@ export const tripMethods = {
     const bookedFor = new Map();
     for (const r of cached(
       this.db,
-      "SELECT t.id,t.kind,t.data,t.version FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND json_extract(t.data,'$.state') IN ('BOOKED','PACKED') AND json_extract(p.data,'$.day')=? AND json_extract(p.data,'$.status')<>'CANCELLED' ORDER BY json_extract(t.data,'$.time'),t.rowid",
+      "SELECT t.id,t.kind,t.data,t.version FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND json_extract(t.data,'$.state') IN ('BOOKED','PACKED') AND json_extract(p.data,'$.day')=? AND json_extract(p.data,'$.status') NOT IN ('CANCELLED','DRAFT') ORDER BY json_extract(t.data,'$.time'),t.rowid",
     ).all(this.repo.company, today)) {
       const t = this.repo.decode(r);
       if (visibleSite(t.site) && !bookedFor.has(t.truck)) bookedFor.set(t.truck, t);
@@ -2135,7 +2152,7 @@ export const tripMethods = {
       d = this.teamPerson(driver);
     const trips = cached(
       this.db,
-      "SELECT t.id,t.kind,t.data,t.version FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND json_extract(p.data,'$.driver')=? AND json_extract(p.data,'$.status')<>'CANCELLED' AND json_extract(t.data,'$.state')<>'CANCELLED' AND (json_extract(p.data,'$.day') IN (?,?) OR (json_extract(p.data,'$.day')<? AND json_extract(t.data,'$.state') IN ('BOOKED','PACKED','LOADED','DELIVERED_SHORT','COLLECTED'))) ORDER BY t.rowid",
+      "SELECT t.id,t.kind,t.data,t.version FROM objects t JOIN objects p ON p.company_id=t.company_id AND p.id=json_extract(t.data,'$.truckPlan') WHERE t.company_id=? AND t.kind='trip' AND json_extract(p.data,'$.driver')=? AND json_extract(p.data,'$.status') NOT IN ('CANCELLED','DRAFT') AND json_extract(t.data,'$.state')<>'CANCELLED' AND (json_extract(p.data,'$.day') IN (?,?) OR (json_extract(p.data,'$.day')<? AND json_extract(t.data,'$.state') IN ('BOOKED','PACKED','LOADED','DELIVERED_SHORT','COLLECTED'))) ORDER BY t.rowid",
     )
       .all(this.repo.company, driver, today, addDays(today, 1), today)
       .map((/** @type {any} */ r) => this.tripView(this.repo.decode(r), { crew: true }));

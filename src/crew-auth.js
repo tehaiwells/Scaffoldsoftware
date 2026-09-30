@@ -17,26 +17,53 @@ const fail = (/** @type {number} */ status, /** @type {string} */ message) => {
 };
 const TOKEN = /^[0-9a-f]{64}$/;
 /** @typedef {import('node:sqlite').DatabaseSync} Db */
-/** @typedef {{id:string,company_id:string,name:string,email:string,crew?:{driver:string,device:string,renewed?:boolean}}} User */
+/** @typedef {{id:string,company_id:string,name:string,email:string,crew?:{driver:string,person?:string,kind?:string,role?:string|null,device:string,renewed?:boolean}}} User */
 
+// A person on the team who can have a phone (ADR 0010: any person, not only a driver): a driver still on the team, or a worker still
+// enabled. kind 'driver' or 'worker'; a worker's role (YARDSMAN, SCAFFOLDER, LEADING_HAND) says what their phone offers.
 /** @param {Db} db @param {string} company @param {string} id */
-function activeDriver(db, company, id) {
+export function activePerson(db, company, id) {
   const row =
     typeof id === 'string'
-      ? cached(db, "SELECT data FROM objects WHERE company_id=? AND id=? AND kind='driver'").get(company, id)
+      ? cached(db, "SELECT kind,data FROM objects WHERE company_id=? AND id=? AND kind IN ('driver','resource')").get(
+          company,
+          id,
+        )
       : null;
   const d = row ? JSON.parse(row.data) : null;
-  return d && d.active ? { id, ...d } : null;
+  if (!d) return null;
+  if (row.kind === 'driver') return d.active ? { id, kind: 'driver', role: 'DRIVER', ...d } : null;
+  return d.type === 'WORKER' && d.enabled ? { id, kind: 'worker', ...d, role: d.role ?? null } : null;
 }
-// The office makes a sign-in link for one driver (operations.manage, a real yard only). Returns the token once; only its hash is kept.
+const activeDriver = activePerson;
+// The roles a person's phone sign-in gets: CREW (own trips and own asks) for everyone; YARD (packs and counts) for a yardsman too.
+/** @param {Db} db @param {string} company @param {string} userId @param {any} person */
+export function crewRoles(db, company, userId, person) {
+  const yard = person.kind === 'worker' && (person.role ?? 'YARDSMAN') === 'YARDSMAN';
+  cached(db, "INSERT OR IGNORE INTO user_roles VALUES(?,?,'CREW')").run(company, userId);
+  if (yard) cached(db, "INSERT OR IGNORE INTO user_roles VALUES(?,?,'YARD')").run(company, userId);
+  else cached(db, "DELETE FROM user_roles WHERE company_id=? AND user_id=? AND role='YARD'").run(company, userId);
+}
+// A worker's role changed (team.js teamUpdate): their phone sign-in, if they have one, follows.
+/** @param {Db} db @param {string} company @param {string} personId */
+export function crewRolesFollow(db, company, personId) {
+  const userId = cached(
+    db,
+    'SELECT user_id FROM crew_links WHERE company_id=? AND driver_id=? ORDER BY created_at LIMIT 1',
+  ).get(company, personId)?.user_id;
+  const person = activePerson(db, company, personId);
+  if (userId && person) crewRoles(db, company, userId, person);
+}
+// The office makes a sign-in link for one person on the team (operations.manage, a real yard only). Returns the token once; only its
+// hash is kept. crew_links.driver_id holds the person's id (a driver or a worker: the column keeps its 008 name).
 /** @param {import('./service.js').Service} service @param {User} user @param {any} input */
 export function crewLink(service, user, input) {
   const db = service.db;
   service.require(user, 'operations.manage');
   if (cached(db, 'SELECT mode FROM companies WHERE id=?').get(user.company_id)?.mode !== 'LIVE')
     fail(409, 'Phone links are for your real yard only.');
-  const driver = activeDriver(db, user.company_id, input?.driver);
-  if (!driver) fail(404, 'Choose a driver from your team.');
+  const driver = activePerson(db, user.company_id, input?.person ?? input?.driver);
+  if (!driver) fail(404, 'Choose someone from your team.');
   return atomic(db, () => {
     let userId = cached(
       db,
@@ -67,7 +94,7 @@ export function crewLink(service, user, input) {
         );
       }
     }
-    cached(db, "INSERT OR IGNORE INTO user_roles VALUES(?,?,'CREW')").run(user.company_id, userId);
+    crewRoles(db, user.company_id, userId, driver);
     const id = randomUUID(),
       token = randomBytes(32).toString('hex'),
       expires = Date.now() + CREW_LINK_MS;
@@ -81,6 +108,7 @@ export function crewLink(service, user, input) {
       token,
       expiresAt: new Date(expires).toISOString(),
       driver: { id: driver.id, name: driver.name, mobile: driver.mobile ?? null },
+      person: { id: driver.id, name: driver.name, kind: driver.kind, role: driver.role ?? null },
     };
   });
 }
@@ -129,7 +157,13 @@ export function crewClaim(service, input) {
       device: id,
       link: link.id,
     });
-    return { token: device, device: id, driver: { id: driver.id, name: driver.name }, company: link.company };
+    return {
+      token: device,
+      device: id,
+      driver: { id: driver.id, name: driver.name },
+      person: { id: driver.id, name: driver.name, kind: driver.kind, role: driver.role ?? null },
+      company: link.company,
+    };
   });
 }
 // Every phone of a driver (or of a crew sign-in) signed out, and their open links cancelled: when the driver leaves the team, when the
@@ -158,8 +192,8 @@ export function crewAuthenticate(db, token) {
     db,
     'SELECT d.id device,d.driver_id,d.company_id,d.last_seen_at,u.id,u.name,u.email FROM crew_devices d JOIN users u ON u.id=d.user_id JOIN memberships m ON m.company_id=d.company_id AND m.user_id=d.user_id AND m.removed_at IS NULL WHERE d.token_hash=? AND d.revoked_at IS NULL AND d.expires_at>?',
   ).get(hash(/** @type {string} */ (token)), Date.now());
-  if (!row || !activeDriver(db, row.company_id, row.driver_id))
-    fail(401, 'This phone is not signed in. Ask the office for a link.');
+  const person = row ? activePerson(db, row.company_id, row.driver_id) : null;
+  if (!row || !person) fail(401, 'This phone is not signed in. Ask the office for a link.');
   const renewed = Date.now() - Date.parse(row.last_seen_at) > CREW_RENEW_MS;
   if (renewed)
     cached(db, 'UPDATE crew_devices SET last_seen_at=?,expires_at=? WHERE id=?').run(
@@ -172,7 +206,15 @@ export function crewAuthenticate(db, token) {
     company_id: row.company_id,
     name: row.name,
     email: row.email,
-    crew: { driver: row.driver_id, device: row.device, renewed },
+    // crew.driver keeps its 008 name: the person this phone belongs to (a driver or a worker: crew.kind, crew.role)
+    crew: {
+      driver: row.driver_id,
+      person: row.driver_id,
+      kind: person.kind,
+      role: person.role ?? null,
+      device: row.device,
+      renewed,
+    },
   };
 }
 // "Sign out this phone", from the phone itself.
@@ -253,8 +295,8 @@ export function crewRevoke(service, user, input) {
   });
 }
 // The words that go with a link: how a phone reaches this server, and a text-message body for the driver.
-/** @param {{link:string,driverName:string,company:string,lan:boolean,hosted:boolean}} p */
-export function crewReach({ link, driverName, company, lan, hosted }) {
+/** @param {{link:string,driverName:string,company:string,lan:boolean,hosted:boolean,kind?:string}} p */
+export function crewReach({ link, driverName, company, lan, hosted, kind = 'driver' }) {
   const reachable = lan || hosted;
   return {
     reachable,
@@ -268,7 +310,9 @@ export function crewReach({ link, driverName, company, lan, hosted }) {
       driverName +
       ', this is ' +
       company +
-      '. Open this link on your phone to see your trips and tap Loaded & left and Delivered: ' +
+      (kind === 'driver'
+        ? '. Open this link on your phone to see your trips and tap Loaded & left and Delivered: '
+        : '. Open this link on your phone to see your day and answer with one tap: ') +
       link,
   };
 }

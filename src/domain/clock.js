@@ -113,6 +113,7 @@ export const clockMethods = {
       this.clockRemind(now);
       this.clockPaperwork(now, today);
       this.clockTrips(now); // trips that should have been confirmed by now are flagged "Not confirmed" (trips.js), never moved on
+      this.clockReturns(now); // returns not counted or not resolved by the end of their day are flagged RETURN_SHORT (returns.js)
     });
     return true;
   },
@@ -123,6 +124,8 @@ export const clockMethods = {
     if (it.type === 'TRUCK') this.clockTruck(it, now, today);
     else if (it.type === 'WORKERS') this.clockWorkers(it, now, today);
     else if (it.type === 'MATERIALS') this.clockMaterials(it, now, today);
+    else if (it.type === 'RESTACK')
+      this.clockRestack(it, now, today); // a dated yard task with a Done tap (dispatch.js, ADR 0010)
     else it.problem = 'This runs only in the Practice yard. Cancel it here.';
   },
   // The day has begun (6 am on its day, company time): an open item is under way. Only a label: nothing moves.
@@ -212,7 +215,8 @@ export const clockMethods = {
     const sendAt = this.clockAt(addDays(it.day, -1), SEND_BEFORE),
       siteName = this.planSiteName(it.site);
     if (this.clockOver(it, now)) {
-      const yes = it.people.filter((/** @type {any} */ p) => this.planMsg(p.message)?.status === 'YES');
+      const yes = it.people.filter((/** @type {any} */ p) => this.planMsg(p.message)?.status === 'YES'),
+        signed = it.people.filter((/** @type {any} */ p) => p.moved);
       // the computer was off from before the 3 pm ask until the day was over: the people were never asked, and it says so
       const never = it.people.filter((/** @type {any} */ p) => !p.message);
       for (const p of never) p.notAsked ??= iso(now);
@@ -221,11 +225,17 @@ export const clockMethods = {
         now,
         !it.people.length
           ? 'nobody was booked'
-          : never.length === it.people.length
-            ? 'not asked in time (nobody got the ask)'
-            : !yes.length
-              ? 'nobody said they were coming'
-              : 'nobody recorded who went to ' + siteName,
+          : signed.length
+            ? 'the day was not marked done (' +
+              plural(signed.length, 'person', 'people') +
+              ' signed on at ' +
+              siteName +
+              ')'
+            : never.length === it.people.length
+              ? 'not asked in time (nobody got the ask)'
+              : !yes.length
+                ? 'nobody said they were coming'
+                : 'nobody recorded who went to ' + siteName,
       );
       return;
     }

@@ -36,6 +36,8 @@ const withSettings = (p, setting, pack) => ({
     ? { figuresStatus: setting.status ?? 'COMPANY CONFIGURED', figuresSource: sourceOf(setting) }
     : {}),
   ...(setting?.minYard > 0 ? { minYard: setting.minYard } : {}),
+  // the owner's replacement value per piece, cents ex GST (ADR 0010, audit H3): what a lost piece is charged at; null until set
+  replacementValue: setting?.replacementValue ?? null,
 });
 export function computeEffectiveProducts(repo) {
   const first = (kind) => {

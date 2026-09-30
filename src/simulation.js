@@ -31,7 +31,10 @@ import { paperworkMethods } from './domain/paperwork.js';
 import { todayMethods } from './domain/today.js';
 import { clockMethods } from './domain/clock.js';
 import { companyMode, LIVE_OPS, IMPORT_OPS, COMING_NEXT } from './domain/mode.js';
-import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS } from './domain/trips.js';
+import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS, PACK_OPS } from './domain/trips.js';
+import { dispatchMethods, DISPATCH_OPS, PHONE_TAP_OPS, CREW_PHONE_OPS } from './domain/dispatch.js';
+import { returnsMethods, RETURN_OPS } from './domain/returns.js';
+import { needsMethods } from './domain/needs.js';
 // Commands that can leave a stillage with fewer pieces than an order holds there (a real yard's exact holds are fitted after them)
 const HOLDS_FIT = new Set(['approveCount', 'stockRemoval', 'removeStock', 'quickAdjust', 'retire', 'scrapContainer']);
 const operational = [
@@ -107,7 +110,21 @@ export class Simulation {
       typeof key === 'string' && key.length >= 8 && key.length <= 150,
       'A valid idempotency key is required.',
     );
-    if (operational.includes(action)) this.auth.require(this.user, 'operations.manage');
+    // A person's own phone (a crew device sign-in, ADR 0010): only the phone ops, each scoped inside to their own trips, asks and yard.
+    if (this.user.crew) {
+      if (!CREW_PHONE_OPS.has(action)) throw new AppError(403, 'Your role does not allow this action.');
+      this.auth.require(
+        this.user,
+        TRIP_CONFIRM_OPS.includes(action)
+          ? 'trips.confirm'
+          : PACK_OPS.includes(action)
+            ? 'packs.confirm'
+            : 'asks.answer',
+      );
+    } else if (PACK_OPS.includes(action)) this.auth.require(this.user, 'packs.confirm');
+    else if (PHONE_TAP_OPS.includes(action) && !PLAN_OPS.includes(action))
+      this.auth.require(this.user, 'operations.manage');
+    else if (operational.includes(action)) this.auth.require(this.user, 'operations.manage');
     else if (
       ['opening', 'purchase', 'stockIntake', 'stockRemoval', 'removeStock', 'purgeDemo', 'approveCount'].includes(
         action,
@@ -139,6 +156,10 @@ export class Simulation {
     else if (ORDER_OPS.includes(action)) this.auth.require(this.user, 'requests.create');
     else if (TRIP_OFFICE_OPS.includes(action)) this.auth.require(this.user, 'operations.manage');
     else if (TRIP_CONFIRM_OPS.includes(action)) this.auth.require(this.user, 'trips.confirm');
+    // Part 3 (ADR 0010): dispatch and returns are the office's; the owner approves losses and sets values (checked in returns.js)
+    else if (DISPATCH_OPS.includes(action) || RETURN_OPS.includes(action) || action === 'needsYouDismiss')
+      this.auth.require(this.user, 'operations.manage');
+    else if (action === 'productValue') this.auth.require(this.user, 'company.manage');
     else throw new AppError(404, 'Unknown command.');
     // The hard wall (ADR 0001): a real yard takes only the commands that record what people did (mode.js LIVE_OPS).
     if (this.live() && !LIVE_OPS.has(action)) throw new AppError(409, COMING_NEXT);
@@ -428,7 +449,10 @@ export class Simulation {
     this.scheduleSnapshot(result, cal, allTrucks, products);
     this.planSnapshot(result); // result.plan: the Today planner's revision and today's counts
     // a real yard's board: trucks by their last confirmed step, the replay queue, pieces per site (ADR 0009, trips.js liveBoard)
-    if (this.live()) result.liveBoard = this.liveBoard({ visibleSite: (id) => operations || siteIds.has(id) });
+    if (this.live()) {
+      result.liveBoard = this.liveBoard({ visibleSite: (id) => operations || siteIds.has(id) });
+      result.needsYou = this.needsYou(); // the board's one chip (ADR 0010, needs.js): at most 5 items, one action each
+    }
     result.alerts = this.alertsView(result, { allContainers, allBalances, operations, cal });
     this.rtAlerts(result);
     // What is stacked on each stillage of this page (the whole pile above it, nearest first) with any live movement, so the page can offer
@@ -683,6 +707,9 @@ Object.assign(
   todayMethods,
   clockMethods,
   tripMethods,
+  dispatchMethods,
+  returnsMethods,
+  needsMethods,
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 installGame(Simulation.prototype); // the game board: one-tap commands, the truck autopilot after every tick, result.game

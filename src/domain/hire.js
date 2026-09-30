@@ -46,10 +46,23 @@ const MAX_DAYS = 400,
   BATCH = 5000,
   MAX_CENTS = 10000000;
 const ADD = new Set(['OPENING_BALANCE', 'PURCHASE']),
-  REMOVE = new Set(['STOCK_REMOVED', 'DEMO_PURGED']),
+  // a real yard's pieces that did not come back and were lost, written off or scrapped (ADR 0010): gone, no minimum-hire top-up
+  REMOVE = new Set(['STOCK_REMOVED', 'DEMO_PURGED', 'LOST', 'WRITTEN_OFF', 'SCRAPPED']),
   ADJUST = 'STOCKTAKE_ADJUSTMENT',
-  // a real yard's confirmed trip steps (ADR 0009) move pieces between places exactly as the simulation's lifts do
-  MOVE = new Set(['PICKUP', 'PLACEMENT', 'REPACK_PICKUP', 'LOADED', 'DELIVERED', 'COLLECTED', 'RETURNED']);
+  // a real yard's confirmed trip steps (ADR 0009) move pieces between places exactly as the simulation's lifts do; a return resolved
+  // "still on site" goes truck -> site from the container it was collected in, so its lots reopen (ADR 0010); damaged goes to quarantine
+  MOVE = new Set([
+    'PICKUP',
+    'PLACEMENT',
+    'REPACK_PICKUP',
+    'LOADED',
+    'DELIVERED',
+    'COLLECTED',
+    'RETURNED',
+    'STILL_ON_SITE',
+    'DAMAGED',
+    'REPAIRED',
+  ]);
 const EVENTS = [...ADD, ...REMOVE, ADJUST, ...MOVE];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 // Closures that charge a minimum hire: collected (no reason recorded) or still on the truck that loaded them. 'counted', 'removed' and 'transfer' do not.

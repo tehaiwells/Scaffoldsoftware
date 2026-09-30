@@ -255,10 +255,15 @@ export const siteFinishMethods = {
       return { archived: true, site: brief(site), message: site.name + ' removed' };
     }
     // a real yard: removing a site that still has scaffolding recorded there would need the simulated crew to bring it all back
+    // (ADR 0010: the site-finish question settles what is still on record: bring it back, or charge, write off or keep looking)
     if (this.live())
       throw new AppError(
         409,
-        'There is still scaffolding recorded at ' + site.name + '. Bringing it back comes next in your real yard.',
+        'There is still scaffolding recorded at ' +
+          site.name +
+          ' (' +
+          this.siteAccount(site.id).words +
+          '). Bring it back, or finish the site: charge, write off or keep looking.',
       );
     // scaffold still there or a truck going out: the board asks first (only the last load driving home: nothing to ask)
     if (why !== 'home') requireRule(input.bringBack === true, sfAsk(site, why));

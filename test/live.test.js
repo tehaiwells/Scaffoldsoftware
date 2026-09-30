@@ -122,7 +122,6 @@ test('a real yard starts with its yard only; its sites get no invented crane, cr
     'seed',
     'teamStart',
     'teamNames',
-    'planRestack',
     'planReplies',
     'pause',
     'resources',

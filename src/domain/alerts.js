@@ -1,6 +1,7 @@
 import { cached } from '../database.js';
 import { catalogueRevision } from '../repository.js';
 import { dayLabel } from './schedule.js';
+import { availableOf } from './stock-math.js';
 // Alerts and minimum stock levels. A product's minimum ('keep at least N in the yard') is stored with the company's product settings (override, minYard);
 // effectiveProducts carries it as p.minYard. Everything here is derived: alertsView builds the snapshot's alerts from what the snapshot already computed (no writes),
 // alCheck keeps the set of materials below their minimum and adds one notification when a material first drops below it (never again until it recovers).
@@ -24,10 +25,7 @@ export function alFreeInYards(stock, yardIds) {
   const free = new Map();
   for (const id of yardIds)
     for (const r of stock?.[id]?.rows ?? [])
-      free.set(
-        r.product,
-        (free.get(r.product) ?? 0) + (r.free ?? Math.max(0, r.quantity - (r.reserved ?? 0) - (r.unserviceable ?? 0))),
-      );
+      free.set(r.product, (free.get(r.product) ?? 0) + (r.free ?? availableOf(r)));
   return free;
 }
 // Live products with a minimum above what the yard holds free: id -> {min, free, short}.
@@ -100,7 +98,7 @@ export const alertMethods = {
     }
     for (const [k, v] of held) {
       const p = k.slice(k.indexOf('|') + 1);
-      free.set(p, (free.get(p) ?? 0) + Math.max(0, v.q - v.r - v.u));
+      free.set(p, (free.get(p) ?? 0) + availableOf({ quantity: v.q, reserved: v.r, unserviceable: v.u }));
     }
     return free;
   },

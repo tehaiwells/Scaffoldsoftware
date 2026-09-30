@@ -331,8 +331,34 @@ export const gameMethods = {
         put(this.gamePlace(yard, p.id), Math.min(left, per));
       }
       done.push({ product: p.id, name: p.name, quantity: line.quantity, stillages: used });
+      // a real yard keeps what it paid and where it came from (ADR 0010, audit H3): unit cost (cents), supplier, reference, received on
+      if (this.live()) this.intakeRecord(p.id, line.quantity, input);
     }
     return { added: done, message: done.map((x) => x.quantity + ' × ' + x.name).join(', ') + ' added to the yard.' };
+  },
+  // One intake record per product added in a real yard (kind 'intake'): the cost side of stock, read by nothing yet but kept from day one.
+  intakeRecord(product, quantity, input) {
+    const has = (v) => v !== undefined && v !== null && v !== '';
+    if (!has(input?.unitCost) && !has(input?.supplier) && !has(input?.reference) && !has(input?.receivedOn))
+      return null;
+    const text = (v, name) => {
+      if (!has(v)) return null;
+      requireRule(typeof v === 'string' && v.trim().length <= 120, name + ' can be at most 120 characters.');
+      return v.trim();
+    };
+    const receivedOn = text(input.receivedOn, 'Received on');
+    if (receivedOn) requireRule(/^\d{4}-\d{2}-\d{2}$/.test(receivedOn), 'Received on must be a day (YYYY-MM-DD).');
+    return this.repo.add('intake', {
+      product,
+      quantity,
+      unitCost: has(input.unitCost) ? integer(input.unitCost, 'Unit cost (cents)', 0, 100000000) : null,
+      supplier: text(input.supplier, 'Supplier'),
+      reference: text(input.reference, 'Reference'),
+      receivedOn: receivedOn ?? this.planToday(),
+      by: this.user.id,
+      at: new Date(this.planNow()).toISOString(),
+      key: this.key ?? null,
+    });
   },
   // Where a new stillage goes: on a pile of the same product while it is under three high, else on the ground with a forklift aisle (1.2 m) all
   // round it so every stillage can still be driven out, else higher on its own piles, else wherever the yard's stockpile rule stacks it.

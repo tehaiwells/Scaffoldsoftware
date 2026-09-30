@@ -33,7 +33,8 @@ import { DEMO_NAME } from './team.js';
 import { lineList } from './game.js';
 /** @typedef {import('../repository.js').StoredObject} StoredObject */
 /** @typedef {'TRUCK'|'MATERIALS'|'WORKERS'|'RESTACK'} PlanType */
-/** PLANNED and ACTIVE are open; DONE, CANCELLED and CALLED_OFF are closed; MISSED waits for a new day or Cancel. @typedef {'PLANNED'|'ACTIVE'|'DONE'|'MISSED'|'CANCELLED'|'CALLED_OFF'} PlanStatus */
+/** PLANNED and ACTIVE are open; DONE, CANCELLED and CALLED_OFF are closed; MISSED waits for a new day or Cancel; DRAFT (a real yard only,
+ * ADR 0010) is planned and sent to nobody until planSend. @typedef {'DRAFT'|'PLANNED'|'ACTIVE'|'DONE'|'MISSED'|'CANCELLED'|'CALLED_OFF'} PlanStatus */
 /** One line of an item's history. @typedef {{at:string,text:string}} PlanLog */
 /** A calendar item (kind 'planItem'); stage says where an open item is in its day (ASKING, READY, WAITING, BOOKED, ...).
  * @typedef {StoredObject & {type:PlanType,day:string,time:string,site:string|null,yard?:string,status:PlanStatus,stage:string,note:string|null,problem:string|null,log:PlanLog[]}} PlanItem */
@@ -64,8 +65,9 @@ export const PAPERWORK_OPS = ['paperworkAdd', 'paperworkUpdate', 'paperworkRemov
 export const PLAN_OPEN = ['PLANNED', 'ACTIVE'],
   MSG_OPEN = ['WAITING_TO_SEND', 'SENT'];
 // MISSED: a list whose day ended before it went (its stillages are let go); it waits on the calendar, red, for a new day or Cancel.
+// DRAFT (a real yard only): can be moved, cancelled or sent; never asked, packed or held.
 /** @type {PlanStatus[]} */
-export const PLAN_FIXABLE = [...PLAN_OPEN, 'MISSED'];
+export const PLAN_FIXABLE = [...PLAN_OPEN, 'MISSED', 'DRAFT'];
 const HEAVY = 10000000,
   DAY = /^\d{4}-\d{2}-\d{2}$/,
   LOG_KEEP = 20,
@@ -93,6 +95,13 @@ const note = (v) => {
   if (!s) return null;
   requireRule(s.length <= 200, 'A note can be at most 200 characters.');
   return s;
+};
+// draft: true books it as a DRAFT (a real yard only: planned, sent to nobody, nothing held) until planSend (dispatch.js).
+/** @type {(sim:any,input:any)=>boolean} */
+const draftOf = (sim, input) => {
+  if (input?.draft !== true) return false;
+  requireRule(sim.live(), 'Drafts are for your real yard.');
+  return true;
 };
 // The engine's last full pass per database and company (throttle, once-a-day prune).
 /** @type {WeakMap<object,Map<string,any>>} */
@@ -496,7 +505,7 @@ export const planMethods = {
       if (!PLAN_OPEN.includes(it.status)) this.planCloseMsgs(it, now);
     });
   },
-  planDone(it, now, text) {
+  planFinish(it, now, text) {
     it.status = 'DONE';
     it.doneAt = iso(now);
     it.problem = null;
@@ -596,7 +605,7 @@ export const planMethods = {
           return;
         }
       }
-      this.planDone(it, now);
+      this.planFinish(it, now);
       return;
     }
     it.problem = problem;
@@ -778,7 +787,7 @@ export const planMethods = {
     if (trips.length && !out && !(it.left ?? []).length && !['WAITING', 'PACKING'].includes(it.stage)) {
       if (trips.some((x) => x.delivered)) {
         it.stage = 'DELIVERED';
-        this.planDone(it, now);
+        this.planFinish(it, now);
         this.notify('Delivered', 'Delivered to ' + siteName + ': the list for ' + dayLabel(it.day) + '.', it.site);
         return;
       }
@@ -797,7 +806,7 @@ export const planMethods = {
         this.planRelease(it, now);
         it.stage = 'DELIVERED';
         it.leftOver = left;
-        this.planDone(
+        this.planFinish(
           it,
           now,
           'Part of the list stayed in the yard (' +
@@ -864,7 +873,7 @@ export const planMethods = {
       if (pick.problem) {
         problem = pick.problem;
         it.why = pick.why ?? null;
-      } else this.planSend(it, pick.truck, now);
+      } else this.planLoadOut(it, pick.truck, now);
       if (it.problem && !problem) problem = it.problem;
     }
     if (it.stage !== 'WAITING' && it.status === 'PLANNED') it.status = 'ACTIVE'; // its day's work has started (packing)
@@ -1060,7 +1069,7 @@ export const planMethods = {
   },
   // The held stillages still in the yard onto the truck, tops of piles first, each in its own savepoint: what does not fit (or cannot be lifted
   // yet) stays held for the next trip. The board's autopilot then takes the trip (truck.game with plan: <item>).
-  planSend(it, truck, now) {
+  planLoadOut(it, truck, now) {
     const yard = this.planYard(),
       site = this.repo.get(it.site, 'site');
     return savepoint(this.db, 'plan_send', () => {
@@ -1166,7 +1175,7 @@ export const planMethods = {
         return;
       }
       if (all) {
-        this.planDone(it, now);
+        this.planFinish(it, now);
       } else it.problem = 'Waiting for everyone to finish before they go home.';
       return;
     }
@@ -1334,7 +1343,7 @@ export const planMethods = {
       ' topped up into fuller stillages, ' +
       plural(stacked, 'empty', 'empties') +
       ' stacked.';
-    this.planDone(it, now, text);
+    this.planFinish(it, now, text);
     this.notify('Re-stack done', text, null);
   },
   // The yard's re-stack switches while one is WORKING (jobs.js deriveJobs restack mode), or null.
@@ -1510,18 +1519,19 @@ export const planMethods = {
       requireRule(input.hire && ['BIG', 'SMALL'].includes(input.hire.size), 'Choose a big or a small hire truck.');
       hire = { size: input.hire.size, truck: null, arrivedAt: null, goneAt: null };
     }
-    const driver = has(input.driver) ? this.planDriver(input.driver, day, null) : null;
+    const driver = has(input.driver) ? this.planDriver(input.driver, day, null) : null,
+      draft = draftOf(this, input);
     this.planWhen('TRUCK', day, time, now);
     const it = this.repo.add('planItem', {
       type: 'TRUCK',
       day,
       time,
       site: null,
-      status: 'PLANNED',
-      stage: driver ? 'ASKING' : 'READY',
+      status: draft ? 'DRAFT' : 'PLANNED',
+      stage: draft ? 'DRAFT' : driver ? 'ASKING' : 'READY',
       note: note(input.note),
       problem: null,
-      log: [{ at: iso(now), text: 'Booked by ' + this.user.name + '.' }],
+      log: [{ at: iso(now), text: (draft ? 'Drafted by ' : 'Booked by ') + this.user.name + '.' }],
       createdAt: iso(now),
       createdBy: this.user.id,
       updatedAt: iso(now),
@@ -1540,6 +1550,11 @@ export const planMethods = {
       t &&
       [...this.repo.all('loadList'), ...this.repo.all('request'), ...this.repo.all('collection')].some(
         (o) => (o.truck ?? o.plannedTruck) === t.id && o.neededOn === day && this.schedulable(o),
+      );
+    if (draft)
+      return this.planReply(
+        it,
+        (t ? t.name : 'A hire truck') + ' drafted for ' + dayLabel(day) + '. Nobody is asked until you send it.',
       );
     return this.planReply(
       it,
@@ -1601,8 +1616,9 @@ export const planMethods = {
     try {
       tp = this.repo.get(id, 'planItem');
     } catch {}
+    // a draft truck booking may carry a draft list (a real yard); a list that is sent needs the truck sent first (dispatch.js planSend)
     requireRule(
-      tp && tp.type === 'TRUCK' && tp.day === day && PLAN_OPEN.includes(tp.status),
+      tp && tp.type === 'TRUCK' && tp.day === day && (PLAN_OPEN.includes(tp.status) || tp.status === 'DRAFT'),
       'Choose a truck booked that day.',
     );
     return tp;
@@ -1632,7 +1648,8 @@ export const planMethods = {
       );
       packer = w;
     }
-    const packDay = pack === 'SAME_DAY' ? day : addDays(day, -1) < cal.today ? cal.today : addDays(day, -1);
+    const packDay = pack === 'SAME_DAY' ? day : addDays(day, -1) < cal.today ? cal.today : addDays(day, -1),
+      draft = draftOf(this, input);
     this.planWhen('MATERIALS', day, time, now);
     // a soft check against what is free in the yard now, made before anything is packed (never an error: planning is for the future)
     const free = this.planFree(yard),
@@ -1644,11 +1661,11 @@ export const planMethods = {
       time,
       site: site.id,
       yard: yard.id,
-      status: 'PLANNED',
-      stage: 'WAITING',
+      status: draft ? 'DRAFT' : 'PLANNED',
+      stage: draft ? 'DRAFT' : 'WAITING',
       note: note(input.note),
       problem: null,
-      log: [{ at: iso(now), text: 'Planned by ' + this.user.name + '.' }],
+      log: [{ at: iso(now), text: (draft ? 'Drafted by ' : 'Planned by ') + this.user.name + '.' }],
       createdAt: iso(now),
       createdBy: this.user.id,
       updatedAt: iso(now),
@@ -1673,8 +1690,14 @@ export const planMethods = {
       this.planEdit(it.id, (x) => {
         x.packer = who.id;
       });
-    // a real yard: the list is an order that holds exact pieces now, on the chosen truck's trip (trips.js); its day is done when delivered
+    // a real yard: the list is an order that holds exact pieces now, on the chosen truck's trip (trips.js); its day is done when delivered.
+    // A draft makes no order and holds nothing until it is sent (dispatch.js planSend).
     let held = '';
+    if (draft)
+      return this.planReply(
+        it,
+        'List for ' + site.name + ' on ' + dayLabel(day) + ' drafted. Nothing is held or asked until you send it.',
+      );
     if (this.live()) {
       const made = this.orderMake(
         'OUT',
@@ -1891,6 +1914,7 @@ export const planMethods = {
       'Pick up to ' + count + ' different people.',
     );
     this.planWhen('WORKERS', day, time);
+    const draft = draftOf(this, input);
     const people = [];
     for (const id of chosen)
       people.push(this.planPersonFree(id, day, null, { site: site.id, also: new Set(people.map((p) => p.id)) }));
@@ -1908,11 +1932,11 @@ export const planMethods = {
       day,
       time,
       site: site.id,
-      status: 'PLANNED',
-      stage: 'BOOKED',
+      status: draft ? 'DRAFT' : 'PLANNED',
+      stage: draft ? 'DRAFT' : 'BOOKED',
       note: note(input.note),
       problem: null,
-      log: [{ at: iso(now), text: 'Booked by ' + this.user.name + '.' }],
+      log: [{ at: iso(now), text: (draft ? 'Drafted by ' : 'Booked by ') + this.user.name + '.' }],
       createdAt: iso(now),
       createdBy: this.user.id,
       updatedAt: iso(now),
@@ -1927,6 +1951,16 @@ export const planMethods = {
     this.planStep(it.id);
     const fresh = this.repo.get(it.id, 'planItem'),
       sent = fresh.stage !== 'BOOKED';
+    if (draft)
+      return this.planReply(
+        it,
+        plural(count, 'worker') +
+          ' drafted for ' +
+          site.name +
+          ' on ' +
+          dayLabel(day) +
+          '. Nobody is asked until you send it.',
+      );
     return this.planReply(
       it,
       plural(count, 'worker') +
@@ -1954,14 +1988,15 @@ export const planMethods = {
     requireRule(consolidate || stackEmpties, 'Tick at least one thing to do.');
     requireRule(!this.planDayItems(day, 'RESTACK').length, 'A re-stack is already booked for ' + dayLabel(day) + '.');
     this.planWhen('RESTACK', day, time, now);
+    const draft = draftOf(this, input);
     const it = this.repo.add('planItem', {
       type: 'RESTACK',
       day,
       time,
       site: null,
       yard: yard.id,
-      status: 'PLANNED',
-      stage: 'WAITING',
+      status: draft ? 'DRAFT' : 'PLANNED',
+      stage: draft ? 'DRAFT' : 'WAITING',
       note: note(input.note),
       problem: null,
       log: [{ at: iso(now), text: 'Booked by ' + this.user.name + '.' }],
@@ -1980,7 +2015,10 @@ export const planMethods = {
       moved: { pieces: 0, jobs: 0, stacked: 0 },
     });
     this.planStep(it.id);
-    return this.planReply(it, 'Re-stack booked for ' + dayLabel(day) + ' at ' + timeWords(time) + '.');
+    return this.planReply(
+      it,
+      'Re-stack ' + (draft ? 'drafted' : 'booked') + ' for ' + dayLabel(day) + ' at ' + timeWords(time) + '.',
+    );
   },
   planItemFor(id) {
     requireRule(typeof id === 'string' && id, 'Choose something on the calendar.');
@@ -2023,22 +2061,30 @@ export const planMethods = {
       };
     // a real yard's day that ended "Not confirmed" (clock.js) can move to a new day: it starts again, asks and all
     if (this.live()) this.planLiveMoveCheck(it); // a real yard: refused once its order or a trip has left (in its own words)
-    const unconfirmed = it.stage === 'UNCONFIRMED';
+    const unconfirmed = it.stage === 'UNCONFIRMED',
+      draft = it.status === 'DRAFT';
     if (unconfirmed) requireRule(day !== it.day, 'That day is over. Pick a new day for it.');
     if (it.type === 'TRUCK')
       requireRule(
-        unconfirmed || it.status === 'MISSED' || (now < this.planAt(it.day, DAY_START) && it.status === 'PLANNED'),
+        unconfirmed ||
+          draft ||
+          it.status === 'MISSED' ||
+          (now < this.planAt(it.day, DAY_START) && it.status === 'PLANNED'),
         'The truck day has started. Cancel it instead.',
       );
     if (day !== it.day || time !== it.time) this.planWhen(it.type, day, time, now);
     if (it.type === 'MATERIALS')
       requireRule(
-        ['WAITING', 'PACKING', 'PACKED', 'MISSED', 'UNCONFIRMED'].includes(it.stage),
+        ['WAITING', 'PACKING', 'PACKED', 'MISSED', 'UNCONFIRMED', 'DRAFT'].includes(it.stage),
         'The truck is already loading this list. Bring it back from the yard board instead.',
       );
     if (it.type === 'WORKERS')
       requireRule(!it.people.some((p) => p.moved), 'People are already on site. Cancel it instead.');
-    if (it.type === 'RESTACK') requireRule(it.stage === 'WAITING', 'The crew has started. Cancel it instead.');
+    if (it.type === 'RESTACK')
+      requireRule(
+        ['WAITING', 'DRAFT', 'TODO', 'UNCONFIRMED'].includes(it.stage),
+        'The crew has started. Cancel it instead.',
+      );
     const moved = day !== it.day;
     if (it.type === 'TRUCK' && moved) {
       if (it.truck)
@@ -2091,9 +2137,14 @@ export const planMethods = {
           this.planCallOff(x.message, 'Moved to ' + dayLabel(day), now);
           x.message = null;
         }
-        x.stage = x.driver ? 'ASKING' : 'READY';
+        x.stage = draft ? 'DRAFT' : x.driver ? 'ASKING' : 'READY';
       }
-      if (x.type === 'MATERIALS') {
+      if (x.type === 'MATERIALS' && draft) {
+        x.packDay = x.pack === 'SAME_DAY' ? day : addDays(day, -1) < cal.today ? cal.today : addDays(day, -1);
+        if (lines) x.lines = lines;
+        if (tp !== undefined) x.truckPlan = tp?.id ?? null;
+        else if (moved && x.truckPlan) x.truckPlan = null;
+      } else if (x.type === 'MATERIALS') {
         this.planRelease(x, now);
         this.planCallOff(x.packMessage, 'Moved to ' + dayLabel(day), now);
         Object.assign(x, {
@@ -2118,8 +2169,9 @@ export const planMethods = {
           this.planCallOff(p.message, 'Moved to ' + dayLabel(day), now);
           p.message = null;
         }
-        x.stage = 'BOOKED';
+        x.stage = draft ? 'DRAFT' : 'BOOKED';
       }
+      if (x.type === 'RESTACK' && !draft && this.live()) x.stage = 'WAITING';
       this.planLog(x, 'Moved from ' + was + ' to ' + dayLabel(day) + ' ' + timeWords(time) + '.', now);
     });
     if (it.type === 'TRUCK' && moved)
@@ -2356,15 +2408,20 @@ export const planMethods = {
     } catch {}
     requireRule(m, 'That message is no longer there.');
     requireRule(typeof input.yes === 'boolean', "Choose I'll be there or Can't make it.");
-    const via = input.via === undefined || input.via === null ? 'OFFICE' : input.via;
-    requireRule(['PHONE_VIEW', 'OFFICE'].includes(via), 'Choose how the answer came in.');
+    // a person's own phone (a crew device sign-in, ADR 0010): only their own asks, and the answer is theirs (PERSON, via PHONE)
+    const own = !!this.user.crew;
+    if (own && m.person !== (this.user.crew.person ?? this.user.crew.driver))
+      throw new AppError(404, 'Record not found in your company.');
+    const via = own ? 'PHONE' : input.via === undefined || input.via === null ? 'OFFICE' : input.via;
+    requireRule(['PHONE_VIEW', 'OFFICE', 'PHONE'].includes(via), 'Choose how the answer came in.');
     requireRule(m.status !== 'CALLED_OFF', 'This was called off.');
     requireRule(m.status !== 'WAITING_TO_SEND', "This hasn't been sent yet.");
     requireRule(m.needsAnswer, "This one doesn't need an answer. Tap Got it.");
     const it = this.planItemFor(m.item),
       now = this.planNow();
     requireRule(PLAN_OPEN.includes(it.status) && !m.closedAt, 'This is already finished.');
-    if (via === 'PHONE_VIEW') requireRule(now < this.planAt(m.day, m.time), 'Too late to answer, call the office.');
+    if (via === 'PHONE_VIEW' || via === 'PHONE')
+      requireRule(now < this.planAt(m.day, m.time), 'Too late to answer, call the office.');
     if (it.type === 'WORKERS') {
       const row = it.people.find((p) => p.message === m.id);
       if (row?.moved && !row.homeAt)
@@ -2379,9 +2436,9 @@ export const planMethods = {
     const reason = input.yes ? null : note(input.reason);
     // Provenance (ADR 0003): the answer is the person's, recorded by whoever is signed in, for them. The crew phone view is the office's own
     // screen until people sign in on their phones (later), so a real yard stores it as recorded by the office, never as the person's phone.
-    if (this.repo.provenance)
+    if (this.repo.provenance && !own)
       this.repo.provenance = { ...this.repo.provenance, kind: 'ON_BEHALF', onBehalfOf: m.person };
-    const stored = this.live() ? 'OFFICE' : via;
+    const stored = own ? 'PHONE' : this.live() ? 'OFFICE' : via;
     this.planAnswerMsg(m, { yes: input.yes, reason, by: this.user.id, via: stored }, now);
     this.planStep(it.id);
     return {
@@ -2403,6 +2460,8 @@ export const planMethods = {
       m = this.repo.get(input.id, 'message');
     } catch {}
     requireRule(m, 'That message is no longer there.');
+    if (this.user.crew && m.person !== (this.user.crew.person ?? this.user.crew.driver))
+      throw new AppError(404, 'Record not found in your company.');
     requireRule(m.subject === 'PACK', 'Answer this one with the two buttons.');
     requireRule(m.status !== 'CALLED_OFF', 'This was called off.');
     const now = this.planNow();

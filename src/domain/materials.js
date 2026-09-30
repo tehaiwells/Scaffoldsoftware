@@ -3,6 +3,7 @@ import { label } from './catalogue.js';
 import { active } from './inventory.js';
 import { cached } from '../database.js';
 import { parseDay, parseSlot } from './schedule.js';
+import { availableOf, unserviceableOf } from './stock-math.js';
 const LIST_EVENTS = { additions: ['OPENING_BALANCE', 'PURCHASE'], removals: ['STOCK_REMOVED'] };
 export const materialsMethods = {
   purgeDemo() {
@@ -392,7 +393,7 @@ export const materialsMethods = {
         unserviceable: 0,
         containers: new Set(),
       };
-      const bad = l.condition === 'SERVICEABLE' ? 0 : l.quantity;
+      const bad = unserviceableOf(l);
       row.quantity += l.quantity;
       row.reserved += l.reserved;
       row.unserviceable += bad;
@@ -420,7 +421,7 @@ export const materialsMethods = {
               quantity: r.quantity,
               reserved: r.reserved,
               unserviceable: r.unserviceable,
-              free: Math.max(0, r.quantity - r.reserved - r.unserviceable),
+              free: availableOf(r),
               containers: r.containers.size,
             };
           })
@@ -447,6 +448,7 @@ export const materialsMethods = {
         product: l.product_id,
         quantity: 0,
         reserved: 0,
+        unserviceable: 0,
         yard: 0,
         site: 0,
         truck: 0,
@@ -454,6 +456,7 @@ export const materialsMethods = {
       };
       row.quantity += l.quantity;
       row.reserved += l.reserved;
+      row.unserviceable += unserviceableOf(l);
       row[kind] = (row[kind] ?? 0) + l.quantity;
       row.containers++;
       rows.set(l.product_id, row);
@@ -469,7 +472,7 @@ export const materialsMethods = {
           system: p?.system ?? null,
           category: p?.category ?? null,
           unitWeight: p?.unitWeight ?? null,
-          available: r.quantity - r.reserved,
+          available: availableOf(r), // one definition (stock-math.js): the same number as every "free" on every page
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));

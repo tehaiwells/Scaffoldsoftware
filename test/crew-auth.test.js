@@ -145,10 +145,11 @@ test('a link for a driver, claimed once by a phone; the phone opens its own trip
     ).status,
     404,
   );
+  // the office's commands are not a phone's (404); packing is a yard hand's, never a driver's (403: ADR 0010)
   for (const a of ['orderCreate', 'tripBook', 'packConfirmed', 'gameAddStock'])
     assert.equal(
       (await req('POST', '/api/crew/commands/' + a, { body: {}, cookie: phone, key: 'tap-00000000' + a })).status,
-      404,
+      a === 'packConfirmed' ? 403 : 404,
       a,
     );
   const rows = f.db.prepare("SELECT actor_kind FROM trip_confirmation WHERE step='LOADED'").all();

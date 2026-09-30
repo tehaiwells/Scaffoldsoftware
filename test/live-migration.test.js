@@ -12,8 +12,14 @@ import { openDatabase, atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
 
-// Migration 008 (trips, a driver's phone) comes after it and is undone first (its trigger reads companies.mode).
+// Migrations 008 (trips, a driver's phone) and 009 (charge lines, the YARD role) come after it and are undone first (their triggers read
+// companies.mode).
+const UNDO_009 =
+  'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
+  "DELETE FROM role_permissions WHERE permission IN ('packs.confirm','asks.answer');DELETE FROM permissions WHERE code IN ('packs.confirm','asks.answer');DELETE FROM roles WHERE code='YARD';DELETE FROM schema_migrations WHERE version=9;" +
+  '';
 const UNDO_008 =
+  UNDO_009 +
   'DROP TRIGGER trip_confirmation_no_update;DROP TRIGGER trip_confirmation_no_delete;DROP TRIGGER trip_confirmation_live_only;DROP TABLE crew_devices;DROP TABLE crew_links;DROP TABLE trip_confirmation;' +
   'DROP INDEX objects_container_place;DROP INDEX objects_container_support;DROP INDEX objects_trip_state;DROP INDEX objects_trip_plan;DROP INDEX objects_trip_truck;DROP INDEX objects_order_status;DROP INDEX objects_hold_order;' +
   'DELETE FROM schema_migrations WHERE version=8';
@@ -55,7 +61,7 @@ function dump(path, { without = {} } = {}) {
   }
 }
 // Tables migration 008 adds (empty on a database from before it).
-const ADDED = ['trip_confirmation', 'crew_links', 'crew_devices'];
+const ADDED = ['trip_confirmation', 'crew_links', 'crew_devices', 'charge_lines'];
 const NEW = {
   companies: ['mode', 'time_zone'],
   ledger: ['occurred_at', 'actor_kind', 'on_behalf_of', 'origin'],
@@ -87,7 +93,7 @@ function checkMigrated(path, backups = null) {
     db.close();
   }
   if (backups) {
-    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v8-.*.sqlite$/.test(n));
+    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v9-.*.sqlite$/.test(n));
     assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
     assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }
@@ -102,9 +108,10 @@ function checkMigrated(path, backups = null) {
   const drop = (name, keep) => {
     for (const d of [before, after]) if (d[name]) d[name] = JSON.stringify(JSON.parse(d[name]).filter(keep));
   };
-  drop('roles', (r) => r.code !== 'CREW');
-  drop('permissions', (r) => r.code !== 'trips.confirm');
-  drop('role_permissions', (r) => r.permission !== 'trips.confirm');
+  // (and 009's YARD role with packs.confirm and asks.answer)
+  drop('roles', (r) => r.code !== 'CREW' && r.code !== 'YARD');
+  drop('permissions', (r) => !['trips.confirm', 'packs.confirm', 'asks.answer'].includes(r.code));
+  drop('role_permissions', (r) => !['trips.confirm', 'packs.confirm', 'asks.answer'].includes(r.permission));
   assert.deepEqual(Object.keys(after), Object.keys(before), 'no table added or dropped');
   for (const name of Object.keys(before)) assert.equal(after[name], before[name], name + ' unchanged');
 }

@@ -5,7 +5,7 @@ import { requireRule } from './geometry.js';
 import { AppError } from '../service.js';
 import { bumpRevision } from '../repository.js';
 import { idleWorker } from './fleet.js';
-import { crewEndAll } from '../crew-auth.js';
+import { crewEndAll, crewRolesFollow } from '../crew-auth.js';
 export const WORKER_ROLES = ['YARDSMAN', 'SCAFFOLDER', 'LEADING_HAND'],
   TEAM_ROLES = [...WORKER_ROLES, 'DRIVER'];
 export const ROLE_WORDS = {
@@ -212,6 +212,7 @@ export const teamMethods = {
     if (worker && p.name !== was) p.demoName = false;
     this.repo.save(p);
     if (worker) bumpRevision(this.db, this.repo.company, 'plan');
+    if (worker && this.live()) crewRolesFollow(this.db, this.repo.company, p.id); // their phone's YARD role follows their role
     return {
       person: this.teamRow(p),
       changed: true,
@@ -241,6 +242,7 @@ export const teamMethods = {
     requireRule(idleWorker(p), p.name + ' is busy on a job, try again in a moment.');
     this.retireResource(p);
     bumpRevision(this.db, this.repo.company, 'plan');
+    crewEndAll(this.db, this.repo.company, { driver: p.id }, this.user.id); // a worker's phone is signed out at once too (ADR 0010)
     return { ok: true, message: p.name + ' has left the team.' };
   },
   // Two demo drivers, once, so the owner can book a truck with a driver straight away (the Today page asks for this when there are none).

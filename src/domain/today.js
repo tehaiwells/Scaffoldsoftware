@@ -208,6 +208,7 @@ export const todayMethods = {
       cancelledAt: it.cancelledAt ?? null,
       cancelReason: it.cancelReason ?? null,
     };
+    const draft = it.status === 'DRAFT';
     let red = !!it.problem || late || missed,
       needsAnswer = false,
       warn = false,
@@ -367,6 +368,7 @@ export const todayMethods = {
         wasOnSite: !!p.moved,
         arrivedAt: p.arrivedAt ?? null,
         homeAt: p.homeAt ?? null,
+        signOn: p.signOn ?? null, // a real yard: who tapped On site, and whether it was their own tap or the office's (ADR 0010)
         sendAt: p.message ? null : sendAt,
       }));
       for (const r of rows) {
@@ -414,12 +416,15 @@ export const todayMethods = {
               : 'Starts at ' + timeWords(it.time);
     }
     if (missed) words = "Didn't go";
+    if (draft) words = 'Draft: sent to nobody yet';
+    if (it.status === 'DONE' && it.done)
+      words = 'Done' + (it.done.kind === 'ON_BEHALF' ? ' (recorded by ' + it.done.byName + ')' : '');
     const canCancel = ctx.ops && fix && !(it.type === 'MATERIALS' && ['LOADING', 'ON_THE_WAY'].includes(it.stage));
     const canMove =
       ctx.ops &&
       fix &&
       (it.type === 'TRUCK'
-        ? missed || (it.status === 'PLANNED' && now < this.planAt(it.day, '06:00'))
+        ? missed || draft || (it.status === 'PLANNED' && now < this.planAt(it.day, '06:00'))
         : it.type === 'MATERIALS'
           ? ['WAITING', 'PACKING', 'PACKED', 'MISSED'].includes(it.stage)
           : it.type === 'WORKERS'
@@ -429,11 +434,23 @@ export const todayMethods = {
       red = it.status === 'DONE' && it.type === 'MATERIALS' && ((it.short ?? []).length > 0 || (it.leftOver ?? 0) > 0);
     return Object.assign(v, {
       words,
-      flags: { needsAnswer: open && needsAnswer, red, late, done: it.status === 'DONE', warn: open && warn, missed },
+      flags: {
+        needsAnswer: open && needsAnswer,
+        red: red && !draft,
+        late,
+        done: it.status === 'DONE',
+        warn: open && warn,
+        missed,
+        draft,
+      },
       canMove,
       canCancel,
-      canEdit: ctx.ops && open && it.type === 'MATERIALS' && it.stage === 'WAITING',
+      canEdit: ctx.ops && (open || draft) && it.type === 'MATERIALS' && ['WAITING', 'DRAFT'].includes(it.stage),
       canAsk: ctx.ops && open && ['TRUCK', 'WORKERS'].includes(it.type),
+      // a real yard (ADR 0010): send a draft; sign a gang on and mark a day or a yard task done (the office, for the people)
+      canSend: ctx.ops && draft,
+      canSignOn: ctx.ops && open && it.type === 'WORKERS' && it.day === ctx.today && this.live(),
+      canDone: ctx.ops && open && ['WORKERS', 'RESTACK'].includes(it.type) && it.day <= ctx.today && this.live(),
     });
   },
   // Yard lists, single requests and collections as calendar runs (the views the snapshot builds).

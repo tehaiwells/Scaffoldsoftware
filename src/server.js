@@ -13,7 +13,7 @@ import { createBackups } from './backups.js';
 import { backupDirectory, backupName, resolveDatabasePath } from './paths.js';
 import { bdRoute, BD_LOGO_BODY } from './domain/brand.js';
 import { crewLink, crewClaim, crewAuthenticate, crewSignOut, crewDevices, crewRevoke, crewReach } from './crew-auth.js';
-import { TRIP_CONFIRM_OPS } from './domain/trips.js';
+import { CREW_PHONE_OPS } from './domain/dispatch.js';
 
 // Which Host names this server answers (audit D1, F2). A page on any other name (DNS rebinding) gets 421 before anything runs.
 // Always: the loopback names. While Wi-Fi sharing is on (the server listens beyond this PC): this PC's own addresses and name too.
@@ -239,10 +239,10 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
           phone = new Simulation(db, crewUser);
         // a phone in use keeps its sign-in: its 180 days start again (the browser's cookie too, not only the server's record)
         if (crewUser.crew?.renewed && path !== '/api/crew/signout') crewCookie(/** @type {string} */ (crewToken));
-        if (req.method === 'GET' && path === '/api/crew/me') send(200, phone.crewTrips());
+        if (req.method === 'GET' && path === '/api/crew/me') send(200, phone.crewMe());
         else if (req.method === 'POST' && path.startsWith('/api/crew/commands/')) {
           const action = path.slice('/api/crew/commands/'.length);
-          if (!TRIP_CONFIRM_OPS.includes(action)) throw new AppError(404, 'Unknown command.');
+          if (!CREW_PHONE_OPS.has(action)) throw new AppError(404, 'Unknown command.');
           try {
             send(200, phone.execute(action, body, req.headers['idempotency-key']));
           } catch (error) {
@@ -352,6 +352,18 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         send(200, simulation.tripsView({ day: new URL(req.url, 'http://localhost').searchParams.get('day') })); // a real yard's trips and orders (trips.js)
       else if (req.method === 'GET' && path === '/api/live-items')
         send(200, simulation.orderItems(new URL(req.url, 'http://localhost').searchParams.get('loc'))); // the LIVE picker: free pieces with the pack size as a hint
+      // Part 3 (ADR 0010): the Dispatch lanes view of Today, the driver's run sheet, "Needs you", a site's account and charge lines
+      else if (req.method === 'GET' && path === '/api/dispatch')
+        send(200, simulation.dispatchView({ day: new URL(req.url, 'http://localhost').searchParams.get('day') }));
+      else if (req.method === 'GET' && path === '/api/run-sheet') {
+        const q = new URL(req.url, 'http://localhost').searchParams;
+        send(200, simulation.runSheet({ day: q.get('day'), driver: q.get('driver') }));
+      } else if (req.method === 'GET' && path === '/api/needs-you') send(200, simulation.needsYou());
+      else if (req.method === 'GET' && path === '/api/site-account') {
+        const site = new URL(req.url, 'http://localhost').searchParams.get('site');
+        simulation.assertSite(simulation.repo.get(site, 'site').id);
+        send(200, { ...simulation.siteAccount(site), charges: simulation.chargeLines(site) });
+      }
       // A driver's phone link (the office; a real yard): Copy link, Text it (sms:), and whether phones can reach this server at all.
       else if (req.method === 'POST' && path === '/api/crew-links') {
         const made = crewLink(service, user, body),
@@ -362,12 +374,13 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
               .replace(/:\d+$/, '')
               .toLowerCase(),
           ),
-          reach = crewReach({ link, driverName: made.driver.name, company, lan, hosted });
+          reach = crewReach({ link, driverName: made.driver.name, company, lan, hosted, kind: made.person.kind });
         send(201, {
           id: made.id,
           link,
           expiresAt: made.expiresAt,
           driver: made.driver,
+          person: made.person,
           reachable: reach.reachable,
           reach: reach.words,
           text: reach.text,

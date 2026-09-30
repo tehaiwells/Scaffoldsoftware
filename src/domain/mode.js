@@ -87,6 +87,20 @@ export const LIVE_OPS = new Set([
   'tripDelivered',
   'tripCollected',
   'tripReturned',
+  // Part 3 (ADR 0010): Today as dispatch (bookings wait for people; drafts; move a day; copy crews; sign-on and done taps), returns counted
+  // and resolved (count later, one outcome per missing piece, quarantine, the site-finish question), values, and "Needs you".
+  'planRestack',
+  'planSend',
+  'planDone',
+  'planMoveDay',
+  'planCopyCrews',
+  'crewSignOn',
+  'returnCount',
+  'returnResolve',
+  'quarantineResolve',
+  'siteFinish',
+  'productValue',
+  'needsYouDismiss',
 ]);
 // Commands whose stock rows are brought in from before the app (opening balances): provenance IMPORT, still with the person who entered them.
 export const IMPORT_OPS = new Set(['opening']);
