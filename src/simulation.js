@@ -36,6 +36,8 @@ import { dispatchMethods, DISPATCH_OPS, PHONE_TAP_OPS, CREW_PHONE_OPS } from './
 import { returnsMethods, RETURN_OPS } from './domain/returns.js';
 import { needsMethods } from './domain/needs.js';
 import { gearMethods, GEAR_OPS } from './domain/gear.js';
+import { ROSTER_OPS } from './domain/roster.js';
+import { TASK_OFFICE_OPS, TASK_TAP_OPS, installCrew } from './domain/tasks.js';
 // Commands that can leave a stillage with fewer pieces than an order holds there (a real yard's exact holds are fitted after them)
 const HOLDS_FIT = new Set(['approveCount', 'stockRemoval', 'removeStock', 'quickAdjust', 'retire', 'scrapContainer']);
 const operational = [
@@ -162,6 +164,10 @@ export class Simulation {
     else if (DISPATCH_OPS.includes(action) || RETURN_OPS.includes(action) || action === 'needsYouDismiss')
       this.auth.require(this.user, 'operations.manage');
     else if (action === 'productValue') this.auth.require(this.user, 'company.manage');
+    // Part 5 (roster and tasks, CREW): the office rosters and allocates; a supervisor may make a plain task at their own site (tasks.js);
+    // a step or a Done from a phone is the tapping worker's own (PHONE_TAP_OPS above), from the office it is recorded for them.
+    else if (ROSTER_OPS.includes(action) || TASK_OFFICE_OPS.includes(action))
+      this.auth.require(this.user, action === 'taskCreate' ? 'requests.create' : 'operations.manage');
     else throw new AppError(404, 'Unknown command.');
     // The hard wall (ADR 0001): a real yard takes only the commands that record what people did (mode.js LIVE_OPS).
     if (this.live() && !LIVE_OPS.has(action)) throw new AppError(409, COMING_NEXT);
@@ -716,6 +722,7 @@ Object.assign(
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 installGame(Simulation.prototype); // the game board: one-tap commands, the truck autopilot after every tick, result.game
+installCrew(Simulation.prototype); // the workers' roster and their tasks (roster.js, tasks.js), and their message kinds
 // The engine's two entry points do nothing for a real yard (ADR 0001): whoever calls them, nothing there moves, completes or answers by itself.
 for (const name of ['tick', 'tickJobs']) {
   const run = Simulation.prototype[name];

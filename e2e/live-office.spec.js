@@ -133,7 +133,18 @@ test('every page of the real yard Office: no simulation controls or invented cre
     ).toHaveCount(0);
     seen.push(tile);
   }
-  expect(seen).toEqual(expect.arrayContaining(['Today', 'Stock ledger', 'Client sites', 'Workers', 'Big trucks']));
+  expect(seen).toEqual(
+    expect.arrayContaining([
+      'Daily activities',
+      'Gear list',
+      'Workers',
+      'Task progress',
+      'Pre-start',
+      'Stock ledger',
+      'Client sites',
+      'Big trucks',
+    ]),
+  );
   // record keeping on the way: remove the mistyped site from Client sites, add a forklift on Equipment
   await page.goto('/');
   await openOffice();

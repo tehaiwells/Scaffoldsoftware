@@ -669,8 +669,7 @@ function onSubmit(e) {
       if (l.outcome === 'LOST' && valueOf(l.product) === null) {
         const c = lrCents(l.unitValue);
         if (c === null || Number.isNaN(c)) {
-          LR.err =
-            'Type the value of each lost piece in dollars, or set a replacement value in the Materials catalogue.';
+          LR.err = 'Type the value of each lost piece in dollars, or set a replacement value in the Gear list.';
           LR.host.redraw();
           return;
         }

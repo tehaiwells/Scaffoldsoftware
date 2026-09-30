@@ -66,8 +66,8 @@ function olderDatabase(dir) {
   const db = openDatabase(path, { backupDirectory: null });
   new Service(db).register(owner);
   db.exec(
-    // migration 010 (ADR 0011: the arrivals table) is undone first, then 009 and 008
-    'DROP TRIGGER trip_arrival_no_update;DROP TRIGGER trip_arrival_no_delete;DROP TRIGGER trip_arrival_live_only;DROP TABLE trip_arrival;DROP INDEX objects_plan_day;DELETE FROM schema_migrations WHERE version=10;' +
+    // migration 010 (ADR 0011: the arrivals table, the plan-day, roster and task indexes) is undone first, then 009 and 008
+    'DROP TRIGGER trip_arrival_no_update;DROP TRIGGER trip_arrival_no_delete;DROP TRIGGER trip_arrival_live_only;DROP TABLE trip_arrival;DROP INDEX objects_plan_day;DROP INDEX IF EXISTS objects_roster_person_day;DROP INDEX IF EXISTS objects_roster_day;DROP INDEX IF EXISTS objects_task_day;DROP INDEX IF EXISTS objects_task_list;DELETE FROM schema_migrations WHERE version=10;' +
       'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
       "DELETE FROM role_permissions WHERE permission IN ('packs.confirm','asks.answer');DELETE FROM permissions WHERE code IN ('packs.confirm','asks.answer');DELETE FROM roles WHERE code='YARD';DELETE FROM schema_migrations WHERE version=9;" +
       'DROP TRIGGER trip_confirmation_no_update;DROP TRIGGER trip_confirmation_no_delete;DROP TRIGGER trip_confirmation_live_only;DROP TABLE crew_devices;DROP TABLE crew_links;DROP TABLE trip_confirmation;' +

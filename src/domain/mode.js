@@ -105,6 +105,19 @@ export const LIVE_OPS = new Set([
   'gearListCreate',
   'gearListUpdate',
   'tripArrived',
+  // Rostering and tasking are record keeping; a step is a person's tap (their phone) or the office
+  // recording it for them. Roster and task asks are answered through messageAnswer (above).
+  'rosterPick',
+  'rosterClear',
+  'rosterPattern',
+  'rosterPatternEnd',
+  'taskCreate',
+  'taskUpdate',
+  'taskCancel',
+  'taskAssign',
+  'taskUnassign',
+  'taskStep',
+  'taskDone',
 ]);
 // Commands whose stock rows are brought in from before the app (opening balances): provenance IMPORT, still with the person who entered them.
 export const IMPORT_OPS = new Set(['opening']);

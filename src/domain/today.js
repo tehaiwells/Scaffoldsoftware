@@ -645,6 +645,8 @@ export const todayMethods = {
         return v;
       })
       .sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
+    // the workers' tasks on these days (tasks.js, part 5): chips on the calendar and the day's task list under its bookings
+    const tasks = typeof this.taskCalendar === 'function' ? this.taskCalendar(from, to, ctx) : [];
     const runsAll = this.planRuns(ctx),
       runs = runsAll.filter((x) => x.day >= from && x.day <= to),
       overdue = runsAll.filter((x) => x.open && x.day < ctx.today);
@@ -704,6 +706,7 @@ export const todayMethods = {
       rev: planRevision(this.db, this.repo.company),
       grid,
       items,
+      tasks,
       runs,
       overdue,
       delivered,
@@ -832,6 +835,9 @@ export const todayMethods = {
         active: !!w.enabled,
       },
       messages: this.personMessages('worker', w.id).filter((m) => ctx.ops || ctx.mine.has(m.site)),
+      // their own day (tasks in priority order) and roster, as their phone shows them (tasks.js, roster.js; part 5)
+      myDay: typeof this.taskMyDay === 'function' ? this.taskMyDay(w.id, today) : null,
+      roster: typeof this.rosterMine === 'function' ? this.rosterMine(w.id, today) : null,
       today:
         it && (ctx.ops || ctx.mine.has(it.site))
           ? {

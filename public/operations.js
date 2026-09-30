@@ -51,6 +51,9 @@ import {
 } from './game.js'; // the game board (the main screen) and the Office drawer
 import { sfFinishedHTML, sfOfficeActs, sfClick } from './game-finish.js'; // Client sites: Remove site, Removed sites, Open again
 import { isLive, LIVE_STRIP, LIVE_HIDDEN_TILES, LIVE_SITES_NEXT, LIVE_CREW_NEXT } from './mode.js'; // the real yard (LIVE) or the Practice yard
+import { rsSetup, rsAddHTML, rsRowHTML, rsGridHTML, rsState } from './roster.js'; // the Workers page's +1 worker form and roster calendar (part 5)
+import { tpSetup, tpView, tpWatch, tpOpenDay } from './tasks.js'; // the Task progress page (part 5)
+import { psSetup, psView, psSheetHTML } from './prestart.js'; // the Pre-start page and its print sheet (part 5)
 // The real yard: no simulation strip, Pause, demo answers, re-stack by the simulated crew or synthetic catalogue on its pages.
 const liveMode = () => isLive(account);
 const SIM_STRIP =
@@ -91,6 +94,35 @@ const loHost = {
     LOM?.__lr?.reset?.();
   },
 };
+// The roster, Task progress and Pre-start pages (public/roster.js, tasks.js, prestart.js; part 5): one host object, wired once.
+const crHost = {
+  get: (p) => api(p),
+  cmd: (a, d) => command(a, d),
+  notify: (t) => notify(t),
+  redraw: () => crRedraw(),
+  refresh: () => refresh(true),
+  view: () => view,
+  teamReload: () => tmLoad(true),
+  today: () => tdhToday(),
+  rev: () => state?.plan?.rev ?? null,
+  go: (v) => schGo(v),
+  goItem: (id, day) => loHost.goItem(id, day),
+  print: (m) => prOpen(m),
+};
+rsSetup(crHost);
+tpSetup(crHost);
+psSetup(crHost);
+function crRedraw() {
+  if (typeof document === 'undefined' || !onPage() || deferRender) return;
+  if (!['WORKERS', 'PROGRESS', 'PRESTART'].includes(view)) return;
+  if (
+    document.activeElement?.matches?.(
+      '.tm-team :is(input,select), [data-rs-add] :is(input,select), [data-tp-form] :is(input,select)',
+    )
+  )
+    return;
+  render();
+}
 // A trip by id (today's, or a later day's): open Today on its day and bring its card into view.
 function ltGoTrip(id) {
   api('trips')
@@ -283,19 +315,22 @@ const onRenderKey = (fn) => (patching ? renderKeys.length : renderKeys.push(onKe
 const isOps = () => !!account?.permissions.includes('operations.manage');
 // The first page after signing in: the game board for the yard office (operations), the Control room for everyone else.
 const startView = (permissions) => (permissions?.includes('operations.manage') ? 'HOME' : 'CONTROL');
+// The pages by id and the name the eyebrow shows (the Office drawer's tiles are in game.js OFFICE_TILES). The Schedule page went in
+// September 2026: Daily activities' calendar does that, and ?view=SCHEDULE opens it (render).
 const NAV = [
   ['HOME', 'Yard'],
   ['CONTROL', 'Control room'],
-  ['TODAY', 'Today'],
+  ['TODAY', 'Daily activities'],
   ['OVERVIEW', 'Overview'],
-  ['SCHEDULE', 'Schedule'],
   ['WORKERS', 'Workers'],
+  ['PROGRESS', 'Task progress'],
+  ['PRESTART', 'Pre-start'],
   ['EQUIPMENT', 'Equipment'],
   ['TRUCK12', 'Truck 12.5 tonne'],
   ['TRUCK2', 'Truck 2 tonne'],
   ['STOCK', 'Stock'],
   ['REPORTS', 'Reports'],
-  ['MATERIALS', 'Materials list'],
+  ['MATERIALS', 'Gear list'],
   ['SITES', 'Client sites'],
   ['HIRE', 'Hire'],
   ['YARD', 'Yard (layout plan)'],
@@ -1026,7 +1061,6 @@ const officeBar = () =>
       'Truck 12.5 tonne': 'Big trucks',
       'Truck 2 tonne': 'Small trucks',
       'Yard (layout plan)': 'Yard layout',
-      'Materials list': 'Materials catalogue',
       Stock: 'Stock ledger',
     }[officeName(view)] ?? officeName(view),
   ) +
@@ -1145,7 +1179,8 @@ function render() {
   mountSprites();
   gsMount();
   histSync();
-  if (liveMode() && LIVE_HIDDEN_TILES.includes(view)) view = 'TODAY'; // the real yard: the Schedule and the Control room are Today
+  if (view === 'SCHEDULE') view = 'TODAY'; // the Schedule page went: Daily activities' calendar is the schedule (both yards)
+  if (liveMode() && LIVE_HIDDEN_TILES.includes(view)) view = 'TODAY'; // the real yard: the Control room is Daily activities
   if (view === 'HOME' && isOps() && !shapeEditor) {
     renderGame();
     return;
@@ -1183,37 +1218,39 @@ function render() {
         ? tdView()
         : view === 'OVERVIEW'
           ? overviewView()
-          : view === 'SCHEDULE'
-            ? scheduleView()
-            : view === 'WORKERS'
-              ? workersView()
-              : view === 'EQUIPMENT'
-                ? equipmentView()
-                : view === 'TRUCK12'
-                  ? truckView((t) => t.payload >= 10000000)
-                  : view === 'TRUCK2'
-                    ? truckView((t) => t.payload < 10000000)
-                    : view === 'STOCK'
-                      ? stockView()
-                      : view === 'REPORTS'
-                        ? hcView()
-                        : view === 'MATERIALS'
-                          ? materialsView()
-                          : view === 'SITES'
-                            ? siteView() +
-                              (shapeEditor
-                                ? ''
-                                : liveMode()
-                                  ? '<p class="notice live-next">' + esc(LIVE_SITES_NEXT) + '</p>'
-                                  : requestView())
-                            : view === 'HIRE'
-                              ? hrView()
-                              : view === 'YARD'
-                                ? yardView()
-                                : view === 'CREW'
-                                  ? cwView()
-                                  : overviewView();
-  app.innerHTML = `<div class="workspace office-mode">${officeBar()}<section class="content${heroOn() ? ' is-home' : ''}">${heroOn() ? homeHero() : pageHeroShown ? '' : `<div class="row"><div><div class="eyebrow">SCAFFOLD / ${esc(NAV.find((n) => n[0] === view)?.[1] ?? view)}</div><h1>${{ CONTROL: 'Your yard. Run it from here.', OVERVIEW: 'Your yard at a glance.', SCHEDULE: 'Every load, on the day it is needed.', WORKERS: 'Your crew.', EQUIPMENT: 'Forklifts, cranes and trucks.', TRUCK12: '12.5 tonne trucks. Ready for the next load.', TRUCK2: '2 tonne trucks. Quick runs and returns.', STOCK: 'Every piece accounted for.', MATERIALS: 'Every component you can order.', SITES: 'From yard to site.', YARD: 'A place for everything.' }[view] ?? ''}</h1></div>${part('pause', '#pause', pauseButton)}</div>${modeStrip()}`}${ops && !state.yards.length ? '<p class="notice">Start here: draw your yard → configure resources → add starting stock → open your yard.</p>' : ''}<div id="view">${viewHTML}</div>${part('detailOut', '.selected-detail', detailOutside)}${view === 'TODAY' ? '' : (liveMode() ? '' : (activityHTML = part('activity', 'section.activity', activityPanel))) + part('notes', 'details:has(> #notifications-summary)', notificationsPanel)}</section>${officeHTML({ state, account, hire: hrOK(), view })}</div>`;
+          : view === 'PROGRESS'
+            ? tpView()
+            : view === 'PRESTART'
+              ? psView()
+              : view === 'WORKERS'
+                ? workersView()
+                : view === 'EQUIPMENT'
+                  ? equipmentView()
+                  : view === 'TRUCK12'
+                    ? truckView((t) => t.payload >= 10000000)
+                    : view === 'TRUCK2'
+                      ? truckView((t) => t.payload < 10000000)
+                      : view === 'STOCK'
+                        ? stockView()
+                        : view === 'REPORTS'
+                          ? hcView()
+                          : view === 'MATERIALS'
+                            ? materialsView()
+                            : view === 'SITES'
+                              ? siteView() +
+                                (shapeEditor
+                                  ? ''
+                                  : liveMode()
+                                    ? '<p class="notice live-next">' + esc(LIVE_SITES_NEXT) + '</p>'
+                                    : requestView())
+                              : view === 'HIRE'
+                                ? hrView()
+                                : view === 'YARD'
+                                  ? yardView()
+                                  : view === 'CREW'
+                                    ? cwView()
+                                    : overviewView();
+  app.innerHTML = `<div class="workspace office-mode">${officeBar()}<section class="content${heroOn() ? ' is-home' : ''}">${heroOn() ? homeHero() : pageHeroShown ? '' : `<div class="row"><div><div class="eyebrow">SCAFFOLD / ${esc(NAV.find((n) => n[0] === view)?.[1] ?? view)}</div><h1>${{ CONTROL: 'Your yard. Run it from here.', OVERVIEW: 'Your yard at a glance.', WORKERS: 'Your crew.', PROGRESS: 'Who has done what today.', PRESTART: 'Everyone’s day, on one sheet.', EQUIPMENT: 'Forklifts, cranes and trucks.', TRUCK12: '12.5 tonne trucks. Ready for the next load.', TRUCK2: '2 tonne trucks. Quick runs and returns.', STOCK: 'Every piece accounted for.', MATERIALS: 'Every component you can order.', SITES: 'From yard to site.', YARD: 'A place for everything.' }[view] ?? ''}</h1></div>${part('pause', '#pause', pauseButton)}</div>${modeStrip()}`}${ops && !state.yards.length ? '<p class="notice">Start here: draw your yard → configure resources → add starting stock → open your yard.</p>' : ''}<div id="view">${viewHTML}</div>${part('detailOut', '.selected-detail', detailOutside)}${view === 'TODAY' ? '' : (liveMode() ? '' : (activityHTML = part('activity', 'section.activity', activityPanel))) + part('notes', 'details:has(> #notifications-summary)', notificationsPanel)}</section>${officeHTML({ state, account, hire: hrOK(), view })}</div>`;
   alSync();
   if (parts) part('rkey', null, () => String(rKeyActive()));
   applyStyles(app);
@@ -1521,6 +1558,7 @@ function bindPage(patch, oldWorkerPositions) {
     bindWorkers();
     bindViews();
     if (view === 'WORKERS') bindWorkersPage();
+    tpWatch(view === 'PROGRESS'); // Task progress polls while it is open (public/tasks.js)
     if (view === 'REPORTS') hcBind();
     if (view === 'HIRE') hrBind();
 
@@ -2703,8 +2741,8 @@ function workersView() {
   return (
     '<div class="page-workers">' +
     wkDefs() +
+    tmTeam() + // Your team first (part 5: +1 worker and the roster live here)
     hero +
-    tmTeam() +
     crewPanel +
     (yard ? jobBoardPanel(yard, crew) + addJobPanel(yard, crew) : '') +
     (siteCrew.length
@@ -6274,7 +6312,7 @@ export function sgSteps(s, acct) {
     ),
     step(
       'materials',
-      'Materials catalogue',
+      'Gear list',
       real >= 1,
       live.length
         ? sgPlural(live.length, 'component') + (demoOnly ? ' · DEMO list only' : demo ? ' · ' + demo + ' demo' : '')
@@ -6354,7 +6392,7 @@ const SG_TICK =
   '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.6 6.3 5 8.6l4.4-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const sgBtn = (act, label, cls = '', extra = '') =>
   '<button type="button" class="' + (cls || 'sg-go') + '" data-sg="' + act + '"' + extra + '>' + label + '</button>';
-const SG_NAMES = { materials: 'Materials catalogue', site: 'Client site' };
+const SG_NAMES = { materials: 'Gear list', site: 'Client site' };
 const sgGapsLine = (x) =>
   '<p class="sg-gaps"><span><b>' +
   num(x.gaps) +
@@ -15661,7 +15699,9 @@ export const prSheetHTML = (m) =>
       ? prPickHTML(m)
       : m?.kind === 'docket'
         ? prDocketHTML(m)
-        : '';
+        : m?.kind === 'prestart'
+          ? psSheetHTML(m) // the Pre-start sheet (public/prestart.js, part 5)
+          : '';
 // ---- Buttons on the pages (one-line hooks in loadListCard, manifestPanel, schEdit and trkGarage) and the delegated click. ----
 const prButton = (kind, id, label, cls = '') =>
   '<button type="button" class="secondary pr-btn' +
@@ -21092,6 +21132,7 @@ export function tdViewFrom(search) {
   v = String(v ?? '')
     .trim()
     .toUpperCase();
+  if (v === 'SCHEDULE') v = 'TODAY'; // the Schedule page went (part 5): its links open Daily activities
   return v && NAV.some((n) => n[0] === v) ? v : null;
 }
 let tdLinked = false;
@@ -21295,6 +21336,7 @@ import {
   WEEKDAYS,
   WEEKDAY_LETTERS,
   chipOf,
+  chipOfTask,
   PLAN_TIMES,
   planTimeWords,
 } from './plan-cal.js';
@@ -21602,6 +21644,9 @@ function tdhEntries(p) {
       l.push(e);
     };
   for (const i of p?.items ?? []) if (i.status !== 'CANCELLED') add(i.day, { src: 'item', v: i, sort: i.time });
+  // a plain task is its own chip; a gear list's task rides on the list's chip (ADR 0011)
+  for (const t of p?.tasks ?? [])
+    if (t.kind !== 'LIST' && t.status !== 'CANCELLED') add(t.day, { src: 'task', v: t, sort: t.time ?? '12:00' });
   for (const r of p?.runs ?? []) add(r.day, { src: 'run', v: r, sort: TDH_SLOT[r.slot] ?? '12:00' });
   const seen = new Set();
   for (const d of p?.delivered ?? []) {
@@ -21625,10 +21670,18 @@ const tdhFlag = (e, today) =>
       ? e.v.open && today && e.v.day < today
         ? 'red'
         : null
-      : null;
-const tdhDone = (e) => e.src === 'done' || (e.src === 'item' && e.v.status === 'DONE') || (e.src === 'run' && e.v.done);
+      : e.src === 'task'
+        ? e.v.flag || (e.v.status === 'OPEN' && today && e.v.day < today)
+          ? 'amber'
+          : null
+        : null;
+const tdhDone = (e) =>
+  e.src === 'done' ||
+  (e.src === 'item' && e.v.status === 'DONE') ||
+  (e.src === 'run' && e.v.done) ||
+  (e.src === 'task' && e.v.status === 'DONE');
 function tdhChip(e) {
-  const c = chipOf(e.v);
+  const c = e.src === 'task' ? chipOfTask(e.v) : chipOf(e.v);
   return (
     '<span class="tdh-chip tone-' +
     c.tone +
@@ -21763,19 +21816,21 @@ function tdhDay(p, today, sel) {
     .filter((i) => i.day === sel && i.status !== 'CANCELLED')
     .sort((a, b) => need(a) - need(b) || a.time.localeCompare(b.time) || a.type.localeCompare(b.type));
   const body = items.map(tdhItem).join('') + tdhRunsFor(p, sel, today),
+    tasks = tdhTasksFor(p, sel),
     loaded = !!p?.grid?.includes(sel);
-  const empty = body
-    ? ''
-    : '<div class="tdh-empty">' +
-      trkPic(past ? 'spr-stillage' : 'spr-truck2', 'tdh-empty-img') +
-      '<p>' +
-      (p && !loaded && api
-        ? 'Loading this day…'
-        : past
-          ? 'Nothing happened on this day.'
-          : 'Nothing planned for this day yet.') +
-      (canAdd ? ' <span>Add something below.</span>' : '') +
-      '</p></div>';
+  const empty =
+    body || tasks
+      ? ''
+      : '<div class="tdh-empty">' +
+        trkPic(past ? 'spr-stillage' : 'spr-truck2', 'tdh-empty-img') +
+        '<p>' +
+        (p && !loaded && api
+          ? 'Loading this day…'
+          : past
+            ? 'Nothing happened on this day.'
+            : 'Nothing planned for this day yet.') +
+        (canAdd ? ' <span>Add something below.</span>' : '') +
+        '</p></div>';
   const form = tdForm && tdForm.kind !== 'PAPER' && tdForm.day === sel && canAdd ? tdhForm(p, sel) : '';
   return (
     '<section class="panel tdh-day" id="tdh-day" aria-labelledby="tdh-day-h"><div class="tdh-day-head"><h2 id="tdh-day-h">' +
@@ -21786,6 +21841,7 @@ function tdhDay(p, today, sel) {
     '<div class="tdh-items">' +
     (liveMode() && !past ? (lo()?.loWaitingHTML({ day: sel, ops: tdhCanPlan() }) ?? '') : '') +
     body +
+    tasks +
     empty +
     '</div>' +
     (canAdd
@@ -21797,6 +21853,62 @@ function tdhDay(p, today, sel) {
           : '') +
     form +
     '</section>'
+  );
+}
+// The day's tasks (ADR 0011): every task on the day in priority order, each worker with their ticks (Got the list · Packed · Loaded for a
+// gear list, Done for a plain job), and the way to Task progress. A gear list's task also sits on the list's card; here the whole day is
+// one line per task, so who does what is seen without leaving the calendar.
+function tdhTasksFor(p, sel) {
+  const tasks = (p?.tasks ?? []).filter((t) => t.day === sel && t.status !== 'CANCELLED');
+  if (!tasks.length) return '';
+  const pri = (t) => Math.min(3, ...t.workers.map((w) => w.priority ?? 3)),
+    box = (on, words) =>
+      '<span class="gl-tick' + (on ? ' on' : '') + '" title="' + esc(words) + '">' + (on ? '✓' : '') + '</span>',
+    done = tasks.filter((t) => t.status === 'DONE').length;
+  return (
+    '<section class="tdh-tasks" aria-label="Tasks"><div class="tdh-tasks-head"><b>Tasks</b><small>' +
+    done +
+    ' of ' +
+    tasks.length +
+    ' done</small>' +
+    (tdhCanPlan()
+      ? '<button type="button" class="tdh-link" data-tdh-tasks="' + esc(sel) + '">Task progress</button>'
+      : '') +
+    '</div><ul class="gl-task">' +
+    tasks
+      .map(
+        (t) =>
+          '<li class="tdh-task' +
+          (t.status === 'DONE' ? ' done' : '') +
+          '"><b>P' +
+          pri(t) +
+          ' ' +
+          esc(t.name) +
+          ' <small>' +
+          esc([t.kindWords, t.timeWords, t.siteName].filter(Boolean).join(' · ')) +
+          '</small></b>' +
+          (t.workers.length
+            ? t.workers
+                .map(
+                  (w) =>
+                    '<span class="tdh-task-w">' +
+                    esc(String(w.name ?? 'Worker').split(' ')[0]) +
+                    '<span class="gl-ticks">' +
+                    (t.kind === 'LIST'
+                      ? box(w.steps?.RECEIVED, 'Got the list') +
+                        box(w.steps?.PACKED, 'Packed and ready') +
+                        box(w.steps?.LOADED, 'Truck loaded')
+                      : box(w.steps?.DONE, 'Done')) +
+                    '</span>' +
+                    (w.answer === 'NO' ? '<span class="tdh-pill no">Can’t make it</span>' : '') +
+                    '</span>',
+                )
+                .join('')
+            : '<span class="tdh-task-w">nobody on it</span>') +
+          '</li>',
+      )
+      .join('') +
+    '</ul></section>'
   );
 }
 function tdhRunsFor(p, sel, today) {
@@ -23802,7 +23914,7 @@ function tdBindOnce() {
   tdBound = true;
   document.addEventListener('click', (e) => {
     const t = e.target?.closest?.(
-      '[data-gl-place],[data-gl-worker],[data-tdh-arrive],[data-gl-open],[data-gl-new],[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-send],[data-tdh-done],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]',
+      '[data-gl-place],[data-gl-worker],[data-tdh-arrive],[data-gl-open],[data-gl-new],[data-tdh-tasks],[data-tdh-day],[data-tdh-month],[data-tdh-add],[data-tdh-form-x],[data-tdh-pick],[data-tdh-step],[data-tdh-mini],[data-tdh-mini-x],[data-tdh-yes],[data-tdh-send],[data-tdh-done],[data-tdh-cancel],[data-tdh-log],[data-tdh-edit],[data-tdh-rest],[data-tdh-goto],[data-tdh-toggle],[data-tdh-paper-add],[data-tdh-paper-x],[data-tdh-team],[data-tdh-retry],[data-cw-driver],#tdh-replies,[data-cw-yes],[data-cw-no],[data-cw-no-x],[data-cw-reason],[data-cw-send],[data-cw-seen],[data-cw-change],[data-tm-remove]',
     );
     if (!t || !onPage() || t.disabled) return;
     const d = t.dataset;
@@ -23810,6 +23922,13 @@ function tdBindOnce() {
       e.preventDefault();
       e.stopPropagation();
       cwOpenDriver(d.cwDriver);
+      return;
+    }
+    if (d.tdhTasks !== undefined) {
+      // the day's tasks on Task progress (public/tasks.js), the same day picked
+      e.preventDefault();
+      tpOpenDay(d.tdhTasks);
+      schGo('PROGRESS');
       return;
     }
     if (t.id === 'tdh-replies') {
@@ -24222,7 +24341,7 @@ function tmLoad(force) {
   if (!force && tmData && rev === tmRev && Date.now() - tmAt < 30000) return;
   tmBusyLoad = true;
   tmRev = rev;
-  api('team')
+  api('team?roster=1')
     .then((d) => {
       tmData = d;
       tmErr = null;
@@ -24244,7 +24363,7 @@ function tmTeam() {
   const head =
     '<div class="tm-head"><span class="tm-badge">' +
     trkPic('spr-worker', 'tm-badge-img') +
-    '</span><div class="tm-head-text"><h2 id="tm-team-h">Your team</h2><p>Names, jobs and mobiles. Messages go to these people.</p></div>' +
+    '</span><div class="tm-head-text"><h2 id="tm-team-h">Your team</h2><p>Names, jobs, phones and their roster. Messages go to these people.</p></div>' +
     (d ? '<span class="badge">' + tdhPlural(d.people.length, 'person', 'people') + '</span>' : '') +
     '</div>';
   if (!d)
@@ -24320,11 +24439,15 @@ function tmTeam() {
       esc(x.id) +
       '"' +
       (x.away ? ' disabled title="Away at a site today"' : '') +
-      '>Remove</button></span></li>' +
+      '>Remove</button>' +
+      rsRowHTML(x) + // Roster (part 5): the next fortnight in a few words; opens the calendar under the row
+      '</span></li>' +
+      (RS_OPEN === x.id ? '<li class="tm-roster-row">' + rsGridHTML(x) + '</li>' : '') +
       // a real yard: the driver's own phone (a link to send, the phones signed in, Sign out this phone)
       (liveMode() && LOM ? '<li class="tm-phone-row">' + LOM.loPhoneHTML({ id: x.id, name: x.name }) + '</li>' : '')
     );
   };
+  const RS_OPEN = rsOpenId();
   if (liveMode()) lo();
   const reach = liveMode() && LOM ? LOM.LO_REACH : '';
   const add =
@@ -24349,14 +24472,27 @@ function tmTeam() {
   return (
     '<section class="panel tm-team" id="tm-team" aria-labelledby="tm-team-h">' +
     head +
+    // +1 worker (part 5): name, job (yard or onsite), where, phone, email; the roster calendar opens under the new row
+    '<div class="tm-plus">' +
+    rsAddHTML(d) +
+    '</div>' +
     reach +
     '<ul class="tm-list">' +
     d.people.map(row).join('') +
     '</ul>' +
+    '<details class="tm-more"><summary>More: add a leading hand or a driver</summary>' +
     add +
+    '</details>' +
     '</section>'
   );
 }
+const rsOpenId = () => {
+  try {
+    return rsState().open;
+  } catch {
+    return null;
+  }
+};
 async function tmChange(el) {
   const id = el.dataset.id,
     f = el.dataset.tmField;
@@ -24394,7 +24530,13 @@ async function tmAdd(form) {
 }
 async function tmRemove(id, btn) {
   const x = tmData?.people.find((p) => p.id === id);
-  if (!confirm('Remove ' + (x?.name ?? 'this person') + ' from your team? Anything booked for them is called off.'))
+  if (
+    !confirm(
+      'Remove ' +
+        (x?.name ?? 'this person') +
+        ' from your team? Their next 14 rostered days and their tasks from tomorrow are removed. Today stays. Anything booked for them is called off.',
+    )
+  )
     return;
   btn.disabled = true;
   try {
@@ -26637,6 +26779,7 @@ export function cwView() {
   return (
     '<div class="page-crew">' +
     (cwMsgsFirst ? msgs + hero : hero + msgs) +
+    part('cwMyDay', '#view .cw-myday', () => cwMyDayCard() || '<i class="cw-myday" hidden></i>', true) +
     part('cwCtl', '#view .cw-ctl', () => cwControls() || '<i class="cw-ctl" hidden></i>', true) +
     part('cwNow', '#view .cw-now', cwNowCard, true) +
     part('cwNext', '#view .cw-next', () => cwNextCard() || '<i class="cw-next" hidden></i>', true) +
@@ -27118,6 +27261,98 @@ function cwMsgCard(m) {
     '</article>'
   );
 }
+// "My day" on the office's phone view (part 5): the worker's roster today and tomorrow, their tasks in priority order (the first not done is
+// Now), each step a tick the office can tap for them (recorded ON_BEHALF). The worker's own phone (crew.html) has the same with big buttons.
+const CW_TASK_STEP = { RECEIVED: 'Got the list', PACKED: 'Packed and ready', LOADED: 'Truck loaded', DONE: 'Done' };
+function cwMyDayCard() {
+  const d = cwDayFor === cwWorker ? cwDay : null,
+    my = d?.myDay,
+    ros = d?.roster;
+  if (!d || (!my?.tasks?.length && !my?.tomorrow?.length && !ros?.today && !ros?.tomorrow)) return '';
+  const rosterLine = (r, when) =>
+    r
+      ? '<p class="cw-plain cw-roster st-' +
+        esc(String(r.status).toLowerCase()) +
+        '">' +
+        esc(when + ': ' + r.whereName + ' ' + r.timeWords + ' · ' + r.statusWords) +
+        '</p>'
+      : '';
+  const taskRow = (t, { now = false, quiet = false } = {}) => {
+    const me = t.mine,
+      steps =
+        t.kind === 'LIST'
+          ? [
+              ['RECEIVED', me.steps.RECEIVED],
+              ['PACKED', me.steps.PACKED],
+              ['LOADED', me.steps.LOADED],
+            ]
+          : [['DONE', me.steps.DONE]];
+    return (
+      '<li class="cw-task' +
+      (now ? ' is-now' : '') +
+      (me.done ? ' is-done' : '') +
+      '"><b>P' +
+      me.priority +
+      ' ' +
+      esc(t.name) +
+      '</b><small>' +
+      esc([t.timeWords, t.siteName, t.kind === 'LIST' ? 'pack + load' : ''].filter(Boolean).join(' · ')) +
+      '</small>' +
+      (t.lines?.length
+        ? '<small>' + t.lines.map((l) => l.quantity + ' × ' + esc(l.name)).join(', ') + '</small>'
+        : '') +
+      '<span class="cw-task-steps">' +
+      steps
+        .map(
+          ([k, m]) =>
+            '<span class="cw-task-step' +
+            (m ? ' on' : '') +
+            '">' +
+            (m ? cwGlyph('check') : '') +
+            esc(CW_TASK_STEP[k]) +
+            '</span>',
+        )
+        .join('') +
+      '</span>' +
+      (!quiet && me.canTap && me.next && isOps()
+        ? '<button type="button" class="cw-ans cw-yes" data-cw-task="' +
+          esc(t.id) +
+          '" data-step="' +
+          me.next +
+          '">' +
+          cwGlyph('check') +
+          '<b>' +
+          esc(CW_TASK_STEP[me.next]) +
+          ' (for them)</b></button>'
+        : '') +
+      '</li>'
+    );
+  };
+  const tasks = my?.tasks ?? [],
+    nowT = tasks.find((t) => t.now),
+    rest = tasks.filter((t) => !t.now);
+  return cwCard(
+    'cw-myday',
+    trkPic('spr-stillage'),
+    'My day',
+    tasks.length
+      ? tasks.filter((t) => t.mine.done).length + ' of ' + tasks.length + ' done'
+      : 'The roster and tomorrow’s tasks',
+    rosterLine(ros?.today, 'Today') +
+      rosterLine(ros?.tomorrow, 'Tomorrow') +
+      (nowT ? '<h3 class="cw-msg-old">Now</h3><ul class="cw-tasks">' + taskRow(nowT, { now: true }) + '</ul>' : '') +
+      (rest.length
+        ? '<h3 class="cw-msg-old">Next</h3><ul class="cw-tasks">' +
+          rest.map((t) => taskRow(t, { quiet: true })).join('') +
+          '</ul>'
+        : '') +
+      (my?.tomorrow?.length
+        ? '<h3 class="cw-msg-old">Tomorrow</h3><ul class="cw-tasks">' +
+          my.tomorrow.map((t) => taskRow(t, { quiet: true })).join('') +
+          '</ul>'
+        : ''),
+  );
+}
 function cwMsgsCard() {
   const list = cwMsgs(),
     badge = trkPic(cwDriver ? 'spr-truck12' : 'spr-worker');
@@ -27153,6 +27388,21 @@ function cwMsgsCard() {
 }
 function cwMsgClick(t) {
   const d = t.dataset;
+  if (d.cwTask !== undefined) {
+    // a step ticked for the worker on the office's phone view (ON_BEHALF); the card reads again on the next poll
+    t.disabled = true;
+    const p =
+      d.step === 'DONE'
+        ? command('taskDone', { id: d.cwTask, for: cwWorker })
+        : command('taskStep', { id: d.cwTask, step: d.step, for: cwWorker });
+    p.then((r) => notify(r.message))
+      .catch((e) => notify(e.message))
+      .finally(() => {
+        cwDaySig = null;
+        cwDayLoad(true);
+      });
+    return true;
+  }
   if (d.cwYes !== undefined) {
     cwAct(
       t,

@@ -87,6 +87,17 @@ export function chipOf(e) {
     return { kind: 'LOAD', ...CHIP_KINDS.LOAD, icon: 'spr-truck12', label: 'Going → ' + (e.siteName ?? 'site') }; // sent from the yard board today
   return { kind: 'DELIVERED', ...CHIP_KINDS.DELIVERED, label: 'Delivered ' + (e.siteName ?? '') };
 }
+// A worker's task on the calendar (ADR 0011): a plain job's chip, 'P1 Sweep the racks · Kev, Sam'. A gear list's task is not a chip of its
+// own: the list's chip is there, and the card under the calendar shows the workers' ticks.
+export function chipOfTask(t) {
+  const who = (t.workers ?? []).map((w) => String(w.name ?? '').split(' ')[0]).filter(Boolean),
+    p = Math.min(3, ...(t.workers ?? []).map((w) => w.priority ?? 3));
+  return {
+    kind: 'TASK',
+    ...CHIP_KINDS.WORKERS,
+    label: 'P' + p + ' ' + (t.name ?? 'Task') + (who.length ? ' · ' + who.join(', ') : ''),
+  };
+}
 // The planner's times of day (5:00 am to 5:00 pm every half hour, as src/domain/plantime.js) and their words: '07:00' -> '7:00 am'.
 export const PLAN_TIMES = [];
 for (let h = 5; h <= 17; h++)

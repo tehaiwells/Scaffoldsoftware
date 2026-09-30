@@ -14,10 +14,10 @@ import { Simulation } from '../src/simulation.js';
 
 // Migrations 008 (trips, a driver's phone) and 009 (charge lines, the YARD role) come after it and are undone first (their triggers read
 // companies.mode).
-// Migration 010 (ADR 0011: the trip_arrival table, the plan-day index) comes after those and is undone first.
+// Migration 010 (ADR 0011: the trip_arrival table, the plan-day, roster and task indexes) comes after those and is undone first.
 const UNDO_010 =
-  'DROP TRIGGER trip_arrival_no_update;DROP TRIGGER trip_arrival_no_delete;DROP TRIGGER trip_arrival_live_only;DROP TABLE trip_arrival;DROP INDEX objects_plan_day;DELETE FROM schema_migrations WHERE version=10;' +
-  '';
+  'DROP TRIGGER trip_arrival_no_update;DROP TRIGGER trip_arrival_no_delete;DROP TRIGGER trip_arrival_live_only;DROP TABLE trip_arrival;DROP INDEX objects_plan_day;' +
+  'DROP INDEX IF EXISTS objects_roster_person_day;DROP INDEX IF EXISTS objects_roster_day;DROP INDEX IF EXISTS objects_task_day;DROP INDEX IF EXISTS objects_task_list;DELETE FROM schema_migrations WHERE version=10;';
 const UNDO_009 =
   UNDO_010 +
   'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
@@ -98,7 +98,7 @@ function checkMigrated(path, backups = null) {
     db.close();
   }
   if (backups) {
-    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v10-.*.sqlite$/.test(n));
+    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v(9|10)-.*.sqlite$/.test(n));
     assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
     assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }

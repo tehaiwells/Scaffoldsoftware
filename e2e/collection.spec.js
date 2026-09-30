@@ -15,8 +15,9 @@ test('a collection brings the site stock back: booked on the site card, loaded b
   await block.getByRole('combobox', { name: 'Truck', exact: true }).selectOption({ label: 'T-01 (here now)' });
   await block.getByRole('button', { name: 'Book collection', exact: true }).click();
   await expect(status).toHaveText('BOOKED');
-  await office(page, 'Schedule').click();
-  await expect(page.locator('.sch-card.rt-card').first()).toBeVisible();
+  // the Schedule page went (September 2026): Daily activities' calendar shows the collection as a chip on its day
+  await office(page, 'Today').click();
+  await expect(page.locator('.tdh-chip.tone-back').first()).toBeVisible({ timeout: 30000 });
   await office(page, 'Client sites').click();
   await block.getByRole('button', { name: 'Load collection onto T-01', exact: true }).click();
   await expect(status).toHaveText('LOADING');

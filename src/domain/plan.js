@@ -2525,22 +2525,27 @@ export const planMethods = {
       const hook = MESSAGE_KINDS.get(messageKindOf(m));
       requireRule(hook, 'That message is no longer there.');
       if (hook.scope) requireRule(hook.scope(this, m, this.user), 'Record not found in your company.');
-      requireRule(m.status === 'SENT' && !m.closedAt, 'This is already answered.');
-      requireRule(hook.isOpen(this, m), 'This is already finished.');
-      if (via === 'PHONE_VIEW' || via === 'PHONE')
-        requireRule(now < hook.deadline(this, m), 'Too late to answer, call the office.');
+      // an answer may be changed while the day is still ahead (as a booking's ask); a day that has gone or a task that closed is finished
+      requireRule(
+        ['SENT', 'YES', 'NO'].includes(m.status) && !m.closedAt && hook.isOpen(this, m),
+        'This is already finished.',
+      );
+      if (via !== 'OFFICE') requireRule(now < hook.deadline(this, m), 'Too late to answer, call the office.');
       const why = input.yes ? null : note(input.reason);
       if (this.repo.provenance && !own)
         this.repo.provenance = { ...this.repo.provenance, kind: 'ON_BEHALF', onBehalfOf: m.person };
-      this.planAnswerMsg(m, { yes: input.yes, reason: why, by: this.user.id, via: own ? 'PHONE' : 'OFFICE' }, now);
+      const kept = own ? 'PHONE' : this.live() ? 'OFFICE' : via;
+      this.planAnswerMsg(m, { yes: input.yes, reason: why, by: this.user.id, via: kept }, now);
+      const saved = this.repo.get(m.id, 'message');
       return {
         ok: true,
         message: input.yes
           ? via === 'OFFICE'
-            ? 'Marked as yes for ' + m.personName + '.'
-            : 'Thanks. See you there.'
+            ? 'Marked as confirmed for ' + m.personName + '.'
+            : 'Thanks. See you then.'
           : 'Got it. The office will sort it.',
-        messageView: this.planMsgView(this.repo.get(m.id, 'message'), now),
+        messageView: this.planMsgView(saved, now),
+        ...(hook.reply ? hook.reply(this, saved) : {}), // the record it is about, as the kind shows it (the roster day, the task)
       };
     }
     const it = this.planItemFor(m.item);

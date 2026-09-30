@@ -15,7 +15,7 @@ import { mobileWords } from './team.js';
 /** Office commands of this file (operations.manage). @type {string[]} */
 export const DISPATCH_OPS = ['planSend', 'planMoveDay', 'planCopyCrews'];
 /** Taps a person may make from their own phone as well as the office (asks.answer; scoped inside each command). @type {string[]} */
-export const PHONE_TAP_OPS = ['messageAnswer', 'messageSeen', 'crewSignOn', 'planDone'];
+export const PHONE_TAP_OPS = ['messageAnswer', 'messageSeen', 'crewSignOn', 'planDone', 'taskStep', 'taskDone'];
 /** Everything /api/crew/commands/<action> accepts (server.js): the trip confirmations, the yard's packs and counts, and the taps. */
 export const CREW_PHONE_OPS = new Set([...TRIP_CONFIRM_OPS, ...PACK_OPS, ...PHONE_TAP_OPS]);
 /** A trip's one state dot on the lanes: derived from the records, never from a timer. */
@@ -726,6 +726,11 @@ export const dispatchMethods = {
             canDone: day === today,
           })),
       );
+    // the worker's own day: their tasks in priority order and their roster (tasks.js, roster.js; part 5)
+    const myDay =
+      phone.kind === 'worker' && typeof this.taskMyDay === 'function' ? this.taskMyDay(phone.id, today) : null;
+    const roster =
+      phone.kind === 'worker' && typeof this.rosterMine === 'function' ? this.rosterMine(phone.id, today) : null;
     return {
       ...base,
       person: { id: phone.id, name: phone.person.name, kind: phone.kind, role: phone.role },
@@ -735,12 +740,15 @@ export const dispatchMethods = {
         packs: yard,
         signOn: phone.role === 'LEADING_HAND',
         done: yard || phone.role === 'LEADING_HAND',
+        tasks: !!(myDay?.tasks.length || myDay?.tomorrow.length),
       },
       asks,
       packs,
       returns,
       tasks,
       gang,
+      myDay,
+      roster,
       dayEnd: DAY_END,
     };
   },

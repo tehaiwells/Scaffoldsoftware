@@ -545,6 +545,48 @@ input:focus-visible {
   opacity: 1;
   background: #fbfaf5;
 }
+/* ---- part 5: the worker's roster and tasks (My day) ---- */
+.cr-roster {
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fbfaf5;
+  border: 1px solid var(--cr-line);
+  font-size: 17px;
+}
+.cr-roster b {
+  margin-right: 6px;
+}
+.cr-roster.st-confirmed {
+  background: #d6efd9;
+  border-color: #b9dec0;
+}
+.cr-roster.st-denied {
+  background: var(--cr-amber-bg);
+  border-color: #e9cf9a;
+}
+.cr-task.is-now {
+  border: 2px solid var(--cr-go);
+}
+.cr-task.is-quiet {
+  opacity: 0.85;
+}
+.cr-task.is-quiet .cr-card-head b {
+  font-size: 18px;
+}
+.cr-task-steps .cr-todo {
+  color: var(--cr-soft);
+}
+.cr-box {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  border: 2px solid #b8c2b5;
+  border-radius: 5px;
+  vertical-align: -3px;
+  background: #fff;
+}
 @media print {
   .cr-foot,
   .cr-big,

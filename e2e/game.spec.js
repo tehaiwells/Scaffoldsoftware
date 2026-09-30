@@ -116,8 +116,8 @@ test('sign up, choose a yard size, load the parts, add stock, send it to a site,
     })
     .toBe(added);
   // the Office: a drawer of pages, each with a big way back to the game
-  await office(page, 'Schedule').click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Schedule', exact: true })).toBeVisible();
+  await office(page, 'Today').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to the yard', exact: true }).click();
   await expect(bar).toBeVisible();
   await office(page, 'Control room').click();

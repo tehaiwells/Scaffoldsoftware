@@ -29,7 +29,8 @@ test('a link picks the page to open: ?view=TODAY (any case) or any other page, n
   const { tdTest } = await load();
   assert.equal(tdTest.viewFrom('?view=TODAY'), 'TODAY');
   assert.equal(tdTest.viewFrom('?view=today'), 'TODAY');
-  assert.equal(tdTest.viewFrom('?view=SCHEDULE&x=1'), 'SCHEDULE');
+  assert.equal(tdTest.viewFrom('?view=SCHEDULE&x=1'), 'TODAY'); // the Schedule page went (part 5): its link opens Daily activities
+  assert.equal(tdTest.viewFrom('?view=PROGRESS'), 'PROGRESS');
   for (const v of ['', '?', '?view=', '?view=ADMIN', '?other=TODAY', null, undefined])
     assert.equal(tdTest.viewFrom(v), null, String(v));
 });

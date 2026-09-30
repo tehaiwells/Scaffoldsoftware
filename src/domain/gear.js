@@ -152,7 +152,7 @@ export const gearMethods = {
     // the workers on it: a task, when the tasks module is there (CREW's part; ADR 0011 §11.4)
     let task = null;
     if (Array.isArray(input.workers) && input.workers.length && typeof this.taskCreate === 'function')
-      task = this.taskCreate({ day, kind: 'LIST', list: it.id, workers: input.workers });
+      task = this.taskCreate({ day, kind: 'LIST', list: it.id, workers: input.workers })?.task ?? null;
     this.planStep(it.id);
     const fresh = this.repo.get(it.id, 'planItem'),
       tpv = tp ? this.repo.get(tp.id, 'planItem') : null,

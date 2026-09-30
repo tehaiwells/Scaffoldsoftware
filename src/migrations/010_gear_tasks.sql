@@ -27,5 +27,9 @@ WHEN (SELECT mode FROM companies WHERE id=NEW.company_id) IS NOT 'LIVE'
 BEGIN SELECT RAISE(ABORT,'Trips are confirmed in a real yard only.'); END;
 -- Gear lists on the calendar by day (the day panel, the week list and the day-before asks read one day at a time).
 CREATE INDEX IF NOT EXISTS objects_plan_day ON objects(company_id,json_extract(data,'$.day')) WHERE kind='planItem';
--- (CREW appends: the roster and task indexes of ADR 0011 §2.2 / §2.3)
+-- The roster and task indexes (ADR 0011 §2.2 / §2.3): roster.js and tasks.js read one person's or one day's rows.
+CREATE INDEX IF NOT EXISTS objects_roster_person_day ON objects(company_id, json_extract(data,'$.person'), json_extract(data,'$.day')) WHERE kind='rosterDay';
+CREATE INDEX IF NOT EXISTS objects_roster_day ON objects(company_id, json_extract(data,'$.day')) WHERE kind='rosterDay';
+CREATE INDEX IF NOT EXISTS objects_task_day ON objects(company_id, json_extract(data,'$.day')) WHERE kind='workTask';
+CREATE INDEX IF NOT EXISTS objects_task_list ON objects(company_id, json_extract(data,'$.list')) WHERE kind='workTask';
 INSERT INTO schema_migrations VALUES(10);

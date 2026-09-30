@@ -9,7 +9,8 @@ const OFFICE_NAME = {
   'Truck 12.5 tonne': 'Big trucks',
   'Truck 2 tonne': 'Small trucks',
   Stock: 'Stock ledger',
-  'Materials list': 'Materials catalogue',
+  'Materials list': 'Gear list',
+  Today: 'Daily activities',
   'Yard (layout plan)': 'Yard layout',
   Home: 'Control room',
 };

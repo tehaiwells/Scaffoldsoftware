@@ -41,7 +41,7 @@ test('the installed app opens on Today: a month calendar, the day under it on a 
     timeout: 45000,
   });
   await expect(page).toHaveURL(/\/\?view=TODAY$/); // kept while Today is open, so 'Add to Home screen' from here opens on Today
-  await expect(page.locator('.office-bar .ob-title')).toHaveText('Today');
+  await expect(page.locator('.office-bar .ob-title')).toHaveText('Daily activities');
   await expect(page.locator('.gm-tile[data-view="TODAY"]')).toHaveClass(/current/);
   await expect(page.locator('.tdh-cell')).toHaveCount(42);
   await expect(page.locator('.tdh-cell.today')).toHaveCount(1);

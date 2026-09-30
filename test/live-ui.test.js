@@ -70,8 +70,8 @@ test('the Office in a real yard: no Control room or Schedule; the Practice yard 
     ...__gm.office({ state: null, account: b.demoAccount, hire: true, view: 'HOME' }).matchAll(/data-view="(\w+)"/g),
   ].map((m) => m[1]);
   assert.ok(
-    demoTiles.includes('CONTROL') && demoTiles.includes('SCHEDULE'),
-    'the Practice yard: every place, as before',
+    demoTiles.includes('CONTROL') && !demoTiles.includes('SCHEDULE'),
+    'the Practice yard: every place, as before (the Schedule tile went in part 5: Daily activities is the calendar)',
   );
 });
 

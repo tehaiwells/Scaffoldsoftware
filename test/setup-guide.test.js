@@ -309,10 +309,7 @@ test('Home shows the card to operations roles only, at the top, and leaves it ou
   assert.ok(home.includes('>DEMO</span> Load demo materials'), 'the demo catalogue is labelled DEMO');
   assert.ok(home.includes('1<small>/9</small>'), 'progress ring');
   assert.ok(!/ style="/.test(home), 'no inline style attributes (CSP)');
-  assert.ok(
-    home.includes('Do these first: Client site, Materials catalogue.'),
-    'the yard list waits for a site and a catalogue',
-  );
+  assert.ok(home.includes('Do these first: Client site, Gear list.'), 'the yard list waits for a site and a catalogue');
   assert.ok(home.includes('>Add a 12.5 t truck<') && home.includes('>Add a 2 t truck<'));
   // Steps still to do are cards with the next one first; the finished yard is a small tick chip that keeps its Change button.
   const cards = [...home.matchAll(/<li class="sg-step[^"]*" data-sg-step="(\w+)"/g)].map((m) => m[1]);
