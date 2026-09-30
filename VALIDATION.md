@@ -41,14 +41,16 @@ The suite is not an exhaustive proof. In particular, the broad independent accep
 
 `npm.cmd run benchmark` generated 500 synthetic containers, 10,000 ledger records and five workers in an in-memory SQLite database. Twenty samples per operation; reported p95 is the highest sampled value in this small run.
 
+The script crashed from commit 06b45c7 (22 September) until 30 September: its fixture put every record at a made-up location, which the snapshot refuses. It now builds the yard and crew through the real commands, is covered by test/benchmark.test.js, and runs in CI as `npm run benchmark:smoke` with a response-time gate. Re-run on 30 September 2026:
+
 Machine: Windows 10.0.26200, Intel Core i7-13620H, Node v24.19.0.
 
 | Operation | Median | Sample p95 |
 |---|---:|---:|
-| Company snapshot, first 100-container page | 5.40 ms | 7.18 ms |
-| Indexed history page, 100 records | 0.16 ms | 0.31 ms |
+| Company snapshot, first 100-container page | 5.58 ms | 16.1 ms |
+| Indexed history page, 100 records | 0.13 ms | 0.28 ms |
 
-Snapshot JSON size: **48,920 bytes**. This measures backend processing, not network, disk endurance, browser render time or FPS. PostgreSQL, million-record operational loads and public deployment were not tested.
+Snapshot JSON size: **61,523 bytes** (the snapshot carries more than on 22 September, when it was 5.40 ms / 7.18 ms and 48,920 bytes). This measures backend processing, not network, disk endurance, browser render time or FPS. PostgreSQL, million-record operational loads and public deployment were not tested.
 
 ## Source handling
 

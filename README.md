@@ -6,7 +6,7 @@ A working local yard → forklift → truck → site crane → site → truck �
 
 Requires Node.js 24+. From PowerShell:
 
-    cd C:\Users\tehai\OneDrive\Documents\ChatGPT\scaffold\SCAFFOLD_YARD_V1
+    cd <the folder you cloned Scaffold Yard into>
     npm.cmd ci
     npm.cmd start
 
@@ -47,8 +47,12 @@ POST /api/commands/loadTruck takes {truck, containers:[ids]} and loads those sti
 
     npm.cmd test
     npm.cmd run check
+    npm.cmd run typecheck
     npm.cmd run benchmark
+    npm.cmd run benchmark:smoke
     npm.cmd run test:e2e -- --list
+
+`typecheck` runs TypeScript over the files marked `// @ts-check` (src/repository.js and the hire, logistics and plan rules; tsconfig.json lists them) using their JSDoc types; nothing is compiled. `benchmark` times the snapshot and the history page on a synthetic yard (`--containers=`, `--ledger=`; `--gate-ms=N` fails when the median snapshot is slower than N ms); `benchmark:smoke` runs a small one of each benchmark with a gate. Tests check behaviour: unit tests render the app's HTML from real snapshots, and e2e/behaviour.spec.js reads the real stylesheets back from the browser, so no test matches source code text.
 
 For independent Playwright browser testing:
 
@@ -61,7 +65,7 @@ To use the Edge that is already installed instead of downloading Chromium, and a
 
 The browser tests start their own server with a throwaway database and backup folder in the system temp folder (never data/ or your live database) and use fresh demo emails.
 
-GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml): npm ci, npm run check and npm test on Node 24, then the browser tests with Playwright's bundled Chromium on Linux. The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
+GitHub runs the same checks automatically on every push and pull request to main (.github/workflows/ci.yml), on Linux and on Windows: npm ci, npm run check, npm run typecheck, npm test and the benchmark smoke check on Node 24, then the browser tests with Playwright's bundled Chromium. Failed tests are never retried: a test that only passes the second time is a bug to fix. The results show as a tick or cross next to each commit on GitHub. See VALIDATION.md for tests actually executed; listing a test is not a completed run.
 
 ## Configuration and maintenance
 
@@ -95,6 +99,20 @@ Scripts that write (seed:demo, import-catalogue) take the same lock and keep usi
 While the server runs it makes a consistent copy of the whole database once a day (the first hourly check after midnight) and, 30 seconds after start-up, whenever the newest daily copy is more than 24 hours old. Copies go to data/backups in the project folder (BACKUP_DIR overrides it), named scaffold-YYYY-MM-DD.sqlite. A server run on another database with DATABASE_PATH names its copies scaffold-<file name>-<8-character code>-YYYY-MM-DD.sqlite instead, so a test database never takes the live database's daily slot or rotates its files, even in the same folder. On Windows that folder is inside the synced project folder on purpose: one file a day gives an off-site copy without constant churn. Each copy is made through its own read-only connection with SQLite's backup API, never inside the movement engine's transaction, checked, and saved as a single self-contained file. The 14 newest daily copies are kept plus one per week for 8 weeks; only files named exactly scaffold-YYYY-MM-DD.sqlite (and the manual copies below) are ever removed. Copies dated in the future (from a wrong clock) are left alone and never push real ones out. Unfinished copies (*.partial) from a server that stopped mid-backup are removed at the next start. The server prints "Backup saved: …" or "Backup FAILED (…)".
 
 Owners see a **Backups** panel on the Account page: the live database path, when the last backup ran, the backup folder, how many are kept, and **Back up now** (at most once a minute). Those manual copies are named scaffold-<date>T<time>-manual.sqlite; the 10 newest are kept and older ones are removed automatically.
+
+**Before an update changes the database.** When a new version needs to change the database's layout (a start-up migration), the server first saves a checked copy of the database as it was, named scaffold-before-update-v<old>-to-v<new>-<date and time>.sqlite, in the backup folder, and only then changes it. If that copy cannot be saved, nothing is changed and the server does not start ("Could not save a copy of the database before updating it ..."). These copies are never removed automatically.
+
+**An encrypted copy somewhere else.** On the Account page, Backups, "Keep an encrypted copy somewhere else": choose a folder (a USB drive such as E:\, or another synced folder) and a passphrase. From then on every backup is also saved there, encrypted (AES-256-GCM), as <backup name>.sqlite.enc; the same 14 daily / 8 weekly / 10 manual copies are kept. The passphrase is never stored: a key that only the passphrase unlocks is kept next to the live database (offsite-backup.json) and inside every encrypted copy, so the passphrase alone opens a copy even if this PC is lost. **If you forget the passphrase, nobody can open the encrypted copies.** If the folder is missing (the USB drive is unplugged), the normal backup still happens, the card says the copy was not saved, and the next backup tries again. To use an encrypted copy, unlock it into a normal backup file first:
+
+    npm.cmd run decrypt-backup -- "E:\scaffold-2026-09-30.sqlite.enc" "unlocked.sqlite"
+
+**Restore test (drill).** A backup is only worth something if it restores. "Test the newest backup" on the Account page, or
+
+    npm.cmd run restore-drill
+    npm.cmd run restore-drill -- --encrypted
+    npm.cmd run restore-drill -- --file=<a backup or encrypted copy>
+
+restores the newest backup (or the newest encrypted copy, which asks for its passphrase) into a temporary folder, runs SQLite's full integrity check, compares its row counts with the live database, prints the table, and adds a line to restore-drill.log in the backup folder. Nothing live is changed. The Account page shows when the last test ran and whether it passed.
 
 A one-off copy to a file name of your choice still works, and never overwrites an existing file:
 
