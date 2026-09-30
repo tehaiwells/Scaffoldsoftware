@@ -37,9 +37,11 @@ test('the installed app opens on Today: a month calendar, the day under it on a 
   await firstYard(page);
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
   await page.goto('/?view=TODAY');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   await expect(page).toHaveURL(/\/\?view=TODAY$/); // kept while Today is open, so 'Add to Home screen' from here opens on Today
-  await expect(page.locator('.office-bar .ob-title')).toHaveText('Today');
+  await expect(page.locator('.office-bar .ob-title')).toHaveText('Daily activities');
   await expect(page.locator('.gm-tile[data-view="TODAY"]')).toHaveClass(/current/);
   await expect(page.locator('.tdh-cell')).toHaveCount(42);
   await expect(page.locator('.tdh-cell.today')).toHaveCount(1);
@@ -87,7 +89,9 @@ test('a truck, a materials list and workers booked on a coming day; the driver s
   await sw.click();
   await expect(sw).toContainText('Off');
   await page.goto('/?view=TODAY');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   const day = await page.evaluate(() => {
     const t = document.querySelector('.tdh-cell.today').dataset.tdhDay,
       [y, m] = t.split('-').map(Number),

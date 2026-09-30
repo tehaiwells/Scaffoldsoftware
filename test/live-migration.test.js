@@ -14,7 +14,11 @@ import { Simulation } from '../src/simulation.js';
 
 // Migrations 008 (trips, a driver's phone) and 009 (charge lines, the YARD role) come after it and are undone first (their triggers read
 // companies.mode).
+// 010 (gear lists, roster, tasks: indexes on objects) is undone first of all.
+const UNDO_010 =
+  'DROP INDEX IF EXISTS objects_roster_person_day;DROP INDEX IF EXISTS objects_roster_day;DROP INDEX IF EXISTS objects_task_day;DROP INDEX IF EXISTS objects_task_list;DELETE FROM schema_migrations WHERE version=10;';
 const UNDO_009 =
+  UNDO_010 +
   'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
   "DELETE FROM role_permissions WHERE permission IN ('packs.confirm','asks.answer');DELETE FROM permissions WHERE code IN ('packs.confirm','asks.answer');DELETE FROM roles WHERE code='YARD';DELETE FROM schema_migrations WHERE version=9;" +
   '';
@@ -93,7 +97,7 @@ function checkMigrated(path, backups = null) {
     db.close();
   }
   if (backups) {
-    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v9-.*.sqlite$/.test(n));
+    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v(9|10)-.*.sqlite$/.test(n));
     assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
     assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }

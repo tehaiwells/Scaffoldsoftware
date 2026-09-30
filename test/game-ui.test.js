@@ -100,7 +100,6 @@ test('the Office holds every other page as a picture tile in three short groups,
   assert.ok(!officeHTML({ state: s, account: f.account, hire: false }).includes('data-view="HIRE"'));
   for (const v of [
     'TODAY',
-    'SCHEDULE',
     'WORKERS',
     'EQUIPMENT',
     'TRUCK12',
@@ -113,6 +112,8 @@ test('the Office holds every other page as a picture tile in three short groups,
     'YARD',
     'OVERVIEW',
     'CONTROL',
+    'PROGRESS',
+    'PRESTART',
   ])
     assert.ok(
       OFFICE_TILES.some((x) => x[0] === v),
@@ -123,7 +124,7 @@ test('the Office holds every other page as a picture tile in three short groups,
     OFFICE_TILES.slice(0, 2).map((x) => [x[0], x[1], x[4]]),
     [
       ['HOME', 'Yard & sites', 'day'],
-      ['TODAY', 'Today', 'day'],
+      ['TODAY', 'Daily activities', 'day'],
     ],
   );
   assert.ok(html.indexOf('data-view="HOME"') < html.indexOf('data-view="TODAY"'), 'Yard & sites is the first tile');
@@ -131,18 +132,28 @@ test('the Office holds every other page as a picture tile in three short groups,
     officeHTML({ state: s, account: f.account, hire: true, view: 'HOME' }),
     /class="gm-tile current" data-view="HOME" aria-current="page" aria-label="Yard &amp; sites"/,
   );
-  // The owner's order for each group: Client sites moved out of Every day to the front of Yard and fleet.
+  // The owner's order for each group (30 September 2026): Every day is the map, Daily activities (Today renamed; the Schedule tile went,
+  // the calendar does that), Gear list (the Materials catalogue renamed), Workers (moved out of Yard and fleet), Task progress and
+  // Pre-start (new); the Stock ledger sits in Yard and fleet after the small trucks and before the Control room.
   const group = (g) => OFFICE_TILES.filter((x) => x[4] === g).map((x) => x[1]);
-  assert.deepEqual(group('day'), ['Yard & sites', 'Today', 'Schedule', 'Stock ledger', 'Materials catalogue']);
+  assert.deepEqual(group('day'), [
+    'Yard & sites',
+    'Daily activities',
+    'Gear list',
+    'Workers',
+    'Task progress',
+    'Pre-start',
+  ]);
   assert.deepEqual(group('yard'), [
     'Client sites',
     'Yard layout',
-    'Workers',
     'Equipment',
     'Big trucks',
     'Small trucks',
+    'Stock ledger',
     'Control room',
   ]);
+  assert.ok(!OFFICE_TILES.some((x) => x[0] === 'SCHEDULE'), 'no Schedule tile');
   // Without operations.manage the main page is the Control room, the same place the Office bar's back button goes.
   const other = officeHTML({ state: s, account: { ...f.account, permissions: [] }, hire: false });
   assert.ok(!other.includes('data-view="HOME"'));

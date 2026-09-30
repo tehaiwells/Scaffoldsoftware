@@ -25,7 +25,7 @@ test('Account "Open the Materials list" opens it; browser Back on an Office page
   // Account > Open the Materials list: the Materials catalogue, at Import materials
   await office(page, 'Account').click();
   await page.getByRole('button', { name: 'Open the Materials list', exact: true }).click();
-  await expect(title(page)).toHaveText('Materials catalogue', { timeout: 20000 });
+  await expect(title(page)).toHaveText('Gear list', { timeout: 20000 });
   await expect(page.locator('#mi-import')).toBeInViewport();
   await page.getByRole('button', { name: 'Back to the yard', exact: true }).first().click();
   await expect(board(page)).toBeVisible();
@@ -39,13 +39,13 @@ test('Account "Open the Materials list" opens it; browser Back on an Office page
   expect(page.url()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
   // the button and the browser agree: Today, Back to the yard, Forward, Back
   await office(page, 'Today').click();
-  await expect(title(page)).toHaveText('Today');
+  await expect(title(page)).toHaveText('Daily activities');
   await expect(page).toHaveURL(/\?view=TODAY$/);
   await page.getByRole('button', { name: 'Back to the yard', exact: true }).first().click();
   await expect(board(page)).toBeVisible();
   await expect(page).not.toHaveURL(/view=/);
   await page.goForward();
-  await expect(title(page)).toHaveText('Today');
+  await expect(title(page)).toHaveText('Daily activities');
   await page.goBack();
   await expect(board(page)).toBeVisible();
 });

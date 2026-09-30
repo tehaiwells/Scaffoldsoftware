@@ -146,6 +146,9 @@ export const crewMethods = {
       role,
       roleWords: role ? { YARDSMAN: 'Yardsman', SCAFFOLDER: 'Scaffolder', LEADING_HAND: 'Leading hand' }[role] : null,
       messages,
+      // their own day (tasks in priority order) and roster, as their phone shows them (tasks.js, roster.js; part 5)
+      myDay: ops && typeof this.taskMyDay === 'function' ? this.taskMyDay(w.id, this.planToday()) : null,
+      roster: ops && typeof this.rosterMine === 'function' ? this.rosterMine(w.id, this.planToday()) : null,
       away: w.away ? { site: w.location, since: w.away.since } : null,
       day,
       since,

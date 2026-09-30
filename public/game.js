@@ -408,19 +408,22 @@ function startHTML(ctx) {
   );
 }
 // ---------------------------------------------------------------- the Office: a drawer of picture tiles for every other page, in three groups
+// Every day in the owner's order (30 September 2026): the map, Daily activities (the calendar; the Schedule tile went, its calendar does that),
+// the gear list, the workers, their task progress and the pre-start sheet. Yard and fleet: sites, layout, equipment, trucks, the stock ledger
+// (after the small trucks, before the control room).
 export const OFFICE_TILES = [
   ['HOME', 'Yard & sites', 'Back to the main page: the live map of your yard and sites', 'ov-site', 'day'],
-  ['TODAY', 'Today', 'Loads due today, on a phone too', 'sg-list', 'day'],
-  ['SCHEDULE', 'Schedule', 'Every load and collection by day', 'hr-board', 'day'],
-  ['STOCK', 'Stock ledger', 'Every piece in and out, counts', 'spr-stillage', 'day'],
-  ['MATERIALS', 'Materials catalogue', 'Your parts, weights and packs', 'spr-bundle', 'day'],
-  // Yard and fleet in the owner's order: client sites, yard layout, workers, equipment, big trucks, small trucks, control room.
+  ['TODAY', 'Daily activities', 'The calendar: gear lists, trucks, workers, on a phone too', 'sg-list', 'day'],
+  ['MATERIALS', 'Gear list', 'Your parts, weights and packs; the lists you send', 'spr-bundle', 'day'],
+  ['WORKERS', 'Workers', 'Your team and their roster', 'spr-worker', 'day'],
+  ['PROGRESS', 'Task progress', 'Every worker, every task today, ticked as they confirm', 'hc-board', 'day'],
+  ['PRESTART', 'Pre-start', 'Print everyone’s tasks for the day', 'si-docket', 'day'],
   ['SITES', 'Client sites', 'Sites, their plans and dockets', 'si-site', 'yard'],
   ['YARD', 'Yard layout', 'Yard shape, stillages, planner', 'sg-yard', 'yard'],
-  ['WORKERS', 'Workers', 'Your crew and their jobs', 'spr-worker', 'yard'],
   ['EQUIPMENT', 'Equipment', 'Forklifts and cranes', 'spr-forklift', 'yard'],
   ['TRUCK12', 'Big trucks', '12.5 t trucks, decks and dockets', 'spr-truck12', 'yard'],
   ['TRUCK2', 'Small trucks', '2 t trucks for quick runs', 'spr-truck2', 'yard'],
+  ['STOCK', 'Stock ledger', 'Every piece in and out, counts', 'spr-stillage', 'yard'],
   ['CONTROL', 'Control room', 'Run the crew and trucks by hand', 'spr-worker-busy', 'yard'],
   ['HIRE', 'Hire', 'What is out on hire, and rates', 'hr-tag', 'biz'],
   ['REPORTS', 'Reports', 'History charts', 'hc-board', 'biz'],

@@ -26,7 +26,19 @@ export const CREW_ACTIONS = {
   messageSeen: { label: 'Got it', ask: '' },
   crewSignOn: { label: 'On site', ask: 'Who is here?' },
   planDone: { label: 'Done', ask: '' },
+  // a worker's task steps (part 5): Got the list, Packed and ready, Truck loaded; a plain task's Done
+  taskStep: { label: 'Task step', ask: '' },
+  taskDone: { label: 'Done', ask: '' },
 };
+export const TASK_STEP_WORDS = {
+  RECEIVED: 'Got the list',
+  PACKED: 'Packed and ready',
+  LOADED: 'Truck loaded',
+  DONE: 'Done',
+};
+const TASK_AFTER = { RECEIVED: 'PACKED', PACKED: 'LOADED', LOADED: null, DONE: null };
+// The subjects that get their own card on the phone (the roster and the day's tasks), not the "Can you make it?" list.
+const OWN_CARD = new Set(['ROSTER', 'TASK_READY', 'TASK_DAY']);
 // Why someone can't make it: three taps, or their own words.
 export const CREW_REASONS = ['Crook', 'Another job', "Something's come up"];
 // Back at yard straight after Loaded & left: the site would not take it (refused, or shut), so the load came back.
@@ -362,14 +374,25 @@ export function askCard(a, v) {
     open = v.open?.ask === a.id,
     when = esc(a.dayLabel + ' ' + (a.timeWords ?? '')),
     where = a.siteName ? esc(a.siteName) : '',
-    done = !!w || !!a.answeredAt || a.seen || (!a.canAnswer && !a.canSee);
+    notice = a.subject === 'TASK_DAY' && !a.needsAnswer,
+    done = !!w || !!a.answeredAt || a.seen || (notice ? !!a.seen : !a.canAnswer && !a.canSee);
   const said = w
     ? w.action === 'messageSeen'
       ? 'Got it'
       : w.input?.yes
-        ? 'I’ll be there'
-        : 'Can’t make it' + (w.input?.reason ? ': ' + w.input.reason : '')
-    : a.words;
+        ? a.subject === 'ROSTER'
+          ? 'Confirmed'
+          : 'I’ll be there'
+        : (a.subject === 'ROSTER' ? 'Denied' : 'Can’t make it') + (w.input?.reason ? ': ' + w.input.reason : '')
+    : notice
+      ? a.seen
+        ? 'Got it'
+        : ''
+      : a.subject === 'ROSTER' && a.answer === 'YES'
+        ? 'Confirmed, see you then'
+        : a.subject === 'ROSTER' && a.answer === 'NO'
+          ? 'You said you can’t work that day'
+          : a.words;
   let body = '';
   if (open)
     body =
@@ -393,13 +416,17 @@ export function askCard(a, v) {
       '<button type="submit" class="cr-big cr-soft">Send: can’t make it</button><button type="button" class="cr-link" data-cr-cancel>Never mind</button></form>';
   else if (!done)
     body =
-      a.subject === 'PACK'
+      a.subject === 'PACK' || a.subject === 'TASK_DAY'
         ? '<button type="button" class="cr-big" data-cr-seen="' + esc(a.id) + '">Got it</button>'
         : '<div class="cr-two"><button type="button" class="cr-big" data-cr-yes="' +
           esc(a.id) +
-          '">I’ll be there</button><button type="button" class="cr-big cr-soft" data-cr-no="' +
+          '">' +
+          (a.subject === 'ROSTER' ? 'Confirm' : 'I’ll be there') +
+          '</button><button type="button" class="cr-big cr-soft" data-cr-no="' +
           esc(a.id) +
-          '">Can’t make it</button></div>';
+          '">' +
+          (a.subject === 'ROSTER' ? 'Deny' : 'Can’t make it') +
+          '</button></div>';
   return (
     '<article class="cr-card cr-askcard' +
     (done ? ' is-done' : '') +
@@ -413,7 +440,13 @@ export function askCard(a, v) {
       ? 'Drive' + (where ? ' to ' + where : '')
       : a.subject === 'PACK'
         ? 'Pack a list for ' + (where || 'a site')
-        : 'Work at ' + (where || 'a site')) +
+        : a.subject === 'ROSTER'
+          ? 'You’re on ' + (a.day === v.me?.today ? 'today' : 'tomorrow') + ' · ' + (where || 'the yard')
+          : a.subject === 'TASK_READY'
+            ? 'Your tasks ' + (a.day === v.me?.today ? 'today' : 'tomorrow')
+            : a.subject === 'TASK_DAY'
+              ? 'Today’s tasks'
+              : 'Work at ' + (where || 'a site')) +
     '</b><small>' +
     when +
     (a.address ? ' · ' + esc(a.address) : '') +
@@ -662,9 +695,126 @@ export function taskCard(x, v) {
     '</article>'
   );
 }
-/** "My trips" for a driver, "My day" for anyone else. @param {any} me */
-export const crewTitle = (me) =>
-  (me?.person?.kind === 'worker' ? 'My day, ' : 'My trips, ') + (me?.person?.name ?? me?.driver?.name ?? '');
+/** The next step a task waits for on this phone: the server's, moved on by taps still waiting to send. @param {any} t @param {any[]} pending */
+export function taskNextOf(t, pending = []) {
+  let next = t.mine?.next ?? null;
+  for (const p of pending) {
+    if (p.input?.id !== t.id) continue;
+    if (p.action === 'taskDone') next = null;
+    else if (p.action === 'taskStep' && p.input?.step === next) next = TASK_AFTER[next] ?? null;
+  }
+  return next;
+}
+/** One task on the worker's phone: "Now" gets the big button for its next step; "Next" and tomorrow are quiet rows. @param {any} t @param {any} v @param {{now?:boolean,quiet?:boolean}} o */
+export function taskDayCard(t, v, { now = false, quiet = false } = {}) {
+  const me = t.mine ?? {},
+    next = taskNextOf(t, v.pending ?? []),
+    w = (v.pending ?? []).find((p) => (p.action === 'taskStep' || p.action === 'taskDone') && p.input?.id === t.id),
+    done = !next;
+  const steps =
+    t.kind === 'LIST'
+      ? [
+          ['RECEIVED', me.steps?.RECEIVED],
+          ['PACKED', me.steps?.PACKED],
+          ['LOADED', me.steps?.LOADED],
+        ]
+      : [['DONE', me.steps?.DONE]];
+  const others = (t.workers ?? []).filter((x) => x.person !== me.person).map((x) => x.name);
+  const stepList =
+    '<ul class="cr-steps cr-task-steps">' +
+    steps
+      .map(([k, m]) => {
+        const waiting = w && (w.input?.step === k || (w.action === 'taskDone' && k === 'DONE'));
+        return m
+          ? '<li class="cr-done"><span class="cr-tick" aria-hidden="true">✓</span>' +
+              esc(
+                TASK_STEP_WORDS[k] +
+                  ' ' +
+                  hm(m.at) +
+                  (m.kind === 'ON_BEHALF'
+                    ? ' · the office'
+                    : m.byName && m.byName !== v.me?.person?.name
+                      ? ' · ' + m.byName
+                      : ''),
+              ) +
+              '</li>'
+          : waiting
+            ? '<li class="cr-wait"><span class="cr-dot" aria-hidden="true"></span>' +
+              esc(TASK_STEP_WORDS[k]) +
+              ' · ' +
+              sending(v) +
+              '</li>'
+            : '<li class="cr-todo"><span class="cr-box" aria-hidden="true"></span>' + esc(TASK_STEP_WORDS[k]) + '</li>';
+      })
+      .join('') +
+    '</ul>';
+  const head =
+    '<div class="cr-card-head"><span class="cr-time">' +
+    esc(t.time ?? '') +
+    '</span><span class="cr-where"><b>P' +
+    esc(me.priority ?? '') +
+    ' · ' +
+    esc(t.name) +
+    (t.kind === 'LIST' ? ' · pack + load' : '') +
+    '</b><small>' +
+    esc([t.timeWords, t.siteName].filter(Boolean).join(' · ')) +
+    (others.length ? ' · with ' + esc(others.join(', ')) : '') +
+    '</small></span></div>';
+  const lines = t.lines?.length
+    ? '<ul class="cr-lines">' +
+      t.lines
+        .map((l) => '<li><span class="cr-name">' + esc(l.name) + '</span><b class="cr-n">' + l.quantity + '</b></li>')
+        .join('') +
+      '</ul>'
+    : '';
+  const button =
+    !quiet && next && me.canTap && !w
+      ? '<button type="button" class="cr-big" data-cr-task="' +
+        esc(t.id) +
+        '" data-step="' +
+        next +
+        '">' +
+        esc(TASK_STEP_WORDS[next]) +
+        '</button>'
+      : '';
+  return (
+    '<article class="cr-card cr-task' +
+    (now ? ' is-now' : '') +
+    (done ? ' is-done' : '') +
+    (quiet ? ' is-quiet' : '') +
+    '" id="task-' +
+    esc(t.id) +
+    '">' +
+    head +
+    (t.note ? '<p class="cr-msg">' + esc(t.note) + '</p>' : '') +
+    lines +
+    stepList +
+    (done && t.status === 'DONE'
+      ? '<p class="cr-state st-yes">Done</p>'
+      : done
+        ? '<p class="cr-state st-yes">Your part is done</p>'
+        : '') +
+    button +
+    '</article>'
+  );
+}
+/** A rostered day in one quiet line. @param {any} r @param {string} when */
+export const rosterLine = (r, when) =>
+  r
+    ? '<p class="cr-roster st-' +
+      esc(String(r.status).toLowerCase()) +
+      '"><b>' +
+      esc(when) +
+      '</b> ' +
+      esc(r.whereName + ' · ' + r.timeWords + ' · ' + r.statusWords) +
+      '</p>'
+    : '';
+/** "My trips" for a driver with trips and no tasks, "My day" for everyone else. @param {any} me */
+export const crewTitle = (me) => {
+  const driver = me?.person ? me.person.kind === 'driver' : !!me?.driver,
+    tasks = (me?.myDay?.tasks?.length ?? 0) + (me?.myDay?.tomorrow?.length ?? 0);
+  return (driver && !tasks ? 'My trips, ' : 'My day, ') + (me?.person?.name ?? me?.driver?.name ?? '');
+};
 /** The whole page. @param {any} v */
 export function crewPage(v) {
   if (v.notSigned) {
@@ -746,12 +896,46 @@ export function crewPage(v) {
         TRUCK +
         '<h2>No trips for you today</h2><p>New trips show here when the office books them.</p></section>'
       : '';
-  // everyone's own asks first (an unanswered one is the thing to do), then the yard hand's and leading hand's work, then a driver's trips
+  // the roster (tomorrow's Confirm / Deny, today's line) and the day's tasks in priority order first, then everyone's own asks (an
+  // unanswered one is the thing to do), then the yard hand's and leading hand's work, then a driver's trips
+  const isOpenAsk = (a) =>
+    a.canAnswer || a.canSee || (a.subject === 'TASK_DAY' && !a.seen && !a.answeredAt && a.status === 'SENT');
   const asks = (me.asks ?? [])
+    .filter((a) => !OWN_CARD.has(a.subject))
     .slice()
     .sort((a, b) => Number(!a.canAnswer && !a.canSee) - Number(!b.canAnswer && !b.canSee));
+  const own = (me.asks ?? []).filter((a) => OWN_CARD.has(a.subject) && isOpenAsk(a));
   const section = (title, cards) => (cards.length ? '<h2 class="cr-day">' + title + '</h2>' + cards.join('') : '');
+  const my = me.myDay,
+    nowTask = (my?.tasks ?? []).find((t) => t.now),
+    laterTasks = (my?.tasks ?? []).filter((t) => !t.now);
+  const roster =
+    own
+      .filter((a) => a.subject === 'ROSTER')
+      .map((a) => askCard(a, v))
+      .join('') +
+    rosterLine(me.roster?.today, 'Today') +
+    (me.roster?.tomorrow && !own.some((a) => a.subject === 'ROSTER') ? rosterLine(me.roster.tomorrow, 'Tomorrow') : '');
+  const tasksHTML =
+    (roster ? '<h2 class="cr-day">Your roster</h2>' + roster : '') +
+    own
+      .filter((a) => a.subject === 'TASK_DAY')
+      .map((a) => askCard(a, v))
+      .join('') +
+    (nowTask ? '<h2 class="cr-day">Now</h2>' + taskDayCard(nowTask, v, { now: true }) : '') +
+    (laterTasks.length
+      ? '<h2 class="cr-day">Next</h2>' + laterTasks.map((t) => taskDayCard(t, v, { quiet: !!nowTask })).join('')
+      : '') +
+    (my?.tomorrow?.length || own.some((a) => a.subject === 'TASK_READY')
+      ? '<h2 class="cr-day">Tomorrow</h2>' +
+        own
+          .filter((a) => a.subject === 'TASK_READY')
+          .map((a) => askCard(a, v))
+          .join('') +
+        (my?.tomorrow ?? []).map((t) => taskDayCard(t, v, { quiet: true })).join('')
+      : '');
   const other =
+    tasksHTML +
     section(
       'Can you make it?',
       asks.map((a) => askCard(a, v)),
@@ -974,6 +1158,10 @@ function boot() {
       return;
     }
     if (b.dataset.crDone) return tapNow('planDone', { id: b.dataset.crDone });
+    if (b.dataset.crTask)
+      return b.dataset.step === 'DONE'
+        ? tapNow('taskDone', { id: b.dataset.crTask })
+        : tapNow('taskStep', { id: b.dataset.crTask, step: b.dataset.step });
     if (b.dataset.crRcv) {
       V.rcv = b.dataset.crRcv;
       V.formError = null;

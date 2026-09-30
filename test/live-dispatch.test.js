@@ -65,6 +65,8 @@ test('the dispatch commands are on the LIVE allow-list and refused in the Practi
     'packConfirmed',
     'planDone',
     'returnCount',
+    'taskDone',
+    'taskStep',
     'tripCollected',
     'tripDelivered',
     'tripLoaded',
@@ -158,7 +160,7 @@ test("the driver's own yes from their phone (via PHONE, the person's own); never
     other = phone(f, mick);
   const me = dave.me();
   assert.equal(me.person.kind, 'driver');
-  assert.deepEqual(me.can, { trips: true, asks: true, packs: false, signOn: false, done: false });
+  assert.deepEqual(me.can, { trips: true, asks: true, packs: false, signOn: false, done: false, tasks: false });
   const shown = me.asks.find((a) => a.id === ask.id);
   assert.ok(
     shown && shown.canAnswer && shown.subject === 'DRIVE',

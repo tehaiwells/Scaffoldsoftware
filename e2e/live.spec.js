@@ -44,7 +44,7 @@ test('start the real yard from Account, see the LIVE board and Office, and switc
   const tiles = page.getByRole('navigation', { name: 'Main navigation' });
   for (const name of ['Control room', 'Schedule'])
     await expect(tiles.getByRole('button', { name, exact: true })).toHaveCount(0);
-  for (const name of ['Today', 'Stock ledger', 'Client sites', 'Workers'])
+  for (const name of ['Daily activities', 'Stock ledger', 'Client sites', 'Workers', 'Task progress', 'Pre-start'])
     await expect(tiles.getByRole('button', { name, exact: true })).toBeVisible();
   await tiles.getByRole('button', { name: 'Stock ledger', exact: true }).click();
   await expect(page.locator('.live-banner')).toContainText('Live · your real yard');

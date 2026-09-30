@@ -25,6 +25,8 @@ export const NEEDS_RANK = {
   NOT_ASKED: 4,
   NO_ANSWER: 4,
   CANT_MAKE_IT: 4,
+  TASK_NOT_DONE: 4,
+  ROSTER_DENIED: 4,
   PAPERWORK: 5,
   UNPRICED_ON_HIRE: 6,
 };
@@ -231,6 +233,33 @@ export const needsMethods = {
           item: it.id,
         });
     }
+    // part 5: a task the day ended on with nobody confirming it, and a rostered day tomorrow the person said no to (roster.js, tasks.js)
+    if (typeof this.taskDayRows === 'function')
+      for (const t of cached(
+        this.db,
+        "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='workTask' AND json_extract(data,'$.status')='OPEN' AND json_type(data,'$.flag')='object' ORDER BY rowid",
+      )
+        .all(this.repo.company)
+        .map((/** @type {any} */ r) => this.repo.decode(r)))
+        push({
+          id: 'TASK_NOT_DONE:' + t.id + ':' + t.flag.since,
+          kind: 'TASK_NOT_DONE',
+          words: t.name + ' ' + dayLabel(t.day) + ': ' + t.flag.words,
+          action: { label: 'Open Task progress', view: 'PROGRESS', day: t.day, task: t.id },
+          since: t.flag.since,
+          item: t.id,
+        });
+    if (typeof this.rosterDayRows === 'function')
+      for (const r of this.rosterDayRows(tomorrow))
+        if (r.status === 'DENIED' && this.teamPerson(r.person))
+          push({
+            id: 'ROSTER_DENIED:' + r.id + ':' + (r.answeredAt ?? r.day),
+            kind: 'ROSTER_DENIED',
+            words: this.planName(r.person) + ' can’t work tomorrow. Roster someone else.',
+            action: { label: 'Open Workers', view: 'WORKERS', person: r.person, day: r.day },
+            since: r.answeredAt ?? r.day,
+            item: r.id,
+          });
     // paperwork expired or due for review
     const months = this.paperMonths?.();
     for (const p of this.repo.all('paperwork')) {

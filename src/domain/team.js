@@ -78,6 +78,21 @@ export const mobileWords = (e) => {
   const m = /^\+614(\d{2})(\d{3})(\d{3})$/.exec(e);
   return m ? '04' + m[1] + ' ' + m[2] + ' ' + m[3] : e;
 };
+// Part 5 (owner brief 30 September 2026): a worker's job on the +1 form is Yard worker or Onsite worker (their role, which the phone's
+// permissions follow: a yard worker's phone packs), where they usually work (the yard or a site) and an email beside the mobile.
+export const JOB_ROLE = { YARD: 'YARDSMAN', ONSITE: 'SCAFFOLDER' },
+  JOB_WORDS = { YARD: 'Yard worker', ONSITE: 'Onsite worker' };
+export const jobOfRole = (role) => (role === 'YARDSMAN' ? 'YARD' : 'ONSITE');
+const EMAIL_ERROR = 'Enter an email like name@example.com.';
+// A basic x@y.z check, lowercased; empty -> null.
+export function normEmail(v) {
+  if (v === undefined || v === null) return null;
+  requireRule(typeof v === 'string', EMAIL_ERROR);
+  const s = v.trim().toLowerCase();
+  if (!s) return null;
+  requireRule(s.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s), EMAIL_ERROR);
+  return s;
+}
 const nameOf = (v) => {
   requireRule(
     typeof v === 'string' && v.trim().length >= 1 && v.trim().length <= 60,
@@ -146,31 +161,67 @@ export const teamMethods = {
     );
   },
   // ---------- commands ----------
+  // Where a worker usually works, for the +1 form: the yard (default) or an active site.
+  teamWhere(v) {
+    const yard = this.repo.all('yard')[0];
+    requireRule(yard, 'Set up your yard first.');
+    if (v === undefined || v === null || v === '') return yard;
+    requireRule(typeof v === 'string', 'Choose the yard or a site.');
+    let p = null;
+    try {
+      p = this.repo.get(v);
+    } catch {}
+    requireRule(p && (p.kind === 'yard' || (p.kind === 'site' && p.status === 'ACTIVE')), 'Choose the yard or a site.');
+    return p;
+  },
   teamAdd(input) {
     const name = nameOf(input?.name),
-      role = input?.role;
+      job = input?.job === undefined || input?.job === null || input?.job === '' ? null : input.job;
+    if (job !== null) requireRule(job === 'YARD' || job === 'ONSITE', 'Choose Yard worker or Onsite worker.');
+    const role = job ? JOB_ROLE[job] : input?.role;
     requireRule(TEAM_ROLES.includes(role), 'Choose Yardsman, Scaffolder, Leading hand or Driver.');
-    const mobile = normMobile(input.mobile);
+    const mobile = normMobile(input.mobile),
+      email = normEmail(input.email);
     requireRule(!this.teamNameTaken(name), "There's already a " + name + ' in your team. Add a surname or an initial.');
     const now = new Date().toISOString();
     if (role === 'DRIVER') {
-      const d = this.repo.add('driver', { name, mobile, active: true, demo: false, createdAt: now, removedAt: null });
+      const d = this.repo.add('driver', {
+        name,
+        mobile,
+        email,
+        active: true,
+        demo: false,
+        createdAt: now,
+        removedAt: null,
+      });
       return { person: this.teamRow(d), message: name + ' is in your team as a driver.' };
     }
-    const yard = this.repo.all('yard')[0];
-    requireRule(yard, 'Set up your yard first.');
+    const where = this.teamWhere(input.where);
     this.ensureConfig();
+    // a worker whose place is a site stands with that site's crew (the Practice yard draws them there; a real yard keeps it as a record)
     const w = this.repo.add('resource', {
       name,
       type: 'WORKER',
-      location: yard.id,
+      location: where.id,
       enabled: true,
       task: null,
       role,
       mobile,
+      email,
+      job: job ?? jobOfRole(role),
+      where: where.id,
     });
     bumpRevision(this.db, this.repo.company, 'plan');
-    return { person: this.teamRow(w), message: name + ' is in your team as a ' + ROLE_WORDS[role].toLowerCase() + '.' };
+    return {
+      person: this.teamRow(w),
+      message:
+        name +
+        ' is in your team as ' +
+        (job === 'ONSITE' ? 'an ' : 'a ') +
+        (job ? JOB_WORDS[job].toLowerCase() : ROLE_WORDS[role].toLowerCase()) +
+        (where.kind === 'site' ? ' at ' + where.name : '') +
+        '.',
+    };
   },
   teamUpdate(input) {
     const p = this.repo.get(input?.id);
@@ -207,6 +258,37 @@ export const teamMethods = {
         changed = true;
       }
     }
+    if (input.email !== undefined) {
+      const email = normEmail(input.email);
+      if ((p.email ?? null) !== email) {
+        p.email = email;
+        changed = true;
+      }
+    }
+    if (worker && input.job !== undefined && input.job !== null && input.job !== '') {
+      requireRule(input.job === 'YARD' || input.job === 'ONSITE', 'Choose Yard worker or Onsite worker.');
+      if (p.job !== input.job || p.role !== JOB_ROLE[input.job]) {
+        p.job = input.job;
+        p.role = JOB_ROLE[input.job];
+        changed = true;
+      }
+    }
+    if (worker && input.where !== undefined) {
+      const where = this.teamWhere(input.where);
+      if ((p.where ?? null) !== where.id) {
+        requireRule(!p.away, p.name + ' is away at a site today. Change it tomorrow.');
+        requireRule(idleWorker(p), p.name + ' is busy on a job, try again in a moment.');
+        p.where = where.id;
+        if (p.location !== where.id) {
+          if (p.job) this.releaseJob?.(p, 'Moved to ' + where.name);
+          p.location = where.id;
+          delete p.x;
+          delete p.y;
+          p.walk = null;
+        }
+        changed = true;
+      }
+    }
     if (!changed) return { person: this.teamRow(p), changed: false, message: 'Nothing changed.' };
     if (p.kind === 'driver' && p.name !== was) p.demo = false;
     if (worker && p.name !== was) p.demoName = false;
@@ -227,6 +309,7 @@ export const teamMethods = {
       p.removedAt = new Date().toISOString();
       this.repo.save(p);
       this.planPersonGone('driver', p.id);
+      this.taskPersonGone?.(p.id, this.planNow());
       crewEndAll(this.db, this.repo.company, { driver: p.id }, this.user.id); // their phones are signed out at once
       return { ok: true, message: p.name + ' has left the team.' };
     }
@@ -240,6 +323,9 @@ export const teamMethods = {
       throw new AppError(409, p.name + ' is at ' + site + ' today. Remove them tomorrow.');
     }
     requireRule(idleWorker(p), p.name + ' is busy on a job, try again in a moment.');
+    // part 5: their rostered days ahead (a fortnight at most) and their tasks from tomorrow go; today's stay (roster.js, tasks.js)
+    this.rosterPersonGone?.(p.id, this.planNow());
+    this.taskPersonGone?.(p.id, this.planNow());
     this.retireResource(p);
     bumpRevision(this.db, this.repo.company, 'plan');
     crewEndAll(this.db, this.repo.company, { driver: p.id }, this.user.id); // a worker's phone is signed out at once too (ADR 0010)
@@ -302,9 +388,13 @@ export const teamMethods = {
         roleWords: 'Driver',
         mobile: p.mobile ?? null,
         mobileWords: mobileWords(p.mobile),
+        email: p.email ?? null,
         demo: !!p.demo,
         demoName: false,
         where: null,
+        whereId: null,
+        job: null,
+        jobWords: null,
         away: null,
         active: !!p.active,
         phoneView: '?view=CREW&driver=' + encodeURIComponent(p.id),
@@ -326,10 +416,14 @@ export const teamMethods = {
       roleSet: !!p.role,
       mobile: p.mobile ?? null,
       mobileWords: mobileWords(p.mobile),
+      email: p.email ?? null,
       demo: false,
       demoName: DEMO_NAME.test(p.name) || !!p.demoName,
       label: this.teamLabel(p),
       where: at(this.teamHome(p)),
+      whereId: p.where ?? this.teamHome(p),
+      job: p.job ?? jobOfRole(role),
+      jobWords: JOB_WORDS[p.job ?? jobOfRole(role)],
       home: this.teamHome(p),
       away: p.away ? { item: p.away.item, site: p.location, siteName: at(p.location) } : null,
       busy: !idleWorker(p),
@@ -338,12 +432,17 @@ export const teamMethods = {
     };
   },
   // GET /api/team: the Team list (operations only). Yard crew first, then site crew by site, then drivers; by name.
-  teamView() {
+  // ?roster=1 adds each worker's next fortnight (roster.js); the plain call stays cheap.
+  teamView({ roster = false } = {}) {
     this.auth.require(this.user, 'operations.manage');
     const kinds = this.placeKinds(),
-      order = { YARDSMAN: 0, LEADING_HAND: 1, SCAFFOLDER: 2, DRIVER: 4 };
+      order = { YARDSMAN: 0, LEADING_HAND: 1, SCAFFOLDER: 2, DRIVER: 4 },
+      today = roster ? this.planToday() : null;
     const rows = [
-      ...this.teamWorkers(kinds).map((w) => this.teamRow(w, kinds)),
+      ...this.teamWorkers(kinds).map((w) => ({
+        ...this.teamRow(w, kinds),
+        ...(roster && typeof this.rosterNext === 'function' ? { roster: this.rosterNext(w.id, today) } : {}),
+      })),
       ...this.teamDrivers().map((d) => this.teamRow(d)),
     ];
     rows.sort(
@@ -358,6 +457,16 @@ export const teamMethods = {
     return {
       people: rows,
       roles: TEAM_ROLES.map((r) => ({ code: r, words: ROLE_WORDS[r] })),
+      jobs: Object.entries(JOB_WORDS).map(([code, words]) => ({ code, words })),
+      places: [
+        ...this.repo.all('yard').map((y) => ({ id: y.id, name: y.name, kind: 'yard' })),
+        ...this.repo
+          .all('site')
+          .filter((x) => x.status === 'ACTIVE')
+          .map((x) => ({ id: x.id, name: x.name, kind: 'site' }))
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+      ],
+      today: this.planToday(),
       // the Practice yard's demo drivers and names (a real yard's people are only the ones the owner adds)
       needsStart: !this.live() && !s?.demoDriversAdded && !this.repo.all('driver').length,
       needsNames: !this.live() && !s?.demoNamesGiven && rows.some((r) => r.kind === 'worker' && DEMO_NAME.test(r.name)),

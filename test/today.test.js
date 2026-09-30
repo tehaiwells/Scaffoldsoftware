@@ -29,7 +29,8 @@ test('a link picks the page to open: ?view=TODAY (any case) or any other page, n
   const { tdTest } = await load();
   assert.equal(tdTest.viewFrom('?view=TODAY'), 'TODAY');
   assert.equal(tdTest.viewFrom('?view=today'), 'TODAY');
-  assert.equal(tdTest.viewFrom('?view=SCHEDULE&x=1'), 'SCHEDULE');
+  assert.equal(tdTest.viewFrom('?view=SCHEDULE&x=1'), 'TODAY'); // the Schedule page went (part 5): its link opens Daily activities
+  assert.equal(tdTest.viewFrom('?view=PROGRESS'), 'PROGRESS');
   for (const v of ['', '?', '?view=', '?view=ADMIN', '?other=TODAY', null, undefined])
     assert.equal(tdTest.viewFrom(v), null, String(v));
 });
@@ -132,7 +133,7 @@ test("the Today page: a planner. The date, a 42-day calendar with today marked, 
   __test.setState(s, acct(f));
   __test.setView('TODAY');
   const html = tdTest.view();
-  assert.ok(html.includes('<h1>Today</h1>'));
+  assert.ok(html.includes('<h1>Daily activities</h1>'));
   assert.ok(html.includes('Wednesday 23 September 2026'), 'the long date');
   for (const gone of [
     'td-hero',

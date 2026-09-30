@@ -62,7 +62,9 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
 
   // ---- the office books the day on Today
   await page.goto('/?view=TODAY');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   await expect(page.locator('#lt-needs')).toBeVisible({ timeout: 30000 }); // the Needs-you card is there, quiet
   await expect(page.locator('#lt-needs')).toContainText('Nothing needs you');
   const cell = page.locator(`.tdh-cell[data-tdh-day="${day}"]`);
@@ -213,7 +215,9 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await page.goto('/');
   await expect(page.locator('.gm-needs')).toContainText('Needs you · ' + needs.count, { timeout: 45000 });
   await page.locator('.gm-needs').click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
   const needCard = page.locator('#lt-needs');
   await expect(needCard).toContainText('Needs you · ' + needs.count, { timeout: 30000 });
   await expect(needCard.locator('.lt-need')).toHaveCount(needs.count);

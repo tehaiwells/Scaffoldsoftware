@@ -386,7 +386,7 @@ test('the crew page renders from a live snapshot: hero, now with the map, orders
   assert.ok(html.startsWith('<div class="page-crew">'));
   assert.ok(html.includes('<h1>' + w.name + '</h1>'));
   assert.match(html, /class="cw-pill"><i aria-hidden="true"><\/i>Idle</);
-  assert.ok(html.includes('data-cw-back') && html.includes('>Today<'), 'Back names the page it came from');
+  assert.ok(html.includes('data-cw-back') && html.includes('>Daily activities<'), 'Back names the page it came from');
   assert.ok(html.includes('data-cw-open="' + w2.id + '"'), 'the switcher jumps to the next worker');
   assert.match(html, /<b>1<\/b> of 5/);
   assert.ok(

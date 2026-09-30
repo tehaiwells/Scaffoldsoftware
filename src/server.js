@@ -150,6 +150,11 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/live-today.js': ['live-today.js', 'text/javascript'], // Today as a dispatch tool: Needs you, the lanes, the run sheet (ADR 0010)
     '/live-returns.js': ['live-returns.js', 'text/javascript'], // Back & counted, quarantine, the site-finish question, values (ADR 0010)
   });
+  Object.assign(assets, {
+    '/roster.js': ['roster.js', 'text/javascript'], // Workers: +1 worker and the roster calendar (part 5)
+    '/tasks.js': ['tasks.js', 'text/javascript'], // Task progress (part 5)
+    '/prestart.js': ['prestart.js', 'text/javascript'], // Pre-start and its print sheet (part 5)
+  });
   return async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -347,7 +352,22 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
       else if (req.method === 'GET' && path === '/api/person') {
         const q = new URL(req.url, 'http://localhost').searchParams;
         send(200, simulation.personView(q.get('kind'), q.get('id')));
-      } else if (req.method === 'GET' && path === '/api/team') send(200, simulation.teamView());
+      } else if (req.method === 'GET' && path === '/api/team')
+        send(
+          200,
+          simulation.teamView({ roster: new URL(req.url, 'http://localhost').searchParams.get('roster') === '1' }),
+        );
+      // Part 5 (roster and tasks, CREW): a worker's roster calendar, the day's tasks by worker (Task progress) and the pre-start sheet
+      else if (req.method === 'GET' && path === '/api/roster') {
+        const q = new URL(req.url, 'http://localhost').searchParams;
+        send(
+          200,
+          simulation.rosterView({ person: q.get('person'), from: q.get('from'), to: q.get('to'), day: q.get('day') }),
+        );
+      } else if (req.method === 'GET' && path === '/api/tasks')
+        send(200, simulation.tasksView({ day: new URL(req.url, 'http://localhost').searchParams.get('day') }));
+      else if (req.method === 'GET' && path === '/api/prestart')
+        send(200, simulation.prestartView({ day: new URL(req.url, 'http://localhost').searchParams.get('day') }));
       else if (req.method === 'GET' && path === '/api/crew-day')
         send(200, simulation.crewDay(new URL(req.url, 'http://localhost').searchParams.get('worker')));
       else if (req.method === 'GET' && path === '/api/hire')

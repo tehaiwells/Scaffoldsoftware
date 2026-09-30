@@ -66,7 +66,9 @@ function olderDatabase(dir) {
   const db = openDatabase(path, { backupDirectory: null });
   new Service(db).register(owner);
   db.exec(
-    'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
+    // 010 (part 5: the roster and task indexes) first, then 009 and 008
+    'DROP INDEX IF EXISTS objects_roster_person_day;DROP INDEX IF EXISTS objects_roster_day;DROP INDEX IF EXISTS objects_task_day;DROP INDEX IF EXISTS objects_task_list;DELETE FROM schema_migrations WHERE version=10;' +
+      'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
       "DELETE FROM role_permissions WHERE permission IN ('packs.confirm','asks.answer');DELETE FROM permissions WHERE code IN ('packs.confirm','asks.answer');DELETE FROM roles WHERE code='YARD';DELETE FROM schema_migrations WHERE version=9;" +
       'DROP TRIGGER trip_confirmation_no_update;DROP TRIGGER trip_confirmation_no_delete;DROP TRIGGER trip_confirmation_live_only;DROP TABLE crew_devices;DROP TABLE crew_links;DROP TABLE trip_confirmation;' +
       'DROP INDEX objects_container_place;DROP INDEX objects_container_support;DROP INDEX objects_trip_state;DROP INDEX objects_trip_plan;DROP INDEX objects_trip_truck;DROP INDEX objects_order_status;DROP INDEX objects_hold_order;' +
@@ -83,10 +85,10 @@ test('before a start-up migration changes an existing database, a checked copy o
   assert.equal(version(path), 7);
   const db = openDatabase(path, { backupDirectory: backups, backupName: 'scaffold' });
   db.close();
-  assert.equal(version(path), 9, 'the migration ran');
+  assert.equal(version(path), 10, 'the migration ran');
   const saved = readdirSync(backups);
   assert.equal(saved.length, 1, 'one copy');
-  assert.match(saved[0], /^scaffold-before-update-v7-to-v9-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/);
+  assert.match(saved[0], /^scaffold-before-update-v7-to-v10-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/);
   assert.equal(version(join(backups, saved[0])), 7, 'the copy is the database before the update');
   assert.equal(companies(join(backups, saved[0])), 1, 'with the data in it');
 });

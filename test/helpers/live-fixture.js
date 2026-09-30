@@ -92,10 +92,28 @@ export function records(db, company) {
       if (Array.isArray(d.people)) d.people = d.people.map(({ message, notAsked, ...p }) => p);
       return [r.id, d];
     });
+  // Part 5: the clock fills a roster pattern a fortnight ahead (PATTERN rows still ROSTERED) and puts its asks and flags on roster days and
+  // tasks; everything else on them (who, which day, every step mark, confirmed or denied) must stay exactly as people left it.
+  const crew = db
+    .prepare(
+      "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind IN ('rosterDay','workTask') ORDER BY id",
+    )
+    .all(company)
+    .filter((r) => {
+      const d = JSON.parse(r.data);
+      return !(r.kind === 'rosterDay' && d.source === 'PATTERN' && d.status === 'ROSTERED');
+    })
+    .map((r) => {
+      const d = JSON.parse(r.data);
+      for (const k of ['message', 'notAsked', 'flag', 'log']) delete d[k];
+      if (Array.isArray(d.workers)) d.workers = d.workers.map(({ message, notice, notAsked, ...w }) => w);
+      return [r.id, r.kind, d];
+    });
   return {
     plan: JSON.stringify(plan),
+    crew: JSON.stringify(crew),
     objects: rows(
-      "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind NOT IN ('message','notification','planItem','clockState') ORDER BY id",
+      "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind NOT IN ('message','notification','planItem','clockState','rosterDay','workTask') ORDER BY id",
     ),
     contents: rows('SELECT * FROM contents WHERE company_id=? ORDER BY container_id,product_id'),
     ledger: rows('SELECT * FROM ledger WHERE company_id=? ORDER BY sequence'),

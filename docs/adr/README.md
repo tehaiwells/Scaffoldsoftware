@@ -16,3 +16,4 @@ writing a new record that supersedes it, never by editing an accepted one.
 | [0008](0008-live-foundation.md) | The LIVE foundation as built: the allow-list wall, the business clock on company time, ledger provenance, "Start your real yard" | Accepted |
 | [0009](0009-record-reality.md) | Record what really happened: orders with exact pieces, trips confirmed by people (the driver's phone or the office for them), stock moving only on a confirmation | Accepted |
 | [0010](0010-dispatch-and-returns.md) | Today as LIVE dispatch (bookings wait for people; drafts; move a day; the lanes view), returns counted and resolved with charge lines and one "available", "Needs you" v1 | Accepted |
+| [0011](0011-daily-activities-gear-roster-tasks.md) | Daily activities and the drawer in the owner's order; gear lists; the workers' roster (a fortnight ahead, asked the day before); tasks with a priority a day, Task progress and the Pre-start sheet | Accepted |
