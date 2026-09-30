@@ -76,7 +76,7 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await tform.locator('.tdh-go').click();
   const truck = page.locator('.tdh-item.tone-truck');
   await expect(truck).toContainText('Waiting for Dave to answer', { timeout: 20000 });
-  await page.getByRole('button', { name: /^\+ Gear list/ }).click(); // the list (ADR 0011): yard -> Bondi on Dave's truck
+  await page.getByRole('button', { name: /^\+ Gear list/ }).click(); // the list (ADR 0012): yard -> Bondi on Dave's truck
   await page.locator('[data-tdh-pick]').click();
   await page.locator(`.tdh-layer [data-pp-slot="${part.id}"]`).click();
   // a real yard's picker keeps the number typed (exact pieces): 24, not a whole stillage
@@ -107,7 +107,7 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   // ---- the phones: Dave says yes, Jo can't make it (Crook), Lee can, Kev packs with the counts
   const dPhone = await phoneOf(dave);
   await expect(dPhone.getByRole('heading', { name: 'My trips, Dave' })).toBeVisible({ timeout: 30000 });
-  // the truck's own ask first (past 3 pm the gear list's "ready for tomorrow?" ask is there too, ADR 0011)
+  // the truck's own ask first (past 3 pm the gear list's "ready for tomorrow?" ask is there too, ADR 0012)
   await dPhone.getByRole('button', { name: 'I’ll be there', exact: true }).first().click();
   await expect(dPhone.locator('.cr-askcard').first()).toContainText('You said yes, see you there', { timeout: 20000 });
   const jPhone = await phoneOf(jo);
@@ -138,6 +138,12 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   await expect(page.locator('.tdh-item.tone-truck')).toContainText('Said yes on their phone', { timeout: 30000 });
   await expect(page.locator('.tdh-item.tone-crew')).toContainText('Can’t make it: Crook');
   await expect(page.locator('.tdh-item.tone-crew')).toContainText('1 of 2 said yes');
+  // the trip is on the day card once: the list's card has the dots, the truck card one line to it (no second docket, Move or Cancel);
+  // the office's on-behalf steps and the docket are under "For the driver"
+  await expect(page.locator('.tdh-item.tone-truck .lo-gear-line')).toContainText('Bondi gear');
+  await expect(page.locator('.tdh-item.tone-truck .lo-trip')).toHaveCount(0);
+  await expect(page.locator('.tdh-item.tone-truck [data-tdh-cancel]')).toHaveCount(0);
+  await page.locator('.tdh-item.tone-mat [data-tdh-toggle^="trip:"]').click();
   await expect(page.locator('.lo-trip').first()).toContainText('Packed', { timeout: 30000 });
   await expect(page.locator('.lo-trip').first().locator('.lo-docket')).toContainText('packed'); // the yard's count, on the docket
   await expect(page.locator('.tdh-item.tone-mat')).toContainText('Packed by Kev');

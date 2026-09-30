@@ -1,5 +1,5 @@
 // @ts-check
-// The confirmation chain of a gear list (ADR 0011 §2.1): the steps in order for each direction, and the words the owner asked for. Pure:
+// The confirmation chain of a gear list (ADR 0012 §2.1): the steps in order for each direction, and the words the owner asked for. Pure:
 // the real yard reads the marks from the trip's steps (trip_confirmation and trip_arrival), the Practice yard from the item's own chain
 // (the engine's marks). Arrivals move nothing; the movement steps are the ones of ADR 0009.
 //   OUT   yard -> site      Arrived at yard · Packed · Loaded · Arrived at site · Landed
@@ -55,6 +55,7 @@ export function chainOf(direction, marks, names) {
 export function nextArrival(direction, marks) {
   const d = CHAIN_STEPS[direction] ? direction : 'OUT',
     mv = CHAIN_MOVES[d];
+  if (marks?.RETURNED) return null; // back at the yard (delivered, or came back not delivered): no arrival is left
   if (!marks?.[mv.out]) return marks?.ARRIVED_PICKUP ? null : 'ARRIVED_PICKUP';
   if (!marks?.[mv.in]) return marks?.ARRIVED_DROP ? null : 'ARRIVED_DROP';
   return null;

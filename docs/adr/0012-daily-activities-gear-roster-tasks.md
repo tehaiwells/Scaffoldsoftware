@@ -1,4 +1,4 @@
-# 0011. Daily activities, gear lists, the workers' roster and their tasks (Phase 1A, part 5)
+# 0012. Daily activities, gear lists, the workers' roster and their tasks (Phase 1A, part 5)
 
 - Status: Accepted, 1 October 2026 (Phase 1A part 5, the owner's brief of 30 September 2026). Two builders: **GEAR** (the gear list, its
   truck and driver, the day-before asks and the confirmation chain) and **CREW** (the Office drawer, workers with a roster calendar,
@@ -192,3 +192,32 @@ with one big button for the next step, Next, Tomorrow; one key per tap as before
   day begins, lists finished tasks under Done and offers *Change my answer* while the day is ahead; a tap on an asked roster day opens a
   choice (They said yes / They said no / Take them off); the Gear list page opens on the week's lists; the pre-start says one word per
   person and the print shell one title. `test/part5-review.test.js` covers each.
+
+## After the second review (the merged tree, 1 October 2026)
+
+- **A move the second site would not take comes home.** From Collected a move offers *Back at yard* beside *Delivered* (as a send does
+  from Loaded & left): the load comes back to the yard, the trip is "Came back, not delivered", the order ends NOT_DELIVERED and *Send
+  again* makes a new order from the yard (the pieces are there now). Hire: the pieces left the first site on the collection day and are on
+  hire nowhere after it, so they settle as a collection from that site and the minimum hire applies to them, exactly as a move's leftover
+  that comes back after a short delivery already did (the customer asked to move them, not to bring them back, but no one is on hire for
+  them; the top-up is the hire-stop rule's, ADR 0011). After a full move delivery *Back at yard* is offered as the courtesy step that
+  brings the truck home, as on a send.
+- **A move's rows are where they happened.** A move's Collected and Back at yard confirmation rows carry the first site (its account counts
+  them as collected and back); Delivered carries the second. The site account counts what landed at the other site as `moved` ("6 moved to
+  Manly") and yard returns of a short move as back, so the integrity number (sent - back - moved - on site - charged - written off) is 0 at
+  both sites, and the second site never reports a collection that was not from it. The truck's timeline reads the trip's direction: a move
+  is out from Collected to Delivered (or Back at yard), so the next day's keyed-in confirmation on that truck is not refused. An off-hire
+  called on a site with a move planned from it asks the pickup only for what the move does not take (as it already did for an open
+  bring-back), so both collections are one tap; when a move already takes everything, the off-hire is recorded once it has gone.
+- **The roster is the office's.** A supervisor's task with "roster them too" leaves the worker not rostered (the office rosters; `rosterPick`
+  keeps its permission); the reply says nothing was rostered. Someone who left the team still answers on the roster grid (a view that says
+  so, never a refusal) and the Workers page closes their grid with them.
+- **The drawer for Accounts.** The day's tiles (Daily activities, Gear list, Workers, Task progress, Pre-start) show only to the office and a
+  supervisor; an Accounts member sees Hire and the business pages, never a tile whose page answers "not allowed".
+- **On screen.** The page offers today's times from the company's clock (the server's time of day, moved on by the seconds since it was
+  read), never the browser's calendar: a computer on another clock (CI on UTC) no longer hides *+ Gear list* and *+ Truck* for the
+  company's today. A gear list's trip is on the day card once: the list's card has the dots and the workers' boxes (with what the three boxes
+  are, once: got it, packed, loaded), the office's on-behalf steps are folded under *For the driver*, and the truck card that a gear list
+  booked has the driver's answer and one line to the list, with no second Move, Cancel or What happened. On the day a worker's phone shows
+  today's roster row and today's tasks; yesterday's answered asks are not cards that still say "tomorrow", and Tomorrow holds only
+  tomorrow's. `test/part5-fixes.test.js` covers each.

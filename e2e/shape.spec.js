@@ -65,6 +65,18 @@ async function openEditor(p) {
   await button(p, 'Change yard shape & size').click();
   await expect(p.locator('#shape-editor')).toBeVisible();
 }
+// In the Practice yard the simulated crew may move a stillage while a handle is being brought on screen, which redraws the plan; the
+// locator resolves again, so a redraw between the two frames of the scroll is retried rather than failed.
+async function bringOn(loc) {
+  for (let i = 0; i < 4; i++)
+    try {
+      await loc.scrollIntoViewIfNeeded();
+      return;
+    } catch (e) {
+      if (!/not attached/i.test(String(e))) throw e;
+    }
+  await loc.scrollIntoViewIfNeeded();
+}
 
 test('the first-run editor fits a phone: Width is on screen, the save bar is short and nothing scrolls sideways', async ({
   page,
@@ -102,7 +114,7 @@ test('focus stays where the owner put it: drag the right side, then type a width
   await yardWithStock(page);
   await openEditor(page);
   const handle = page.locator('#shape-svg [data-handle="side:1"]').first();
-  await handle.scrollIntoViewIfNeeded();
+  await bringOn(handle);
   const b = await handle.boundingBox();
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.down();
@@ -141,7 +153,7 @@ test('the gate cannot be dropped outside the yard; it stays at its last allowed 
   await yardWithStock(page);
   await openEditor(page);
   const gate = page.locator('#shape-svg [data-handle="gate"]');
-  await gate.scrollIntoViewIfNeeded();
+  await bringOn(gate);
   await expect(gate).toBeInViewport();
   const b = await gate.boundingBox(),
     svg = await page.locator('#shape-svg').boundingBox();

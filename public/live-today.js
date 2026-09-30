@@ -38,20 +38,27 @@ export const LT_KIND_WORDS = {
   CANT_MAKE_IT: 'Can’t make it',
   PAPERWORK: 'Paperwork',
   UNPRICED_ON_HIRE: 'No rate',
+  OFF_HIRE_OVERDUE: 'Pickup overdue',
+  UNBILLED: 'Unbilled',
+  BILLED_CHANGED: 'Billed differently',
+  // part 5 (ADR 0012): a task nobody confirmed, a rostered person who said no, and their task that needs someone else
+  TASK_NOT_DONE: 'Task not done',
+  TASK_CANT_WORK: 'Needs someone',
+  ROSTER_DENIED: 'Can’t work',
 };
 const DOT_TONE = {
   DRAFT: 'draft',
   BOOKED: 'booked',
   ASKED: 'asked',
   YES: 'yes',
-  ARRIVED: 'arrived', // at the pickup (ADR 0011)
+  ARRIVED: 'arrived', // at the pickup (ADR 0012)
   PACKED: 'packed',
   LOADED: 'road',
   AT_SITE: 'atsite', // at the drop
   DELIVERED: 'done',
   BACK: 'back',
 };
-/** @param {{get:(p:string)=>Promise<any>,cmd:(a:string,d:any)=>Promise<any>,notify:(t:string)=>void,redraw:()=>void,refresh:()=>Promise<any>,state:()=>any,go:(v:string)=>void,goItem:(id:string,day:string)=>void,goTrip:(id:string)=>void,selectDay:(d:string)=>void,addForm:(kind:string,day:string)=>void,today:()=>string|null}} host */
+/** @param {{get:(p:string)=>Promise<any>,cmd:(a:string,d:any)=>Promise<any>,notify:(t:string)=>void,redraw:()=>void,refresh:()=>Promise<any>,state:()=>any,go:(v:string)=>void,goItem:(id:string,day:string)=>void,goTrip:(id:string)=>void,selectDay:(d:string)=>void,addForm:(kind:string,day:string)=>void,today:()=>string|null,pickCustomer?:(id:string)=>void}} host */
 export function ltSetup(host) {
   LT.host = host;
   if (typeof document === 'undefined' || LT.bound) return;
@@ -604,6 +611,24 @@ function act(x) {
   if (a.view === 'TODAY' && a.item) return h.goItem(a.item, a.day ?? h.today());
   if (a.view === 'TODAY') return h.selectDay(a.day ?? h.today());
   if (a.view === 'TRIPS' && a.trip) return h.goTrip(a.trip);
+  // UNBILLED: the Hire page opens on that customer's statement (ADR 0011); BILLED_CHANGED: on the Adjust form with the amount
+  if (a.view === 'HIRE' && a.customer) {
+    h.pickCustomer?.(a.customer);
+    if (a.statement) h.openAdjust?.(a.statement, a.amount ?? null, a.description ?? '');
+    h.go('HIRE');
+    requestAnimationFrame(() =>
+      document
+        .querySelector(a.statement ? '[data-lb-st="' + CSS.escape(a.statement) + '"]' : '#lb-statements')
+        ?.scrollIntoView({ block: 'start' }),
+    );
+    return;
+  }
+  // a removed customer with money owing: the Customers card on Client sites (Bring back)
+  if (a.view === 'SITES' && a.customer) {
+    h.go('SITES');
+    requestAnimationFrame(() => document.getElementById('lb-customers')?.scrollIntoView({ block: 'start' }));
+    return;
+  }
   if (a.view === 'SITES' && a.site) {
     h.go('SITES');
     requestAnimationFrame(() => document.getElementById('si-site-' + a.site)?.scrollIntoView({ block: 'start' }));

@@ -29,7 +29,7 @@ export const LO_ACTIONS = {
   tripDelivered: 'Delivered',
   tripCollected: 'Collected',
   tripReturned: 'Back at yard',
-  tripArrived: 'Arrived', // the driver's arrival at the pickup or the drop (ADR 0011): a light step, one tap, no counts
+  tripArrived: 'Arrived', // the driver's arrival at the pickup or the drop (ADR 0012): a light step, one tap, no counts
 };
 const STEPS = [
   ['ARRIVED_PICKUP', 'Arrived'],
@@ -384,7 +384,7 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
             '<button type="button" class="lo-btn' +
             (a === 'packConfirmed' ||
             a === 'tripArrived' ||
-            (a === 'tripReturned' && ['DELIVERED', 'LOADED'].includes(t.state))
+            (a === 'tripReturned' && ['DELIVERED', 'LOADED', 'COLLECTED'].includes(t.state))
               ? ' soft'
               : '') +
             '" data-lo-go="' +
@@ -393,7 +393,7 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
             esc(t.id) +
             '">' +
             esc(
-              a === 'tripReturned' && t.state === 'LOADED'
+              a === 'tripReturned' && (t.state === 'LOADED' || (t.state === 'COLLECTED' && t.direction === 'MOVE'))
                 ? 'Came back, not delivered'
                 : a === 'tripArrived'
                   ? (t.arrival?.words ?? LO_ACTIONS.tripArrived)
@@ -402,8 +402,9 @@ export function loTripHTML(t, { ops = true, compact = false, day = null } = {}) 
             '</button>',
         )
         .join('') +
-      // a load that came back: the same pieces, as a new order waiting for a truck
-      (t.undelivered && t.direction === 'OUT'
+      // a load that came back (a send, or a move the second site would not take: its pieces are in the yard now): the same pieces, as a
+      // new order from the yard waiting for a truck
+      (t.undelivered
         ? '<button type="button" class="lo-btn" data-lo-again="' + esc(t.id) + '">Send again</button>'
         : '') +
       (['BOOKED', 'PACKED'].includes(t.state)
@@ -444,6 +445,13 @@ export function loTripOne(id, day, ops = true) {
   const t = d ? [...d.trips, ...(d.upcoming ?? [])].find((x) => x.id === id) : null;
   return t ? '<div class="lo-trips lo-one">' + loTripHTML(t, { ops, day: d.day }) + '</div>' : '';
 }
+/** Is every trip of a truck booking that day a gear list's (drawn on the list's card)? False while the day is not loaded. */
+export function loGearOnly({ day = null, truckPlan = null } = {}) {
+  const d = loDay(day);
+  if (!d || !truckPlan) return false;
+  const list = d.trips.filter((t) => t.truckPlan === truckPlan);
+  return list.length > 0 && list.every((t) => t.list);
+}
 /** A day's trips for one truck booking (Today) or one truck (the truck page). */
 export function loTripsFor({
   day = null,
@@ -459,7 +467,7 @@ export function loTripsFor({
   const all = truck ? [...d.trips, ...(d.upcoming ?? []).filter((u) => !d.trips.some((t) => t.id === u.id))] : d.trips;
   const list = all.filter((t) => (!truckPlan || t.truckPlan === truckPlan) && (!truck || t.truck === truck));
   if (!list.length) return empty ? '<p class="lo-quiet">' + esc(empty) + '</p>' : '';
-  // a gear list's trip (ADR 0011) is drawn once, on the list's card with its chain: here it is one line that goes there
+  // a gear list's trip (ADR 0012) is drawn once, on the list's card with its chain: here it is one line that goes there
   const one = (t) =>
     linkGear && t.list
       ? '<p class="lo-gear-line"><span class="lo-dot tone-' +

@@ -71,7 +71,7 @@ export const clockMethods = {
   clockDeliverDue(now) {
     for (const m of this.planRows(DUE_MSGS)) {
       if (Date.parse(m.sendAt) > now) continue;
-      // a message about a rostered day or a task (ADR 0011): its own kind says whether it may still go
+      // a message about a rostered day or a task (ADR 0012): its own kind says whether it may still go
       if (messageKindOf(m) !== 'planItem') {
         const hook = MESSAGE_KINDS.get(messageKindOf(m));
         if (!hook || !hook.isOpen(this, m)) this.planCallOff(m.id, 'The plan changed', now);
@@ -118,11 +118,12 @@ export const clockMethods = {
           } catch {}
         }
       }
-      this.planPartFive(now); // the roster's fortnight fill, then the day-before and day-of asks for rostered days, gear lists and tasks (ADR 0011)
+      this.planPartFive(now); // the roster's fortnight fill, then the day-before and day-of asks for rostered days, gear lists and tasks (ADR 0012)
       this.clockRemind(now);
       this.clockPaperwork(now, today);
       this.clockTrips(now); // trips that should have been confirmed by now are flagged "Not confirmed" (trips.js), never moved on
       this.clockReturns(now); // returns not counted or not resolved by the end of their day are flagged RETURN_SHORT (returns.js)
+      this.clockRetention?.(now); // once a day: closed messages and notifications past retentionYears go, nothing else (ADR 0011)
     });
     return true;
   },

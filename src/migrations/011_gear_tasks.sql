@@ -1,4 +1,4 @@
--- Phase 1A part 5 (ADR 0011): gear lists (yard -> site, site -> site, site -> yard) with the driver's arrival taps, the workers' roster
+-- Phase 1A part 5 (ADR 0012): gear lists (yard -> site, site -> site, site -> yard) with the driver's arrival taps, the workers' roster
 -- and their tasks. Additive only. Nothing here changes a company's mode or any existing row.
 -- A driver's arrival at the pickup place (the yard, or site A of a move) and at the drop place (the site, or the yard for a bring-back):
 -- light confirmations that move no stock (the movement steps stay in trip_confirmation, whose CHECK lists only them). One row per step,
@@ -27,9 +27,9 @@ WHEN (SELECT mode FROM companies WHERE id=NEW.company_id) IS NOT 'LIVE'
 BEGIN SELECT RAISE(ABORT,'Trips are confirmed in a real yard only.'); END;
 -- Gear lists on the calendar by day (the day panel, the week list and the day-before asks read one day at a time).
 CREATE INDEX IF NOT EXISTS objects_plan_day ON objects(company_id,json_extract(data,'$.day')) WHERE kind='planItem';
--- The roster and task indexes (ADR 0011 §2.2 / §2.3): roster.js and tasks.js read one person's or one day's rows.
+-- The roster and task indexes (ADR 0012 §2.2 / §2.3): roster.js and tasks.js read one person's or one day's rows.
 CREATE INDEX IF NOT EXISTS objects_roster_person_day ON objects(company_id, json_extract(data,'$.person'), json_extract(data,'$.day')) WHERE kind='rosterDay';
 CREATE INDEX IF NOT EXISTS objects_roster_day ON objects(company_id, json_extract(data,'$.day')) WHERE kind='rosterDay';
 CREATE INDEX IF NOT EXISTS objects_task_day ON objects(company_id, json_extract(data,'$.day')) WHERE kind='workTask';
 CREATE INDEX IF NOT EXISTS objects_task_list ON objects(company_id, json_extract(data,'$.list')) WHERE kind='workTask';
-INSERT INTO schema_migrations VALUES(10);
+INSERT INTO schema_migrations VALUES(11);

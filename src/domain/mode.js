@@ -101,7 +101,21 @@ export const LIVE_OPS = new Set([
   'siteFinish',
   'productValue',
   'needsYouDismiss',
-  // Part 5 (ADR 0011: gear lists, roster, tasks): a gear list books its truck and driver; the driver's arrival taps; CREW appends its names
+  // Part 4 (ADR 0011): customers, off-hire, the hire-stop rule and accounting settings, issued statements, adjustments; opening lots and
+  // the go-live import.
+  'customerSave',
+  'customerRemove',
+  'customerRestore',
+  'customerLinkSites',
+  'customerUnlinkSite',
+  'offHireRequested',
+  'hireSettings',
+  'statementIssue',
+  'statementReverse',
+  'adjustmentAdd',
+  'openingLot',
+  'goLiveImport',
+  // Part 5 (ADR 0012: gear lists, roster, tasks): a gear list books its truck and driver; the driver's arrival taps; CREW appends its names
   'gearListCreate',
   'gearListUpdate',
   'tripArrived',
@@ -120,7 +134,7 @@ export const LIVE_OPS = new Set([
   'taskDone',
 ]);
 // Commands whose stock rows are brought in from before the app (opening balances): provenance IMPORT, still with the person who entered them.
-export const IMPORT_OPS = new Set(['opening']);
+export const IMPORT_OPS = new Set(['opening', 'openingLot', 'goLiveImport']);
 export const COMING_NEXT =
   'Not in your real yard yet: this runs only in the Practice yard. Recording it for real comes next.';
 /** Refused in a real yard (the simulation's own steps). @param {{live:()=>boolean}} sim @param {string} [message] */

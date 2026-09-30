@@ -31,10 +31,16 @@ import { zoneDay, DEFAULT_ZONE } from './zonetime.js';
 // period holds the return day. Amount per line rounded to the cent; GST is 10% of the subtotal, rounded to the cent.
 // A material with no rate is flagged and left out of every total.
 /** A day as 'YYYY-MM-DD' (local calendar day). @typedef {string} Day */
-/** Why a lot stopped being on hire: null = collected; the others never charge a minimum-hire top-up except 'transit'.
- * @typedef {null|'transit'|'counted'|'removed'|'transfer'} CloseReason */
+/** Why a lot stopped being on hire: null = collected; the others never charge a minimum-hire top-up except 'transit' and 'offhire'
+ * (stopped by the company's hire-stop rule after an off-hire call, ADR 0011: charged as a collection).
+ * @typedef {null|'transit'|'counted'|'removed'|'transfer'|'offhire'} CloseReason */
 /** Pieces on hire since start (first: when they first went out, for pieces transferred from another site). @typedef {{q:number,start:Day,first?:Day|null}} OpenLot */
-/** @typedef {{q:number,start:Day,end:Day,first?:Day|null,why?:CloseReason,tag?:string}} ClosedLot */
+/** @typedef {{q:number,start:Day,end:Day,first?:Day|null,why?:CloseReason,tag?:string,oh?:OffHireMark}} ClosedLot */
+/** How the hire-stop rule read a lot (ADR 0011): the pickup, the off-hire day, who called, the day hire stopped, the collection day
+ * (null: not collected yet), and whether the rule applied (ran: false) or the window closed and hire ran to collection (ran: true).
+ * @typedef {{pickup:string,when:Day,who:string,stoppedOn:Day,collectedOn:Day|null,ran:boolean}} OffHireMark */
+/** An off-hire notice as the hire book reads it. @typedef {{pickup:string,when:Day,who:string}} OffHireNotice */
+/** The company's hire-stop rule (hireSettings). @typedef {'OFF_HIRE_DAY'|'DAY_AFTER'|'COLLECTION'} StopRule */
 /** @typedef {{open:OpenLot[],closed:ClosedLot[]}} HireSlot */
 /** Lots per site id, then per product id. @typedef {Map<string,Map<string,HireSlot>>} HireBook */
 /** One dated rate version, in cents ex GST. @typedef {{from:Day|null,week:number|null,day:number|null,minDays:number|null}} RateVersion */
@@ -68,7 +74,59 @@ const SPLIT = 'SPLIT';
 const EVENTS = [...ADD, ...REMOVE, ADJUST, ...MOVE, SPLIT];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 // Closures that charge a minimum hire: collected (no reason recorded) or still on the truck that loaded them. 'counted', 'removed' and 'transfer' do not.
-const TOPUP = new Set([undefined, null, 'collected', 'transit']);
+const TOPUP = new Set([undefined, null, 'collected', 'transit', 'offhire']);
+export const STOP_RULES = ['OFF_HIRE_DAY', 'DAY_AFTER', 'COLLECTION'];
+export const STOP_RULE_WORDS = {
+  OFF_HIRE_DAY: 'hire stops on the off-hire day',
+  DAY_AFTER: 'hire stops the day after the off-hire call',
+  COLLECTION: 'hire runs until the gear is collected',
+};
+/** The rule in one sentence, as a statement prints it. @param {StopRule} rule @param {number} within */
+export const stopRuleWords = (rule, within) =>
+  rule === 'COLLECTION'
+    ? 'Company rule: ' + STOP_RULE_WORDS.COLLECTION + '.'
+    : 'Company rule: ' +
+      STOP_RULE_WORDS[rule] +
+      ' when the gear is collected within ' +
+      within +
+      ' days of the call; otherwise hire runs to collection.';
+// The hire-stop rule applied to one site and product's lots (pure; the ledger is not changed, ADR 0011). Notices oldest first. A lot on
+// hire on the off-hire day (start <= when) that was collected after the stop day and within `within` days of the call ends on the stop
+// day instead; one collected later keeps its collection day, marked ran: true; an open lot inside the window is provisionally stopped
+// (why 'offhire', a collection for the minimum hire), and runs again once the window has closed with no collection. Rule (c),
+// 'COLLECTION', changes nothing.
+/** @param {HireSlot} s @param {OffHireNotice[]} notices @param {Day} today @param {StopRule} rule @param {number} within @returns {HireSlot} */
+export function hireOffHire(s, notices, today, rule, within) {
+  if (!notices.length || rule === 'COLLECTION') return s;
+  const open = s.open.map((l) => ({ ...l })),
+    closed = s.closed.map((l) => ({ ...l }));
+  for (const n of [...notices].sort((a, b) => (a.when < b.when ? -1 : a.when > b.when ? 1 : 0))) {
+    const stop = rule === 'DAY_AFTER' ? addDays(n.when, 1) : n.when,
+      deadline = addDays(n.when, within);
+    for (const l of closed) {
+      if (l.oh || l.start > n.when || !TOPUP.has(l.why) || l.end <= stop) continue;
+      if (l.end <= deadline) {
+        l.oh = { pickup: n.pickup, when: n.when, who: n.who, stoppedOn: stop, collectedOn: l.end, ran: false };
+        l.end = stop < l.start ? l.start : stop;
+      } else l.oh = { pickup: n.pickup, when: n.when, who: n.who, stoppedOn: l.end, collectedOn: l.end, ran: true };
+    }
+    if (today <= deadline)
+      for (let i = open.length - 1; i >= 0; i--) {
+        const l = open[i];
+        if (l.start > n.when) continue;
+        open.splice(i, 1);
+        closed.push({
+          q: l.q,
+          start: l.start,
+          end: stop < l.start ? l.start : stop,
+          ...(l.first ? { first: l.first } : {}),
+          why: 'offhire',
+          oh: { pickup: n.pickup, when: n.when, who: n.who, stoppedOn: stop, collectedOn: null, ran: false },
+        });
+      }
+  }
+  return { open, closed };
+}
 
 // ---- The pure core (tested in node): a book of lots per site and product, replayed in ledger order. ----
 // A lot: {q, start, first?} (first: the day the pieces first went out when they came from another site). A closed lot: {q, start, end, first?, why?, tag?}.
@@ -216,14 +274,23 @@ const lotsOf = (s, today) => [
 ];
 const heldFor = (l) => daysBetween(l.first ?? l.start, l.end);
 // Per-day pieces on hire, piece-days and minimum-hire top-up piece-days for one site and product over [from, to].
-/** @param {HireSlot} s @param {Day} from @param {Day} to @param {Day} today @param {number|null} [minDays] @returns {{daily:number[],pieceDays:number,topUp:number,start:number,end:number}} */
+/** @param {HireSlot} s @param {Day} from @param {Day} to @param {Day} today @param {number|null} [minDays] @returns {{daily:number[],pieceDays:number,topUp:number,start:number,end:number,arrived:number,left:number,sameDay:number}} */
 export function hirePeriod(s, from, to, today, minDays = null) {
   const lots = lotsOf(s, today),
     n = daysBetween(from, to) + 1,
     daily = new Array(Math.max(0, n)).fill(0);
   let pieceDays = 0,
-    topUp = 0;
+    topUp = 0,
+    // what moved inside the period: pieces that arrived, pieces that left, and pieces that did both on one day (a same-day return:
+    // 0 days, but the customer still sees the delivery on the statement, ADR 0011 review)
+    arrived = 0,
+    left = 0,
+    sameDay = 0;
   for (const l of lots) {
+    // pieces on hire on the first day count as 'at start'; a lot that arrives after it (or comes and goes on that day) is 'in'
+    if ((l.start > from || (l.start === from && l.closed && l.end === from)) && l.start <= to) arrived += l.q;
+    if (l.closed && l.end >= from && l.end <= to) left += l.q;
+    if (l.closed && l.start === l.end && l.start >= from && l.start <= to) sameDay += l.q;
     const d = overlapDays(l.start, l.end, from, to);
     if (!d) continue;
     pieceDays += l.q * d;
@@ -236,7 +303,7 @@ export function hirePeriod(s, from, to, today, minDays = null) {
       const held = heldFor(l);
       if (held < minDays) topUp += l.q * (minDays - held);
     }
-  return { daily, pieceDays, topUp, start: daily[0] ?? 0, end: daily.at(-1) ?? 0 };
+  return { daily, pieceDays, topUp, start: daily[0] ?? 0, end: daily.at(-1) ?? 0, arrived, left, sameDay };
 }
 // The rate that applies from a standard version and a site version: a site price (week and/or day) replaces the standard price as a whole (a negotiated
 // week price is never mixed with the standard day price); the minimum comes from the site when it sets one, else from the standard.
@@ -276,6 +343,16 @@ export const hireAmount = (pieceDays, rate) =>
   !rate?.priced ? null : rate.rule === 'day' ? pieceDays * rate.day : Math.round((pieceDays * rate.week) / 7);
 /** @type {(subtotal:number)=>number} */
 export const hireGst = (subtotal) => Math.round((subtotal * GST_PERCENT) / 100);
+/** GST on one line, rounded to the cent on its own with the sign kept (the way Xero and MYOB work a line's tax out, ADR 0011: a
+ * statement's GST is the sum of its lines' GST so the statement, the MYOB file and the invoice Xero raises agree). @type {(c:number|null)=>number} */
+export const lineGst = (c) => (c == null ? 0 : Math.sign(c) * Math.round((Math.abs(c) * GST_PERCENT) / 100));
+/** Cents as '-$1,234.56' for words people read (toasts, Needs you, the locked text); '' for null. @type {(c:number|null)=>string} */
+export const hireDollars = (c) => {
+  if (c == null) return '';
+  const v = Math.abs(Math.round(c)),
+    whole = String(Math.floor(v / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (c < 0 ? '-' : '') + '$' + whole + '.' + String(v % 100).padStart(2, '0');
+};
 /** Cents as dollars and cents ('12.50'); '' for null. @type {(c:number|null)=>string} */
 export const hireMoney = (c) =>
   c == null
@@ -346,6 +423,8 @@ export function hireCharge(s, from, to, today, segs) {
       n7: 0,
       topUp: 0,
       top7: 0,
+      /** @type {{q:number,held:number,days:number}[]} */
+      tops: [], // the top-up by pieces and days short of the minimum, so the line can say '24 × 28 days + 30 × 17 days'
     }));
   const add = (q, S, E) => {
     if (S > T || E <= F) return;
@@ -372,6 +451,9 @@ export function hireCharge(s, from, to, today, segs) {
     if (held >= r.minDays) continue;
     o.topUp += l.q * (r.minDays - held);
     if (r.priced) o.top7 += l.q * (cost7(r, r.minDays) - cost7(r, held));
+    const same = o.tops.find((t) => t.held === held);
+    if (same) same.q += l.q;
+    else o.tops.push({ q: l.q, held, days: r.minDays - held });
   }
   return out.map((o) => ({
     from: o.seg.from,
@@ -381,6 +463,7 @@ export function hireCharge(s, from, to, today, segs) {
     amount: o.seg.rate.priced ? Math.round(o.n7 / 7) : null,
     topUp: o.topUp,
     topUpAmount: o.topUp && o.seg.rate.priced ? Math.round(o.top7 / 7) : null,
+    topUps: o.tops.sort((a, b) => b.days - a.days),
   }));
 }
 
@@ -637,6 +720,9 @@ const stamp = (o) => {
 function saveVersion(sim, kind, old, base, fields, from, today) {
   const empty = fields.week == null && fields.day == null && fields.minDays == null,
     now = new Date().toISOString();
+  // a real yard never re-prices an issued statement (ADR 0011): a rate for every day, or one dated on or before a billed site's
+  // billedUpTo, is refused and points at an adjustment
+  if (sim.live()) sim.hireBilledGuard(base.product, base.site ?? null, from);
   let versions =
     from == null
       ? empty
@@ -646,7 +732,10 @@ function saveVersion(sim, kind, old, base, fields, from, today) {
   versions = hireVersions({ versions });
   if (versions.every((v) => v.week == null && v.day == null && v.minDays == null)) versions = [];
   if (!versions.length) {
-    if (old) sim.repo.remove(old.id, kind);
+    // a real yard keeps a removed rate with its history (retention, ADR 0011); the Practice yard removes the record as before
+    if (old && sim.live())
+      sim.repo.save({ ...old, versions: hireVersions(old), removed: true, removedAt: now, removedBy: sim.user.id });
+    else if (old) sim.repo.remove(old.id, kind);
     return null;
   }
   const cur = versionAt(versions, today) ?? { week: null, day: null, minDays: null },
@@ -669,7 +758,72 @@ const fromArg = (v, today) => {
 };
 const whenText = (from) => (from ? ' from ' + dayLabel(from) : ' for every day');
 
+// The words a statement line prints when the hire-stop rule read it (ADR 0011).
+/** @param {OffHireMark} m @param {StopRule} rule @param {number} within */
+function offHireWords(m, rule, within) {
+  const head = 'Off-hire called ' + dayLabel(m.when) + ' by ' + m.who + ' (pickup ' + m.pickup + '). ';
+  if (m.ran)
+    return (
+      head +
+      'Collected ' +
+      dayLabel(m.collectedOn) +
+      ', ' +
+      daysBetween(m.when, m.collectedOn) +
+      ' days after the call: hire ran to collection (company rule: within ' +
+      within +
+      ' days).'
+    );
+  return (
+    head +
+    'Hire stopped ' +
+    dayLabel(m.stoppedOn) +
+    ' (company rule: ' +
+    STOP_RULE_WORDS[rule] +
+    ')' +
+    (m.collectedOn ? '; collected ' + dayLabel(m.collectedOn) + '.' : '; not collected yet.')
+  );
+}
+
 export const hireMethods = {
+  // A real yard: a rate that would re-price a day already on an issued statement is refused (ADR 0011): the product is on a line of
+  // a statement still standing (not reversed) whose site period reaches the day the rate starts (from null: every day). A rate for a
+  // product never billed, or a site rate for a site never billed for it, is free.
+  hireBilledGuard(productId, siteId, from) {
+    const reversed = new Set(
+      this.repo
+        .all('statement')
+        .map((x) => x.reverses?.id)
+        .filter(Boolean),
+    );
+    let hit = null;
+    for (const st of this.repo.all('statement')) {
+      if (st.reverses || reversed.has(st.id)) continue;
+      for (const s of st.sites) {
+        if (siteId && s.site !== siteId) continue;
+        if (from && s.to < from) continue;
+        if (!s.lines.some((l) => l.product.id === productId && !l.zero)) continue; // a same-day return billed nothing
+        if (!hit || s.to > hit.to) hit = { site: s.site, name: s.name, to: s.to, number: st.number };
+      }
+    }
+    if (!hit) return;
+    const e = /** @type {any} */ (
+      new AppError(
+        409,
+        'Hire at ' +
+          hit.name +
+          ' up to ' +
+          dayLabel(hit.to) +
+          ' is on issued statement ' +
+          hit.number +
+          '. A new rate applies from ' +
+          dayLabel(addDays(hit.to, 1)) +
+          ' at the earliest; to change what was billed, add an adjustment.',
+      )
+    );
+    e.code = 'BILLED';
+    e.detail = { site: hit.site, billedUpTo: hit.to, statement: hit.number, earliest: addDays(hit.to, 1) };
+    throw e;
+  },
   hireRequire() {
     if (!this.auth.permissions(this.user).includes('finance.view'))
       throw new AppError(403, 'Hire figures are for the owner only.');
@@ -683,7 +837,7 @@ export const hireMethods = {
       minDays = minDaysOf(input.minDays),
       today = (this.live() ? this.planNowCal() : calendarNow()).today,
       from = fromArg(input.from, today);
-    const old = this.repo.all('hireRate').find((r) => r.product === p.id),
+    const old = this.repo.all('hireRate').find((r) => r.product === p.id && !r.removed),
       saved = saveVersion(this, 'hireRate', old, { product: p.id }, { week, day, minDays }, from, today),
       removed = !saved,
       off = week == null && day == null && minDays == null;
@@ -716,7 +870,7 @@ export const hireMethods = {
       note = noteOf(input.note),
       today = (this.live() ? this.planNowCal() : calendarNow()).today,
       from = fromArg(input.from, today);
-    const old = this.repo.all('hireSiteRate').find((r) => r.site === site.id && r.product === p.id),
+    const old = this.repo.all('hireSiteRate').find((r) => r.site === site.id && r.product === p.id && !r.removed),
       saved = saveVersion(
         this,
         'hireSiteRate',
@@ -746,26 +900,66 @@ export const hireMethods = {
   },
   // GET /api/hire?site=&from=&to= : the overview, every rate, and one site's statement when a site is given. The sums are kept until the hire book,
   // a rate or the day changes; names, collections and the live count are read fresh each time.
+  // The hire book brought up to date with the ledger (billing.js reads it without the finance check for Needs you).
+  hireSync() {
+    return sync(this.db, this.user.company_id);
+  },
   hire(query = {}) {
     this.hireRequire();
     const cal = this.live() ? this.planNowCal() : calendarNow(), // a real yard: today on company time
       st = sync(this.db, this.user.company_id);
     return this.hireView(st, cal, { site: query.site || null, from: query.from || null, to: query.to || null });
   },
-  hireView(st, cal, { site, from, to }) {
+  // The same read for the app's own billing (billing.js: a customer's statement, the unbilled figure, the parallel run, the re-reading
+  // of a billed period), without the on-screen limit of 400 days: an opening lot may have been out for years (ADR 0011 review). Never
+  // on a route: the caller has checked who is asking.
+  hireFull(query = {}) {
+    const cal = this.live() ? this.planNowCal() : calendarNow(),
+      st = sync(this.db, this.user.company_id);
+    return this.hireView(st, cal, {
+      site: query.site || null,
+      from: query.from || null,
+      to: query.to || null,
+      noLimit: true,
+    });
+  },
+  hireView(st, cal, { site, from, to, noLimit = false }) {
     const today = cal.today,
       weekStart = cal.weekStart,
       monthStart = today.slice(0, 8) + '01',
       catalogue = this.catalogue().byId,
       sites = this.repo.all('site'),
       siteById = new Map(sites.map((s) => [s.id, s]));
-    const rawRates = [...this.repo.all('hireRate'), ...this.repo.all('hireSiteRate')],
+    // a real yard's off-hire notices and its hire-stop rule (ADR 0011): the book is read through them; a removed rate is kept, not priced
+    const notices = this.live() ? this.hireNotices() : new Map(),
+      settings = this.live() ? this.hireSettingsView() : null,
+      rule = settings?.stopRule ?? 'COLLECTION',
+      within = settings?.collectWithinDays ?? 7,
+      slotsAt = (sid) => {
+        const m = st.book.get(sid);
+        if (!m) return new Map();
+        const ns = notices.get(sid);
+        if (!ns?.length || rule === 'COLLECTION') return m;
+        return new Map([...m].map(([pid, s]) => [pid, hireOffHire(s, ns, today, rule, within)]));
+      };
+    const rawRates = [...this.repo.all('hireRate'), ...this.repo.all('hireSiteRate')].filter((r) => !r.removed),
       rates = rawRates.filter((r) => r.kind === 'hireRate').map(stamp),
       siteRates = rawRates.filter((r) => r.kind === 'hireSiteRate').map(stamp),
       std = new Map(rates.map((r) => [r.product, r])),
       over = new Map(siteRates.map((r) => [r.site + '|' + r.product, r]));
     // The key of every kept sum: the hire book's version, the day and every rate object's id and version.
-    const rk = st.bv + '|' + today + '|' + weekStart + '|' + rawRates.map((r) => r.id + '@' + r.version).join(',');
+    const rk =
+      st.bv +
+      '|' +
+      today +
+      '|' +
+      weekStart +
+      '|' +
+      rawRates.map((r) => r.id + '@' + r.version).join(',') +
+      '|' +
+      rule +
+      within +
+      [...notices].map(([sid, ns]) => sid + ':' + ns.map((n) => n.pickup + n.when).join('/')).join(',');
     const lines = new Map(),
       timeline = (s, p) => {
         const k = s + '|' + p;
@@ -809,7 +1003,11 @@ export const hireMethods = {
         onHire = new Map(),
         everOn = new Set(),
         unpricedNow = new Map();
-      for (const [sid, byProduct] of st.book) {
+      for (const sid of st.book.keys()) {
+        // pieces, since and the longest hire read the book as it is (the gear is there until it is collected); only the money reads
+        // it through the hire-stop rule (ADR 0011 review: a site with an open off-hire window is not "all back")
+        const byProduct = slotsAt(sid),
+          raw = st.book.get(sid);
         let n = 0,
           since = null,
           accrued = 0,
@@ -819,23 +1017,28 @@ export const hireMethods = {
           missing = new Set(),
           rr = 0,
           first = null,
-          longest = null;
+          longest = null,
+          pickup = null;
         for (const [pid, lots] of byProduct) {
           everOn.add(pid);
-          const segs = timeline(sid, pid),
+          const real = raw?.get(pid) ?? lots,
+            segs = timeline(sid, pid),
             now = segs.find((x) => inSeg(x, today))?.rate,
-            openQ = lots.open.reduce((a, l) => a + l.q, 0);
-          const start = [...lots.closed.map((l) => l.start), ...lots.open.map((l) => l.start)].sort()[0];
+            openQ = real.open.reduce((a, l) => a + l.q, 0);
+          const start = [...real.closed.map((l) => l.start), ...real.open.map((l) => l.start)].sort()[0];
           if (start && (!first || start < first)) first = start;
           if (openQ) {
             n += openQ;
             onHire.set(pid, (onHire.get(pid) ?? 0) + openQ);
-            const s0 = lots.open[0].start;
+            const s0 = real.open[0].start;
             if (!since || s0 < since) since = s0;
             if (!longest || s0 < longest.since) longest = { product: pid, since: s0, days: daysBetween(s0, today) + 1 };
             if (now?.priced) rr += openQ * now.perWeek;
             else unpricedNow.set(pid, (unpricedNow.get(pid) ?? 0) + openQ);
           }
+          const held = lots.closed.find((l) => l.why === 'offhire' && l.oh && l.oh.collectedOn == null);
+          if (held?.oh && (!pickup || held.oh.stoppedOn < pickup.stoppedOn))
+            pickup = { pickup: held.oh.pickup, when: held.oh.when, who: held.oh.who, stoppedOn: held.oh.stoppedOn };
           if (!start) continue;
           for (const c of hireCharge(lots, start, today, today, segs)) {
             if (!c.pieceDays && !c.topUp) continue;
@@ -862,6 +1065,7 @@ export const hireMethods = {
             runRate: rr,
             missing: [...missing],
             longest,
+            pickup,
           });
       }
       return { sites: out, onHire, everOn, unpricedNow };
@@ -898,6 +1102,10 @@ export const hireMethods = {
         id: sid,
         name: s.name,
         client: s.client ?? null,
+        customer: s.customer ?? null,
+        customerName: s.customer ? this.customerName?.(s.customer) : null,
+        billedUpTo: s.billedUpTo ?? null,
+        lastStatement: s.lastStatement ?? null,
         address: s.address ?? null,
         status: s.status,
         pieces: x.pieces,
@@ -910,6 +1118,8 @@ export const hireMethods = {
         missing: x.missing,
         overrides: siteRates.filter((r) => r.site === sid).length,
         collection: nextCollection.get(sid) ?? null,
+        // a real yard: the off-hire notice whose pickup is still waiting (hire stopped by the rule, the gear still there)
+        pickup: x.pickup ?? null,
       });
     }
     rows.sort(
@@ -961,6 +1171,7 @@ export const hireMethods = {
       products,
       rates,
       siteRates,
+      settings,
       siteList: sites
         .map((s) => ({ id: s.id, name: s.name, status: s.status, onHire: rows.some((r) => r.id === s.id) }))
         .sort(
@@ -978,12 +1189,23 @@ export const hireMethods = {
         siteById,
         rk,
         rates: [...rates, ...siteRates.filter((r) => r.site === site)],
+        slotsAt,
+        rule,
+        within,
+        noLimit,
       });
     return result;
   },
   // One site's statement: a line per material and rate period with piece-days in the period (plus a minimum-hire top-up where pieces went back early),
   // subtotal, GST and total.
-  hireStatement(st, siteId, from, to, cal, { timeline, product, siteById, rk, rates }) {
+  hireStatement(
+    st,
+    siteId,
+    from,
+    to,
+    cal,
+    { timeline, product, siteById, rk, rates, slotsAt, rule, within, noLimit = false },
+  ) {
     const today = cal.today,
       s = siteById.get(siteId);
     if (!s) throw new AppError(404, 'Record not found in your company.');
@@ -993,18 +1215,62 @@ export const hireMethods = {
     requireRule(from <= to, 'The statement starts after it ends. Pick a From date on or before the To date.');
     const clamped = to > today;
     if (clamped) to = today;
-    requireRule(daysBetween(from, to) + 1 <= MAX_DAYS, 'Choose a period of at most ' + MAX_DAYS + ' days.');
+    // the on-screen limit only: the app's own billing reads any period (hireFull)
+    if (!noLimit)
+      requireRule(daysBetween(from, to) + 1 <= MAX_DAYS, 'Choose a period of at most ' + MAX_DAYS + ' days.');
     const core = memo(st, 's|' + rk + '|' + siteId + '|' + from + '|' + to, () => {
       const days = daysBetween(from, to) + 1,
         daily = new Array(days).fill(0),
         lines = [];
-      for (const [pid, lots] of st.book.get(siteId) ?? []) {
-        const p = hirePeriod(lots, from, to, today);
-        const charges = hireCharge(lots, from, to, today, timeline(siteId, pid)).filter((c) => c.pieceDays || c.topUp);
-        if (!charges.length) continue;
+      for (const [pid, lots] of slotsAt(siteId)) {
+        const p = hirePeriod(lots, from, to, today),
+          segs = timeline(siteId, pid);
+        const charges = hireCharge(lots, from, to, today, segs).filter((c) => c.pieceDays || c.topUp),
+          moved = { in: p.arrived, out: p.left, sameDay: p.sameDay };
+        if (!charges.length && !moved.in && !moved.out) continue;
         p.daily.forEach((n, i) => {
           daily[i] += n;
         });
+        // the hire-stop rule's marks on this product's lots inside the period (one per pickup), so the line can say so (ADR 0011):
+        // only once the period reaches the day the rule bites (the stop day; the call day when hire ran to collection), so a
+        // statement to the day before a call says nothing about it
+        const marks = new Map();
+        for (const l of lots.closed)
+          if (
+            l.oh &&
+            to >= (l.oh.ran ? l.oh.when : l.oh.stoppedOn) &&
+            overlapDays(l.start, addDays(l.oh.collectedOn ?? l.end, 1), from, to) &&
+            !marks.has(l.oh.pickup)
+          )
+            marks.set(l.oh.pickup, l.oh);
+        const offHire = [...marks.values()].map((m) => ({
+          ...m,
+          rule,
+          within,
+          provisional: m.collectedOn == null, // the pickup is still waiting: the reading may change (ADR 0011 review)
+          words: offHireWords(m, rule, within),
+        }));
+        if (!charges.length) {
+          // pieces came and went inside the period without a charge (a same-day return): the customer still sees the delivery
+          lines.push({
+            pid,
+            rateFrom: from,
+            rateTo: to,
+            split: false,
+            start: 0,
+            end: 0,
+            peak: 0,
+            pieceDays: 0,
+            rate: segs.find((x) => inSeg(x, to))?.rate ?? hireRateFor(null, null),
+            amount: 0,
+            topUp: null,
+            offHire,
+            daily: new Array(days).fill(0),
+            moved,
+            zero: true,
+          });
+          continue;
+        }
         for (const c of charges) {
           const a = c.from && c.from > from ? c.from : from,
             b = c.to && c.to < to ? c.to : to,
@@ -1022,8 +1288,13 @@ export const hireMethods = {
             pieceDays: c.pieceDays,
             rate: c.rate,
             amount: c.amount,
-            topUp: c.topUp ? { pieceDays: c.topUp, amount: c.topUpAmount, minDays: c.rate.minDays } : null,
+            topUp: c.topUp
+              ? { pieceDays: c.topUp, amount: c.topUpAmount, minDays: c.rate.minDays, parts: c.topUps }
+              : null,
+            offHire,
             daily: mine,
+            moved: charges.length > 1 ? { ...moved, split: true } : moved,
+            zero: false,
           });
         }
       }
@@ -1047,11 +1318,16 @@ export const hireMethods = {
     for (const l of lines) {
       pieceDays += l.pieceDays;
       if (l.product.demo) demo = true;
+      if (l.zero) continue; // nothing to price on a same-day return
       if (!l.rate.priced) unpricedIds.add(l.pid);
       else subtotal += l.amount + (l.topUp?.amount ?? 0);
     }
     missing = unpricedIds.size;
-    const gst = hireGst(subtotal),
+    // GST line by line, as the issued statement and the accounting file work it out (ADR 0011 review)
+    const gst = lines.reduce(
+        (g, l) => (l.zero || !l.rate.priced ? g : g + lineGst(l.amount) + lineGst(l.topUp?.amount ?? 0)),
+        0,
+      ),
       used = new Set(lines.map((l) => l.pid));
     const asOf =
       rates
@@ -1092,7 +1368,12 @@ export const hireMethods = {
       ).size,
       rateChanges: new Set(lines.filter((l) => l.split).map((l) => l.pid)).size,
       ratesAsOf: asOf,
-      ratesAsOfDay: asOf ? localDay(new Date(asOf)) : null,
+      // a real yard's day is the company's (the audit's UTC-date slip put 29 Sep on a 30 Sep AEST statement)
+      ratesAsOfDay: asOf ? (this.live() ? this.planDayOfIso(asOf) : localDay(new Date(asOf))) : null,
+      billedUpTo: s.billedUpTo ?? null,
+      lastStatement: s.lastStatement ?? null,
+      customer: s.customer ?? null,
+      hireStopRule: this.live() ? stopRuleWords(rule, within) : null,
       onHireNow: to === today ? (core.daily.at(-1) ?? 0) : 0,
     };
   },

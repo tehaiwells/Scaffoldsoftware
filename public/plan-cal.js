@@ -67,7 +67,7 @@ export function chipOf(e) {
         : (e.truckName ?? 'Truck') + (e.driverName ? ' · ' + e.driverName : ''),
     };
   }
-  // a gear list (ADR 0011): its name, its time and an arrow by direction ('Bondi gear · 7:00 am → Bondi', 'A → B', '← Bondi')
+  // a gear list (ADR 0012): its name, its time and an arrow by direction ('Bondi gear · 7:00 am → Bondi', 'A → B', '← Bondi')
   if (e.type === 'MATERIALS' && e.gear)
     return {
       kind: 'MATERIALS',
@@ -87,7 +87,7 @@ export function chipOf(e) {
     return { kind: 'LOAD', ...CHIP_KINDS.LOAD, icon: 'spr-truck12', label: 'Going → ' + (e.siteName ?? 'site') }; // sent from the yard board today
   return { kind: 'DELIVERED', ...CHIP_KINDS.DELIVERED, label: 'Delivered ' + (e.siteName ?? '') };
 }
-// A worker's task on the calendar (ADR 0011): a plain job's chip, 'P1 Sweep the racks · Kev, Sam'. A gear list's task is not a chip of its
+// A worker's task on the calendar (ADR 0012): a plain job's chip, 'P1 Sweep the racks · Kev, Sam'. A gear list's task is not a chip of its
 // own: the list's chip is there, and the card under the calendar shows the workers' ticks.
 export function chipOfTask(t) {
   const who = (t.workers ?? []).map((w) => String(w.name ?? '').split(' ')[0]).filter(Boolean),

@@ -117,10 +117,10 @@ const SENT_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.status')='SENT' AND coalesce(json_type(data,'$.closedAt'),'null')='null' ORDER BY rowid";
 const PERSON_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.person')=? ORDER BY rowid";
-// messages about something that is not a plan item (a rostered day, a task: ADR 0011), by the record they are about
+// messages about something that is not a plan item (a rostered day, a task: ADR 0012), by the record they are about
 const ABOUT_MSGS =
   "SELECT id,kind,data,version FROM objects WHERE company_id=? AND kind='message' AND json_extract(data,'$.about.id')=? ORDER BY rowid";
-// ---------- message kinds (ADR 0011 §11.1) ----------
+// ---------- message kinds (ADR 0012 §11.1) ----------
 // What a message is about: a plan item (every message before part 5), a rostered day or a task. Each kind registers its hooks once; plan.js
 // registers the plan-item kind itself with the behaviour it always had, so nothing changes for existing messages. All hooks get the Simulation.
 //   isOpen(sim, m)        may this message still be delivered or answered? (clockDeliverDue calls it off when false)
@@ -267,7 +267,7 @@ export const planMethods = {
     const who = !m.personName || DEMO_NAME.test(m.personName) ? 'there' : m.personName.split(' ')[0],
       when = dayLabel(it.day),
       at = timeWords(it.time);
-    // a gear list's day-before ask and day-of notice to the driver (gear.js, ADR 0011)
+    // a gear list's day-before ask and day-of notice to the driver (gear.js, ADR 0012)
     if ((m.subject === 'READY' || m.subject === 'DAY') && typeof this.gearMsgText === 'function')
       return this.gearMsgText(m, it, who);
     if (m.subject === 'DRIVE') {
@@ -360,7 +360,7 @@ export const planMethods = {
     return 'Asked ' + who + ' to work at ' + this.planSiteName(m.site) + ' on ' + when + '.';
   },
   // A new ask of one person for one item; sent at once when it is due (it always is: asks are made when their time comes).
-  // about: {kind, id} when the message is about something other than a plan item (a rostered day, a task: ADR 0011); `it` then only
+  // about: {kind, id} when the message is about something other than a plan item (a rostered day, a task: ADR 0012); `it` then only
   // lends its day, time and site, and the message stores item: null. needsAnswer: a notice (Got it) rather than an ask (yes / no).
   /** @param {any} it @param {string} person @param {string} personKind @param {string} subject @param {number} now
    * @param {{quiet?:boolean,sendAt?:number,about?:{kind:string,id:string},itemType?:string,needsAnswer?:boolean}} [opts] */
@@ -470,7 +470,7 @@ export const planMethods = {
           '. Ask someone else on the Today page.',
         m.site,
       );
-    // a rostered day or a task follows the answer at once (ADR 0011 §11.1); a plan item's own step reads the message as before
+    // a rostered day or a task follows the answer at once (ADR 0012 §11.1); a plan item's own step reads the message as before
     MESSAGE_KINDS.get(messageKindOf(m))?.onAnswer?.(this, m, at);
     return m;
   },
@@ -501,7 +501,7 @@ export const planMethods = {
       else this.planSeenMsg(m, at);
     }
   },
-  // The clock's duties added by part 5 (ADR 0011 §5), the same three in both yards: the roster's fortnight fill, then the day-before and
+  // The clock's duties added by part 5 (ADR 0012 §5), the same three in both yards: the roster's fortnight fill, then the day-before and
   // day-of asks for rostered days, gear lists and tasks. Each in its own savepoint, so one failing never stops the pass.
   planPartFive(now) {
     for (const name of ['rosterFillDue', 'rosterAsks', 'gearAsks', 'taskAsks']) {
@@ -780,7 +780,7 @@ export const planMethods = {
       if (typeof this.taskListSync === 'function') this.taskListSync(it.id, 'CANCELLED', now);
       return;
     }
-    // a gear list from a site (site -> yard, site -> site): nothing is packed at the yard; the truck fetches it (gear.js, ADR 0011)
+    // a gear list from a site (site -> yard, site -> site): nothing is packed at the yard; the truck fetches it (gear.js, ADR 0012)
     if (it.gear && it.direction && it.direction !== 'OUT' && typeof this.gearStepDemo === 'function')
       return this.gearStepDemo(it, now, today);
     // held stillages that are no longer in the yard (moved by hand, removed): off the list
@@ -833,7 +833,7 @@ export const planMethods = {
         this.planLog(it, 'The load on ' + (t?.name ?? 'the truck') + " didn't go. It is back in the yard.", now);
       }
       if (!trip.done && t?.status === 'AT_SITE' && t.at === it.site) {
-        if (it.gear) this.gearEngineMark?.(it, 'ARRIVED_DROP', now); // the truck is at the site: the chain's arrival dot (ADR 0011)
+        if (it.gear) this.gearEngineMark?.(it, 'ARRIVED_DROP', now); // the truck is at the site: the chain's arrival dot (ADR 0012)
         const ids = new Set(trip.containers ?? []),
           b = this.tasks().find((x) => active(x) && x.state === 'BLOCKED' && ids.has(x.container));
         if (b) {
@@ -940,7 +940,7 @@ export const planMethods = {
         this.planLog(it, packer.name + ' has been asked to pack it.', now);
       } else this.planLog(it, 'No yardsman in the team, so nobody was sent a message.', now);
       it.stage = 'PACKING';
-      if (it.gear) this.gearEngineMark?.(it, 'RECEIVED', now); // the simulated crew has the list (the task's Received, ADR 0011)
+      if (it.gear) this.gearEngineMark?.(it, 'RECEIVED', now); // the simulated crew has the list (the task's Received, ADR 0012)
       if (jobsOff && this.planPack(it, now))
         this.planLog(it, 'Packed by the office (yard jobs are switched off).', now);
     }
@@ -1227,7 +1227,7 @@ export const planMethods = {
       it.problem = null;
       this.planLog(it, t.name + ' is loading ' + plural(loaded.length, 'stillage') + ' for ' + site.name + '.', now);
       if (it.gear) {
-        // the truck is at the yard's loading spot and the crew loads it: the chain's first two dots (ADR 0011)
+        // the truck is at the yard's loading spot and the crew loads it: the chain's first two dots (ADR 0012)
         this.gearEngineMark?.(it, 'ARRIVED_PICKUP', now);
         this.gearEngineMark?.(it, 'LOADED', now);
       }
@@ -2284,7 +2284,7 @@ export const planMethods = {
         now,
       );
     if (this.live()) this.planLiveMoved(this.repo.get(it.id, 'planItem'), { moved, lines, tp });
-    // a gear list's day-before asks are for the old day: called off, sent again when due; its task follows (ADR 0011)
+    // a gear list's day-before asks are for the old day: called off, sent again when due; its task follows (ADR 0012)
     if (it.type === 'MATERIALS' && it.gear) this.gearMoved?.(it.id, now);
     if (it.type === 'MATERIALS' && typeof this.taskListSync === 'function') this.taskListSync(it.id, 'MOVED', now);
     this.planStep(it.id);
@@ -2530,7 +2530,7 @@ export const planMethods = {
     requireRule(m.status !== 'WAITING_TO_SEND', "This hasn't been sent yet.");
     requireRule(m.needsAnswer, "This one doesn't need an answer. Tap Got it.");
     const now = this.planNow();
-    // a message about a rostered day or a task (ADR 0011 §11.1): its own kind says whether it is still open and until when it can be answered
+    // a message about a rostered day or a task (ADR 0012 §11.1): its own kind says whether it is still open and until when it can be answered
     if (messageKindOf(m) !== 'planItem') {
       const hook = MESSAGE_KINDS.get(messageKindOf(m));
       requireRule(hook, 'That message is no longer there.');

@@ -214,6 +214,9 @@ export const gameMethods = {
     const site = this.site({
       name: input?.name,
       address: typeof input?.address === 'string' && input.address.trim() ? input.address : undefined,
+      // a real yard: the customer it bills to and its PO (ADR 0011)
+      ...(input?.customer !== undefined ? { customer: input.customer } : {}),
+      ...(input?.po !== undefined ? { po: input.po } : {}),
     });
     // tapped on an empty block of the map: the site goes there (the map's own rule for moving a site; a refused block keeps the automatic one)
     if (Number.isInteger(input?.col) && Number.isInteger(input?.row) && typeof this.worldPlace === 'function') {
@@ -301,19 +304,23 @@ export const gameMethods = {
       const p = this.effective(line.product);
       if (costs.has(p.id)) line.unitCost = costs.get(p.id);
       requireRule(!p.retired, p.name + ' has been removed from the catalogue.');
-      requireRule(
-        cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
-          this.user.company_id,
-          p.system,
-        )?.enabled,
-        'Switch on this scaffold system on the Account page first.',
-      );
-      requireRule(
-        p.unitWeight > 0,
-        p.name +
-          ' has no weight in your parts list, so the crew cannot lift it. Add its weight in the Office, Materials catalogue.',
-      );
-      const per = gpPerStillage(p, lift);
+      // a real yard: any system name, and a part without a weight goes in as it is (the weight is needed only for the truck-mass check,
+      // ADR 0011); the Practice yard keeps its ticked systems and its lifting rule
+      if (!this.live()) {
+        requireRule(
+          cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
+            this.user.company_id,
+            p.system,
+          )?.enabled,
+          'Switch on this scaffold system on the Account page first.',
+        );
+        requireRule(
+          p.unitWeight > 0,
+          p.name +
+            ' has no weight in your parts list, so the crew cannot lift it. Add its weight in the Office, Materials catalogue.',
+        );
+      }
+      const per = p.unitWeight > 0 ? gpPerStillage(p, lift) : p.packQuantity > 0 ? p.packQuantity : line.quantity;
       requireRule(per > 0, p.name + ' is too heavy for the forklift, even one at a time.');
       let left = line.quantity,
         used = 0;
@@ -653,7 +660,7 @@ export const gameMethods = {
         t.name + ' is on its way to ' + site.name + ' to bring ' + (scope === 'ALL' ? 'everything' : 'it') + ' back.',
     };
   },
-  // A gear list from site A to site B (ADR 0011, the Practice yard): the truck drives to A empty, the site crew there loads what the list asks
+  // A gear list from site A to site B (ADR 0012, the Practice yard): the truck drives to A empty, the site crew there loads what the list asks
   // for (the stillages holding it, as a Bring back picks them), it drives on to B, unloads with B's crane and comes home. gameStep runs it.
   gameMoveStart(input) {
     this.gamePaused(input);

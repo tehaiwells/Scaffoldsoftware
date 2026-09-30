@@ -152,6 +152,8 @@ export const taskMethods = {
     if (row?.status === 'DENIED') throw new AppError(409, w.name + " can't work on " + dayLabel(day) + '.');
     if (row && row.status !== 'REMOVED') return null;
     if (input?.roster !== true || day < this.planToday(this.planNow())) return null;
+    // the roster is the office's (rosterPick needs operations.manage): a supervisor's task leaves them not rostered, and the office rosters
+    if (!this.auth.permissions(this.user).includes('operations.manage')) return null;
     this.rosterPick({ person: w.id, days: [day], ...(site ? { where: site } : {}) });
     return w.name;
   },

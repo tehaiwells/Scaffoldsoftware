@@ -24,7 +24,7 @@ export const CREW_ACTIONS = {
   returnCount: { label: 'Counted back', ask: 'Count what came off the truck at the yard.' },
   messageAnswer: { label: 'Your answer', ask: '' },
   messageSeen: { label: 'Got it', ask: '' },
-  tripArrived: { label: 'Arrived', ask: '' }, // at the yard (or site A), then at the site (or the yard): one tap, no counts (ADR 0011)
+  tripArrived: { label: 'Arrived', ask: '' }, // at the yard (or site A), then at the site (or the yard): one tap, no counts (ADR 0012)
   crewSignOn: { label: 'On site', ask: 'Who is here?' },
   planDone: { label: 'Done', ask: '' },
   // a worker's task steps (part 5): Got the list, Packed and ready, Truck loaded; a plain task's Done
@@ -944,9 +944,11 @@ export function crewPage(v) {
   // the roster (tomorrow's Confirm / Deny, today's line) and the day's tasks in priority order first, then everyone's own asks (an
   // unanswered one is the thing to do), then the yard hand's and leading hand's work, then a driver's trips
   // an answered day-before ask (Your tasks tomorrow) has done its job once its day has begun: the day's tasks say what is on
+  // the day-before asks are yesterday's once their day has come: an answered one is a line under Your roster (today's row) or the day's
+  // tasks, not a card that still says "tomorrow"
   const isOpenAsk = (a) =>
     (a.canAnswer || a.canSee || (a.subject === 'TASK_DAY' && !a.seen && !a.answeredAt && a.status === 'SENT')) &&
-    !(a.subject === 'TASK_READY' && a.answeredAt && me.today && a.day <= me.today);
+    !((a.subject === 'TASK_READY' || a.subject === 'ROSTER') && a.answeredAt && me.today && a.day <= me.today);
   const asks = (me.asks ?? [])
     .filter((a) => !OWN_CARD.has(a.subject))
     .slice()
@@ -977,10 +979,15 @@ export function crewPage(v) {
     (doneTasks.length
       ? '<h2 class="cr-day">Done</h2>' + doneTasks.map((t) => taskDayCard(t, v, { quiet: true })).join('')
       : '') +
-    (my?.tomorrow?.length || own.some((a) => a.subject === 'TASK_READY')
+    // a task ask still open for today (not answered in time) sits with today's tasks; Tomorrow holds only tomorrow's
+    own
+      .filter((a) => a.subject === 'TASK_READY' && me.today && a.day <= me.today)
+      .map((a) => askCard(a, v))
+      .join('') +
+    (my?.tomorrow?.length || own.some((a) => a.subject === 'TASK_READY' && !(me.today && a.day <= me.today))
       ? '<h2 class="cr-day">Tomorrow</h2>' +
         own
-          .filter((a) => a.subject === 'TASK_READY')
+          .filter((a) => a.subject === 'TASK_READY' && !(me.today && a.day <= me.today))
           .map((a) => askCard(a, v))
           .join('') +
         (my?.tomorrow ?? []).map((t) => taskDayCard(t, v, { quiet: true })).join('')

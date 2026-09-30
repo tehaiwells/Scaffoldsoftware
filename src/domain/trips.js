@@ -26,7 +26,7 @@ import { chainOf, chainWords, nextArrival, CHAIN_MOVES } from './gear-chain.js';
 export const ORDER_OPS = ['orderCreate', 'bringBackCreate', 'orderCancel'];
 export const TRIP_OFFICE_OPS = ['tripBook', 'tripCancel'];
 export const TRIP_CONFIRM_OPS = ['tripLoaded', 'tripDelivered', 'tripCollected', 'tripReturned', 'tripArrived'];
-// Arrivals (ADR 0011): light confirmations by the driver at the pickup place and the drop place; they move nothing (trip_arrival).
+// Arrivals (ADR 0012): light confirmations by the driver at the pickup place and the drop place; they move nothing (trip_arrival).
 export const ARRIVAL_STEPS = ['ARRIVED_PICKUP', 'ARRIVED_DROP'];
 // Packing and counting are the yard's (ADR 0010): a yard hand's phone (the YARD role) or the office (packs.confirm).
 export const PACK_OPS = ['packConfirmed', 'returnCount'];
@@ -282,7 +282,7 @@ export const tripMethods = {
     requireLive(this);
     return this.orderMake('BACK', input ?? {});
   },
-  // MOVE (ADR 0011): site -> site; input.fromSite is where the gear is (the holds), input.site where it goes. Made only through gearListCreate.
+  // MOVE (ADR 0012): site -> site; input.fromSite is where the gear is (the holds), input.site where it goes. Made only through gearListCreate.
   /** @param {'OUT'|'BACK'|'MOVE'} direction @param {any} input @param {{source?:string,planItem?:string|null}} [extra] */
   orderMake(direction, input, extra = {}) {
     const site = this.tripSite(input.site),
@@ -895,17 +895,19 @@ export const tripMethods = {
           DELIVERED_SHORT: ['tripReturned'],
         }[trip.state] ?? [];
     else if (trip.direction === 'MOVE')
-      // site A -> site B (ADR 0011): collected at A, delivered at B; what was not landed at B comes back to the yard
+      // site A -> site B (ADR 0012): collected at A, delivered at B; what was not landed at B comes back to the yard. Back at yard
+      // straight from Collected: B would not take it (came back, not delivered; Send again sends it from the yard). After a full
+      // delivery, Back at yard is the courtesy step that brings the truck home, as on a send.
       next =
         {
           BOOKED: ['tripCollected'],
           PACKED: ['tripCollected'],
-          COLLECTED: ['tripDelivered'],
-          DELIVERED: [],
+          COLLECTED: ['tripDelivered', 'tripReturned'],
+          DELIVERED: trip.steps.RETURNED ? [] : ['tripReturned'],
           DELIVERED_SHORT: ['tripReturned'],
         }[trip.state] ?? [];
     else next = { BOOKED: ['tripCollected'], PACKED: ['tripCollected'], COLLECTED: ['tripReturned'] }[trip.state] ?? [];
-    // the arrival is an optional gate (ADR 0011): offered beside the movement step, never in its way
+    // the arrival is an optional gate (ADR 0012): offered beside the movement step, never in its way
     if (trip.state !== 'CANCELLED' && this.tripArrivalNext(trip)) next = [...next, 'tripArrived'];
     return next;
   },
@@ -966,7 +968,7 @@ export const tripMethods = {
       siteName: site?.name ?? 'The site',
       fromSite: trip.fromSite ?? null,
       fromSiteName: trip.fromSite ? places.from : null,
-      // the gear list's chain (ADR 0011): the dots, and the arrival tap that is next (with its words), if any
+      // the gear list's chain (ADR 0012): the dots, and the arrival tap that is next (with its words), if any
       chain: this.tripChain(trip),
       arrival: arrival ? { step: arrival, words: chainWords(trip.direction, arrival, places) } : null,
       address: site?.address ?? null,
@@ -991,7 +993,7 @@ export const tripMethods = {
       next,
     };
   },
-  /** The gear list (ADR 0011) a trip carries, {id, name, day}, or null: its card on Daily activities shows the trip once. @param {any} trip */
+  /** The gear list (ADR 0012) a trip carries, {id, name, day}, or null: its card on Daily activities shows the trip once. @param {any} trip */
   tripGearList(trip) {
     for (const id of trip.orders ?? []) {
       try {
@@ -1084,7 +1086,7 @@ export const tripMethods = {
   tripReturned(/** @type {any} */ input) {
     return this.tripConfirm('tripReturned', input);
   },
-  // Arrived (ADR 0011): the driver's tap at the pickup place before the load leaves, or at the drop place while it is on the truck. The step is
+  // Arrived (ADR 0012): the driver's tap at the pickup place before the load leaves, or at the drop place while it is on the truck. The step is
   // chosen from the trip's state; one trip_arrival row, the mark on the trip, no stock, no ledger row. Refused once the movement step it gates
   // is recorded ("Already loaded & left"). A real yard only; the Practice yard's engine writes the same marks on the item itself (gear.js).
   tripArrived(/** @type {any} */ input) {
@@ -1317,16 +1319,18 @@ export const tripMethods = {
         x[r.step] = Date.parse(r.occurred_at);
         return m.set(r.trip_id, x);
       }, new Map())) {
-      const [id, x] = r,
-        start = x.LOADED ?? x.COLLECTED,
-        end = x.COLLECTED && x.LOADED === undefined ? x.RETURNED : (x.DELIVERED ?? x.RETURNED);
-      if (start === undefined || !(ms > start) || (end !== undefined && !(ms < end))) continue;
+      const [id, x] = r;
       let t = null;
       try {
         t = this.repo.get(id, 'trip');
       } catch {}
-      const tp2 = t ? this.tripPlan(t) : null;
-      if (!t || (tp2?.truck ?? t.truck) !== truckId) continue;
+      if (!t) continue;
+      // out from Loaded & left (a send) or Collected (a bring-back, a move); back at Delivered (a send or a move lands) or Back at yard
+      const start = x.LOADED ?? x.COLLECTED,
+        end = t.direction === 'BACK' ? x.RETURNED : (x.DELIVERED ?? x.RETURNED);
+      if (start === undefined || !(ms > start) || (end !== undefined && !(ms < end))) continue;
+      const tp2 = this.tripPlan(t);
+      if ((tp2?.truck ?? t.truck) !== truckId) continue;
       return (
         this.planName(truckId, 'The truck') +
         ' was on ' +
@@ -1478,11 +1482,14 @@ export const tripMethods = {
     }
     const id = randomUUID(),
       lines = [...done].map(([product, quantity]) => ({ product, quantity }));
+    // the row's site is where the step happened: a move's Collected is at the first site, and its Back at yard brings that site's
+    // pieces home (its account counts them back); Delivered is at the site it went to
+    const site = trip.direction === 'MOVE' && (step === 'COLLECTED' || step === 'RETURNED') ? trip.fromSite : trip.site;
     cached(this.db, INSERT_CONFIRMATION).run(
       id,
       this.repo.company,
       trip.id,
-      trip.site,
+      site,
       step,
       JSON.stringify(lines),
       receivedBy,
@@ -2020,7 +2027,7 @@ export const tripMethods = {
         });
     }
     if (step === 'RETURNED') {
-      if (trip.direction === 'OUT' && !trip.steps.DELIVERED) trip.undelivered = true;
+      if (trip.direction !== 'BACK' && !trip.steps.DELIVERED) trip.undelivered = true; // a send or a move nobody took
       trip.state = 'RETURNED';
       trip.notBack = [...onTruck].map(([product, quantity]) => ({ product, quantity }));
       if (truck)
@@ -2093,7 +2100,7 @@ export const tripMethods = {
         x.stage = 'ON_THE_WAY';
         x.status = 'ACTIVE';
       }
-      // a gear list's task (ADR 0011 section 11.2): the yard's pack and the load are the task's own marks too
+      // a gear list's task (ADR 0012 section 11.2): the yard's pack and the load are the task's own marks too
       if (it.gear && ['PACKED', 'LOADED', 'COLLECTED'].includes(step) && typeof this.taskListSync === 'function')
         this.taskListSync(it.id, step === 'COLLECTED' ? 'LOADED' : step, now, trip.steps?.[step] ?? null);
       if (step === 'RETURNED' && trip.undelivered) {

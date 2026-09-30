@@ -85,7 +85,11 @@ test('Remove site in a real yard: a site with nothing recorded goes (with Undo);
   const typo = f.cmd('gameSite', { name: 'Bondii' }).site;
   const r = f.cmd('gameRemoveSite', { site: typo.id });
   assert.equal(r.removed, true);
-  assert.ok(!f.sim.repo.all('site').some((x) => x.id === typo.id), 'gone from the map');
+  // a real yard never deletes a site (retention, ADR 0011): it is archived with its history, off the map, and Undo opens it again
+  const kept = f.sim.repo.get(typo.id, 'site');
+  assert.equal(kept.status, 'ARCHIVED', 'kept, off the map');
+  assert.equal(kept.neverUsed, true);
+  assert.ok(!f.sim.snapshot().sites.some((x) => x.id === typo.id && x.status === 'ACTIVE'), 'gone from the map');
   f.cmd('gameRestoreSite', { undo: r.undo });
   assert.equal(f.sim.repo.get(typo.id, 'site').status, 'ACTIVE', 'Undo puts it back');
   assert.equal(f.sim.repo.all('resource').filter((x) => x.location === typo.id).length, 0, 'no invented crane or crew');

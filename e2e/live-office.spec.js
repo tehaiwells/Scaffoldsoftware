@@ -149,7 +149,10 @@ test('every page of the real yard Office: no simulation controls or invented cre
   await page.goto('/');
   await openOffice();
   await drawer.getByRole('button', { name: 'Client sites' }).first().click();
+  // a real yard asks why (ADR 0011): the site is archived with the reason, never deleted
   await page.locator(`[data-sf-remove="${typo.id}"]`).click();
+  await page.locator('[data-sf-reason-in]').fill('Mistyped');
+  await page.locator(`[data-sf-reason-go="${typo.id}"]`).click();
   await expect(page.locator(`[data-site-panel="${typo.id}"]`)).toHaveCount(0, { timeout: 30000 });
   const s2 = await api(page, 'state?page=0');
   expect(s2.sites.some((x) => x.id === typo.id && x.status === 'ACTIVE')).toBe(false);

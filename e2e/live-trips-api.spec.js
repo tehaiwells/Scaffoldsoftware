@@ -67,7 +67,7 @@ test('order, truck and driver; the phone confirms Loaded & left and Delivered; t
   expect((await phone.post('/api/crew/claim', { data: { token, label: 'Test phone' } })).status()).toBe(200);
   const mine = await (await phone.get('/api/crew/me')).json();
   expect(mine.trips.map((t) => t.id)).toEqual([trip.id]);
-  expect(mine.trips[0].next).toEqual(['tripLoaded', 'tripArrived']); // the arrival: an optional gate (ADR 0011)
+  expect(mine.trips[0].next).toEqual(['tripLoaded', 'tripArrived']); // the arrival: an optional gate (ADR 0012)
   // the phone: Loaded & left, then Delivered (received by), one key per tap
   const tap = async (action, data) => {
     const r = await phone.post('/api/crew/commands/' + action, { data, headers: { 'Idempotency-Key': key() } });

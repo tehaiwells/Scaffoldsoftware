@@ -136,7 +136,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/game.css': ['game.css', 'text/css'],
   }); // the game board
   Object.assign(assets, { '/plan-cal.js': ['plan-cal.js', 'text/javascript'] });
-  Object.assign(assets, { '/gear.js': ['gear.js', 'text/javascript'] }); // gear lists: the form, the chain of dots, the week (ADR 0011)
+  Object.assign(assets, { '/gear.js': ['gear.js', 'text/javascript'] }); // gear lists: the form, the chain of dots, the week (ADR 0012)
   Object.assign(assets, { '/mode.js': ['mode.js', 'text/javascript'] }); // LIVE or Practice yard: the chip, the switcher, what each shows // the Today calendar's grid and chips (shared with src/domain/today.js)
   Object.assign(assets, {
     '/crew-queue.js': ['crew-queue.js', 'text/javascript'],
@@ -150,6 +150,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
     '/live-office.js': ['live-office.js', 'text/javascript'], // a real yard's trips on Today, the truck page and Your team
     '/live-today.js': ['live-today.js', 'text/javascript'], // Today as a dispatch tool: Needs you, the lanes, the run sheet (ADR 0010)
     '/live-returns.js': ['live-returns.js', 'text/javascript'], // Back & counted, quarantine, the site-finish question, values (ADR 0010)
+    '/live-billing.js': ['live-billing.js', 'text/javascript'], // customers, off-hire, statements, the accounting file, go-live (ADR 0011)
   });
   Object.assign(assets, {
     '/roster.js': ['roster.js', 'text/javascript'], // Workers: +1 worker and the roster calendar (part 5)
@@ -384,7 +385,7 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         const q = new URL(req.url, 'http://localhost').searchParams;
         send(200, simulation.runSheet({ day: q.get('day'), driver: q.get('driver') }));
       } else if (req.method === 'GET' && path === '/api/needs-you') send(200, simulation.needsYou());
-      // Part 5 (ADR 0011): gear lists with their chain (a day, or a week from today) and the places, trucks and drivers for the form
+      // Part 5 (ADR 0012): gear lists with their chain (a day, or a week from today) and the places, trucks and drivers for the form
       else if (req.method === 'GET' && path === '/api/gear') {
         const q = new URL(req.url, 'http://localhost').searchParams;
         send(200, simulation.gearView({ day: q.get('day'), days: Number(q.get('days') ?? 1) }));
@@ -394,6 +395,46 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         simulation.assertSite(simulation.repo.get(site, 'site').id);
         send(200, { ...simulation.siteAccount(site), charges: simulation.chargeLines(site) });
       }
+      // Part 4 (ADR 0011): customers, hire settings, statements (preview, list, one, the byte-identical reprint), unbilled, off-hire,
+      // the monthly accounting file, the go-live check and the parallel run
+      else if (req.method === 'GET' && path === '/api/customers') send(200, simulation.customersView());
+      else if (req.method === 'GET' && path === '/api/hire-settings')
+        send(200, { settings: simulation.hireSettingsView() });
+      else if (req.method === 'GET' && path === '/api/statements')
+        send(200, simulation.statementsView(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams)));
+      else if (req.method === 'GET' && path === '/api/statement')
+        send(200, simulation.statementGet(new URL(req.url, 'http://localhost').searchParams.get('id')));
+      else if (req.method === 'GET' && path === '/api/statement.txt') {
+        const out = simulation.statementReprint(new URL(req.url, 'http://localhost').searchParams.get('id'));
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${out.name}"`,
+        });
+        res.end(out.text);
+      } else if (req.method === 'GET' && path === '/api/statement-preview')
+        send(200, simulation.statementPreview(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams)));
+      else if (req.method === 'GET' && path === '/api/unbilled') send(200, simulation.unbilledView());
+      else if (req.method === 'GET' && path === '/api/off-hire') send(200, simulation.offHiresView());
+      else if (req.method === 'GET' && path === '/api/accounting.csv') {
+        const out = simulation.accountingFile(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams));
+        // the page reads what the file carried from the headers (the body is the file itself, saved as it is)
+        res.writeHead(200, {
+          'Content-Type': out.type,
+          'Content-Disposition': `attachment; filename="${out.name}"`,
+          'X-Statements': out.statements.join(','),
+          'X-Total': String(out.total),
+          'X-Words': encodeURIComponent(out.words),
+        });
+        res.end(out.body);
+      } else if (req.method === 'GET' && path === '/api/accounting-summary') {
+        // what the file would carry (statements, totals, the package's words), nothing recorded: the page says it after the save
+        const { body: _file, ...out } = simulation.accountingFile(
+          Object.fromEntries(new URL(req.url, 'http://localhost').searchParams),
+          { record: false },
+        );
+        send(200, out);
+      } else if (req.method === 'POST' && path === '/api/golive-preview') send(200, simulation.goLivePreview(body));
+      else if (req.method === 'POST' && path === '/api/parallel-run') send(200, simulation.parallelRun(body));
       // A driver's phone link (the office; a real yard): Copy link, Text it (sms:), and whether phones can reach this server at all.
       else if (req.method === 'POST' && path === '/api/crew-links') {
         const made = crewLink(service, user, body),

@@ -1,5 +1,5 @@
 process.env.TZ = 'Australia/Sydney';
-// Site -> site (MOVE, ADR 0011) in a real yard: the order holds at A, Collected moves A -> truck (A's hire ends that day), Delivered moves
+// Site -> site (MOVE, ADR 0012) in a real yard: the order holds at A, Collected moves A -> truck (A's hire ends that day), Delivered moves
 // truck -> B (B's hire starts), with hire.js untouched; each site's account balances; A cannot be finished while the move is open; a short
 // delivery leaves the rest on the truck until Back at yard. Never ticks.
 import test from 'node:test';
@@ -153,8 +153,15 @@ test('a move holds at A; Collected A -> truck, Delivered truck -> B; hire moves 
   // each site's account balances: Bondi sent 10, 6 left for Manly (on record as collected), 4 on site; Manly has 6 on site
   const a = f.sim.siteAccount(f.site.id),
     b = f.sim.siteAccount(f.manly.id);
-  assert.equal(a.onSite ?? a.summary?.onSite ?? 4, 4);
-  assert.equal(b.onSite ?? b.summary?.onSite ?? 6, 6);
+  assert.equal(a.onSite, 4);
+  assert.equal(b.onSite, 6);
+  // the move's Collected is Bondi's row (where it happened) and what landed at Manly has moved on: both accounts stay whole
+  assert.equal(a.collected, 6);
+  assert.equal(a.moved, 6);
+  assert.equal(a.unaccounted, 0);
+  assert.match(a.summary, /6 moved to Manly/);
+  assert.equal(b.collected, 0, 'nothing was collected from Manly');
+  assert.equal(b.unaccounted, 0);
   assert.equal(f.sim.tripSiteBusy(f.site.id), null, 'Bondi is free again');
 });
 

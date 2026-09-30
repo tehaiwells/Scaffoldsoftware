@@ -25,7 +25,7 @@ export const DOT_WORDS = {
   BOOKED: 'Booked',
   ASKED: 'Asked',
   YES: 'Yes',
-  ARRIVED: 'At yard', // the driver's arrival at the pickup (ADR 0011), a light step before Packed / Loaded
+  ARRIVED: 'At yard', // the driver's arrival at the pickup (ADR 0012), a light step before Packed / Loaded
   PACKED: 'Packed',
   LOADED: 'Loaded',
   AT_SITE: 'At site', // arrived at the drop, before Delivered
@@ -87,7 +87,7 @@ export const dispatchMethods = {
         requireRule(tp.status !== 'DRAFT', this.planWhat(tp) + "'s booking is still a draft. Send it first.");
         requireRule(PLAN_OPEN.includes(tp.status) && tp.day === it.day, 'Choose a truck booked that day.');
       }
-      // a gear list's draft keeps its direction (ADR 0011): a move holds at site A, a bring-back at the site
+      // a gear list's draft keeps its direction (ADR 0012): a move holds at site A, a bring-back at the site
       const made = this.orderMake(
         it.direction ?? 'OUT',
         {

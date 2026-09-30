@@ -35,6 +35,8 @@ import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS, PACK_OPS } f
 import { dispatchMethods, DISPATCH_OPS, PHONE_TAP_OPS, CREW_PHONE_OPS } from './domain/dispatch.js';
 import { returnsMethods, RETURN_OPS } from './domain/returns.js';
 import { needsMethods } from './domain/needs.js';
+import { billingMethods, CUSTOMER_OPS, STATEMENT_OPS, OWNER_BILLING_OPS, OFF_HIRE_OPS } from './domain/billing.js';
+import { goLiveMethods } from './domain/golive.js';
 import { gearMethods, GEAR_OPS } from './domain/gear.js';
 import { ROSTER_OPS } from './domain/roster.js';
 import { TASK_OFFICE_OPS, TASK_TAP_OPS, installCrew } from './domain/tasks.js';
@@ -89,7 +91,7 @@ const operational = [
 operational.push(...WORLD_OPS); // Home world map: moving a site on the map (src/domain/world.js)
 operational.push(...GAME_OPS); // the game board's one-tap commands (src/domain/game.js)
 operational.push(...PLAN_OPS); // the Today planner, messages and the team (src/domain/plan.js, team.js)
-operational.push(...GEAR_OPS); // gear lists (src/domain/gear.js, ADR 0011): the office's, in both yards
+operational.push(...GEAR_OPS); // gear lists (src/domain/gear.js, ADR 0012): the office's, in both yards
 export class Simulation {
   constructor(db, user) {
     this.db = db;
@@ -152,9 +154,8 @@ export class Simulation {
       this.auth.require(this.user, 'requests.create');
     else if (PAPERWORK_OPS.includes(action))
       this.auth.require(this.user, 'requests.create'); // the site (or operations.manage for company-wide) is checked in paperwork.js
-    else if (['hireRate', 'hireSiteRate'].includes(action)) {
-      if (!this.auth.permissions(this.user).includes('finance.view')) this.auth.require(this.user, 'company.manage');
-    }
+    // prices are the owner's (ADR 0011 review): accounts reads money and issues statements but never sets a rate
+    else if (['hireRate', 'hireSiteRate'].includes(action)) this.auth.require(this.user, 'company.manage');
     // Record what really happened (ADR 0009, src/domain/trips.js): orders by anyone who may request (a supervisor for their own sites),
     // booking and packing by the office, the four confirmations by the trip's own driver or the office for them (checked in trips.js).
     else if (ORDER_OPS.includes(action)) this.auth.require(this.user, 'requests.create');
@@ -164,7 +165,15 @@ export class Simulation {
     else if (DISPATCH_OPS.includes(action) || RETURN_OPS.includes(action) || action === 'needsYouDismiss')
       this.auth.require(this.user, 'operations.manage');
     else if (action === 'productValue') this.auth.require(this.user, 'company.manage');
-    // Part 5 (roster and tasks, CREW): the office rosters and allocates; a supervisor may make a plain task at their own site (tasks.js);
+    // Part 4 (ADR 0011): customers by the office or accounts; a statement by accounts or the owner; the rule, a reversal, an adjustment
+    // and the go-live import by the owner; an off-hire by the office; an opening lot by whoever may adjust stock.
+    else if (CUSTOMER_OPS.includes(action)) this.auth.require(this.user, 'customers.manage');
+    else if (STATEMENT_OPS.includes(action)) this.auth.require(this.user, 'statements.manage');
+    else if (OWNER_BILLING_OPS.includes(action) || action === 'goLiveImport')
+      this.auth.require(this.user, 'company.manage');
+    else if (OFF_HIRE_OPS.includes(action)) this.auth.require(this.user, 'operations.manage');
+    else if (action === 'openingLot') this.auth.require(this.user, 'stock.adjust');
+    // Part 5 (ADR 0012, roster and tasks, CREW): the office rosters and allocates; a supervisor may make a plain task at their own site (tasks.js);
     // a step or a Done from a phone is the tapping worker's own (PHONE_TAP_OPS above), from the office it is recorded for them.
     else if (ROSTER_OPS.includes(action) || TASK_OFFICE_OPS.includes(action))
       this.auth.require(this.user, action === 'taskCreate' ? 'requests.create' : 'operations.manage');
@@ -718,6 +727,8 @@ Object.assign(
   dispatchMethods,
   returnsMethods,
   needsMethods,
+  billingMethods,
+  goLiveMethods,
   gearMethods,
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)

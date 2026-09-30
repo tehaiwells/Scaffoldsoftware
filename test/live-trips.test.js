@@ -118,7 +118,7 @@ test('Loaded & left moves exact pieces yard -> truck (a part split into a bundle
   assert.equal(tp.type, 'TRUCK', 'a truck booking on Today');
   assert.equal(tp.driver, f.team.Dave.id);
   assert.equal(f.msgs(tp.id)[0]?.status, 'SENT', 'Dave is asked, as for any truck booking');
-  assert.deepEqual(trip.next, ['packConfirmed', 'tripLoaded', 'tripArrived']); // the arrival: an optional gate (ADR 0011)
+  assert.deepEqual(trip.next, ['packConfirmed', 'tripLoaded', 'tripArrived']); // the arrival: an optional gate (ADR 0012)
   // nothing has moved: booking is not driving
   assert.deepEqual(where(f, f.product.id), { yard: f.per * 3, site: 0, truck: 0 });
   assert.throws(

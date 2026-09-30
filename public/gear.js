@@ -1,4 +1,4 @@
-// Gear lists on screen (ADR 0011): the "+ Gear list" form of Daily activities (From / To, the parts, date, time, truck, driver, workers),
+// Gear lists on screen (ADR 0012): the "+ Gear list" form of Daily activities (From / To, the parts, date, time, truck, driver, workers),
 // the chain of dots on a list's card (Arrived · Packed · Loaded · Arrived · Landed), the week's lists on the Gear list page. Pure HTML
 // functions (the tests render them in Node); operations.js wires the events and sends the one command, gearListCreate. Same look as the
 // rest of Today: the tdh-* fields and pills, the lt-dot dots. Nothing here changes a record by itself.
@@ -100,7 +100,7 @@ export function glTaskHTML(task) {
           esc(w.name ?? 'Worker') +
           (w.priority ? ' <small>P' + esc(w.priority) + '</small>' : '') +
           '</b><span class="gl-ticks">' +
-          box(w.steps?.RECEIVED, 'Received the list') +
+          box(w.steps?.RECEIVED, 'Got the list') +
           box(w.steps?.PACKED ?? task.steps?.PACKED, 'Packed and ready') +
           box(w.steps?.LOADED ?? task.steps?.LOADED, 'Truck loaded') +
           '</span>' +
@@ -112,7 +112,8 @@ export function glTaskHTML(task) {
           '</li>',
       )
       .join('') +
-    '</ul>'
+    // what the three boxes are, once (the words Task progress uses)
+    '<li class="gl-legend"><small>the boxes: got it · packed · loaded</small></li></ul>'
   );
 }
 /**

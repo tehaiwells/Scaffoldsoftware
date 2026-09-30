@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-// A gear list in a real yard (ADR 0011), on the pages people use: on Daily activities the office confirms "Bondi gear" yard -> Bondi with the
+// A gear list in a real yard (ADR 0012), on the pages people use: on Daily activities the office confirms "Bondi gear" yard -> Bondi with the
 // parts, a date and time, T-01 and Dave in one tap; the chip is on the calendar with its time; the card shows the five empty dots; Dave's
 // phone (375 px) gets the day-before ask when there is time for one, then taps Arrived at yard; the yard packs; Dave taps Loaded & left,
 // Arrived at Bondi and Delivered with a name; the dots fill one by one and the Dispatch lanes show the arrival dots.
@@ -174,6 +174,62 @@ test('a gear list yard -> site: one tap books it all; the driver taps each step 
   expect(done.chain[3].kind).toBe('PERSON');
   expect(errors).toEqual([]);
   for (const c of phones) await c.close();
+});
+// The parts picker of a site -> site list counts the site the gear comes from, never the yard's stock: the corner numbers are what is at
+// Bondi now, and the words say so.
+test('the picker for a site -> site list counts the first site', async ({ page }) => {
+  const api = async (path, data) => {
+    const r = data
+      ? await page.request.post('/api/' + path, { data, headers: { 'Idempotency-Key': key() } })
+      : await page.request.get('/api/' + path);
+    expect(r.ok(), path + ': ' + (await r.text())).toBe(true);
+    return r.json();
+  };
+  const cmd = (a, d) => api('commands/' + a, d);
+  expect(
+    (
+      await page.request.post('/api/register', {
+        data: {
+          companyName: 'Tee Scaffolding',
+          name: 'Tee',
+          email: `gear-move-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+          password: 'Local-demo-test-2026!',
+          systems: ['quickstage'],
+          mode: 'LIVE',
+        },
+      })
+    ).status(),
+  ).toBe(200);
+  const { yard } = await cmd('gameStart', { size: 'S' });
+  await cmd('gameCatalogue', {});
+  const part = (await api('state')).products.find((p) => p.unitWeight > 0 && !p.retired && p.packQuantity == null);
+  await cmd('gameAddStock', { lines: [{ product: part.id, quantity: 60 }] });
+  await cmd('gameSite', { name: 'Bondi', address: '1 Campbell Parade, Bondi' });
+  await cmd('gameSite', { name: 'Manly', address: '2 The Corso, Manly' });
+  await cmd('quickAdjust', { kind: 'TRUCK', delta: 1, location: yard.id, payload: 12500000 });
+  const trips = await api('trips');
+  const day = nextDay(nextDay(trips.today));
+  await page.goto('/?view=TODAY');
+  await expect(page.getByRole('heading', { level: 1, name: 'Daily activities', exact: true })).toBeVisible({
+    timeout: 45000,
+  });
+  const cell = page.locator(`.tdh-cell[data-tdh-day="${day}"]`);
+  if (!(await cell.count())) await page.getByRole('button', { name: 'Next month' }).click();
+  await cell.click();
+  await page.getByRole('button', { name: /^\+ Gear list/ }).click();
+  const form = page.locator('[data-tdh-form="GEAR"]');
+  await expect(form).toBeVisible();
+  await form.locator('[data-gl-place="from:site"]').click();
+  await form.locator('select[name=fromSite]').selectOption({ label: 'Bondi' });
+  await form.locator('[data-gl-place="to:site"]').click();
+  await form.locator('select[name=toSite]').selectOption({ label: 'Manly' });
+  await expect(form.locator('input[name=name]')).toHaveAttribute('placeholder', 'Manly gear');
+  await form.locator('[data-tdh-pick]').click();
+  const layer = page.locator('.tdh-layer');
+  await expect(layer).toContainText('free at Bondi now');
+  await expect(layer).not.toContainText('in the yard now');
+  await layer.locator(`[data-pp-slot="${part.id}"]`).click();
+  await expect(layer.locator('[data-pp-words]')).toContainText('0 free at Bondi now'); // nothing is at Bondi yet
 });
 function nextDay(day) {
   const d = new Date(day + 'T12:00:00Z');

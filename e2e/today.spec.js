@@ -121,7 +121,7 @@ test('a truck, a materials list and workers booked on a coming day; the driver s
   await page.locator(`.tdh-cell[data-tdh-day="${day}"]`).click(); // the chosen day is remembered in this tab
   await expect(page.locator('.tdh-item.tone-truck')).toContainText('Dave said yes');
   await expect(page.locator(`.tdh-cell[data-tdh-day="${day}"] .tdh-flag`)).toHaveCount(0);
-  // the gear list (ADR 0011): picked in the parts window, from the yard to Bondi, on Dave's truck that day
+  // the gear list (ADR 0012): picked in the parts window, from the yard to Bondi, on Dave's truck that day
   await page.getByRole('button', { name: /^\+ Gear list/ }).click();
   await page.locator('[data-tdh-pick]').click();
   await page.locator(`.tdh-layer [data-pp-slot="${part.id}"]`).click();

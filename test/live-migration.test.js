@@ -12,12 +12,15 @@ import { openDatabase, atomic } from '../src/database.js';
 import { Service } from '../src/service.js';
 import { Simulation } from '../src/simulation.js';
 
-// Migrations 008 (trips, a driver's phone) and 009 (charge lines, the YARD role) come after it and are undone first (their triggers read
-// companies.mode).
-// Migration 010 (ADR 0011: the trip_arrival table, the plan-day, roster and task indexes) comes after those and is undone first.
-const UNDO_010 =
+// Migrations 008 (trips, a driver's phone), 009 (charge lines, the YARD role), 010 (statements, the ACCOUNTS role) and 011 (ADR 0012:
+// the trip_arrival table, the plan-day, roster and task indexes) come after it and are undone first (their triggers read companies.mode).
+const UNDO_011 =
   'DROP TRIGGER trip_arrival_no_update;DROP TRIGGER trip_arrival_no_delete;DROP TRIGGER trip_arrival_live_only;DROP TABLE trip_arrival;DROP INDEX objects_plan_day;' +
-  'DROP INDEX IF EXISTS objects_roster_person_day;DROP INDEX IF EXISTS objects_roster_day;DROP INDEX IF EXISTS objects_task_day;DROP INDEX IF EXISTS objects_task_list;DELETE FROM schema_migrations WHERE version=10;';
+  'DROP INDEX IF EXISTS objects_roster_person_day;DROP INDEX IF EXISTS objects_roster_day;DROP INDEX IF EXISTS objects_task_day;DROP INDEX IF EXISTS objects_task_list;DELETE FROM schema_migrations WHERE version=11;';
+const UNDO_010 =
+  UNDO_011 +
+  'DROP TRIGGER objects_statement_no_update;DROP TRIGGER objects_statement_no_delete;DROP INDEX objects_statement_number;DROP INDEX objects_statement_customer;DROP INDEX objects_site_customer;DROP TABLE statement_items;DROP TABLE statement_exports;' +
+  "DELETE FROM role_permissions WHERE role='ACCOUNTS' OR permission IN ('statements.manage','customers.manage');DELETE FROM permissions WHERE code IN ('statements.manage','customers.manage');DELETE FROM roles WHERE code='ACCOUNTS';DELETE FROM schema_migrations WHERE version=10;";
 const UNDO_009 =
   UNDO_010 +
   'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
@@ -66,7 +69,15 @@ function dump(path, { without = {} } = {}) {
   }
 }
 // Tables migration 008 adds (empty on a database from before it).
-const ADDED = ['trip_confirmation', 'crew_links', 'crew_devices', 'charge_lines', 'trip_arrival'];
+const ADDED = [
+  'trip_confirmation',
+  'crew_links',
+  'crew_devices',
+  'charge_lines',
+  'statement_items',
+  'statement_exports',
+  'trip_arrival',
+];
 const NEW = {
   companies: ['mode', 'time_zone'],
   ledger: ['occurred_at', 'actor_kind', 'on_behalf_of', 'origin'],
@@ -98,7 +109,7 @@ function checkMigrated(path, backups = null) {
     db.close();
   }
   if (backups) {
-    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v(9|10)-.*.sqlite$/.test(n));
+    const saved = readdirSync(backups).filter((n) => /-before-update-v[56]-to-v11-.*.sqlite$/.test(n));
     assert.equal(saved.length, 1, 'one copy saved before the update: ' + readdirSync(backups).join(', '));
     assert.deepEqual(dump(join(backups, saved[0])), before, 'the copy is the database exactly as it was');
   }
@@ -113,10 +124,11 @@ function checkMigrated(path, backups = null) {
   const drop = (name, keep) => {
     for (const d of [before, after]) if (d[name]) d[name] = JSON.stringify(JSON.parse(d[name]).filter(keep));
   };
-  // (and 009's YARD role with packs.confirm and asks.answer)
-  drop('roles', (r) => r.code !== 'CREW' && r.code !== 'YARD');
-  drop('permissions', (r) => !['trips.confirm', 'packs.confirm', 'asks.answer'].includes(r.code));
-  drop('role_permissions', (r) => !['trips.confirm', 'packs.confirm', 'asks.answer'].includes(r.permission));
+  // (and 009's YARD role with packs.confirm and asks.answer, and 010's ACCOUNTS role with statements.manage and customers.manage)
+  const NEW_PERMS = ['trips.confirm', 'packs.confirm', 'asks.answer', 'statements.manage', 'customers.manage'];
+  drop('roles', (r) => !['CREW', 'YARD', 'ACCOUNTS'].includes(r.code));
+  drop('permissions', (r) => !NEW_PERMS.includes(r.code));
+  drop('role_permissions', (r) => !NEW_PERMS.includes(r.permission) && r.role !== 'ACCOUNTS');
   assert.deepEqual(Object.keys(after), Object.keys(before), 'no table added or dropped');
   for (const name of Object.keys(before)) assert.equal(after[name], before[name], name + ' unchanged');
 }

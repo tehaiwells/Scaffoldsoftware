@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { firstYard } from './workflow.js';
-// A gear list in the Practice yard (ADR 0011): the same form and the same card, but the simulated crew packs and the truck autopilot drives:
+// A gear list in the Practice yard (ADR 0012): the same form and the same card, but the simulated crew packs and the truck autopilot drives:
 // the dots fill by themselves and no step button is offered. Booked for now (the current half hour) while the yard's day is on; outside
 // it, for tomorrow, and only the calendar and the empty dots are checked.
 const api = (page, path, data) =>

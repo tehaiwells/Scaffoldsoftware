@@ -67,7 +67,7 @@ test('the dispatch commands are on the LIVE allow-list and refused in the Practi
     'returnCount',
     'taskDone',
     'taskStep',
-    'tripArrived', // the driver's arrival taps (ADR 0011)
+    'tripArrived', // the driver's arrival taps (ADR 0012)
     'tripCollected',
     'tripDelivered',
     'tripLoaded',
@@ -529,7 +529,7 @@ test('the Dispatch lanes view of Today: one lane per truck, a state dot per trip
   assert.equal(v.lanes.length, 2);
   assert.deepEqual(
     v.dots.map((d) => d.code),
-    ['DRAFT', 'BOOKED', 'ASKED', 'YES', 'ARRIVED', 'PACKED', 'LOADED', 'AT_SITE', 'DELIVERED', 'BACK'], // the two arrivals: ADR 0011
+    ['DRAFT', 'BOOKED', 'ASKED', 'YES', 'ARRIVED', 'PACKED', 'LOADED', 'AT_SITE', 'DELIVERED', 'BACK'], // the two arrivals: ADR 0012
   );
   const lane = (truck) => v.lanes.find((l) => l.truck === truck);
   assert.equal(lane(f.truck.id).trips[0].dot, 'ASKED', 'the ask went out at booking');

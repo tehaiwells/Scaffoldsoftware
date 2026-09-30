@@ -145,7 +145,7 @@ test('Workers: +1 worker and the roster; the day-before ask on the phone; a gear
     .poll(async () => (await api('roster?person=' + kev.id + '&from=' + tomorrow + '&to=' + tomorrow)).days[0].status)
     .toBe('CONFIRMED');
 
-  // ---- a gear list yard→Bondi today with Kev and Sam on it (P1 each): one command makes the list and their task (ADR 0011)
+  // ---- a gear list yard→Bondi today with Kev and Sam on it (P1 each): one command makes the list and their task (ADR 0012)
   const made = await cmd('gearListCreate', {
     from: { kind: 'yard' },
     to: { kind: 'site', id: site.id },

@@ -1,5 +1,5 @@
 process.env.TZ = 'Australia/Sydney';
-// Gear lists in the Practice yard (ADR 0011, the DEMO suite: it ticks). A list is a named MATERIALS booking with from -> to, exact lines,
+// Gear lists in the Practice yard (ADR 0012, the DEMO suite: it ticks). A list is a named MATERIALS booking with from -> to, exact lines,
 // a day and a time, and the truck and driver booked in the same tap; it is on the calendar at once; the day before at 3 pm the driver is
 // asked to be ready (and answers by himself, as every simulated person does); on the day the simulated crew packs and the truck autopilot
 // drives, writing the chain's marks (kind ENGINE) on the item. An old-style Materials list is untouched by all of it.

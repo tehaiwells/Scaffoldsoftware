@@ -369,7 +369,7 @@ test('migration 010 on a copy of a real database (SCAFFOLD_MIGRATION_SAMPLE_V9):
   assert.equal(before.version, 9);
   openDatabase(path, { backupDirectory: join(dir, 'before-update') }).close();
   const after = dump();
-  assert.equal(after.version, 10);
+  assert.equal(after.version, 11);
   assert.equal(after.companies, before.companies);
   assert.ok(JSON.parse(after.companies).every((c) => c.mode === 'DEMO'));
   assert.equal(after.objects, before.objects);

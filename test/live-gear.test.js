@@ -1,5 +1,5 @@
 process.env.TZ = 'Australia/Sydney';
-// Gear lists in a real yard (ADR 0011, the LIVE suite: it never ticks). One tap makes the list, its exact order, the truck booking and the
+// Gear lists in a real yard (ADR 0012, the LIVE suite: it never ticks). One tap makes the list, its exact order, the truck booking and the
 // trip; the driver is asked to be ready at 3 pm company time the day before (Perth on a Sydney server too) and answers on his own phone;
 // then the chain: Arrived at yard, Packed, Loaded & left, Arrived at Bondi, Landed, each a person's tap (or the office's ON_BEHALF), the
 // arrivals light (no stock, no ledger row, an append-only trip_arrival row); the clock only asks and flags, under 10,000 passes.

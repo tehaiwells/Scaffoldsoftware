@@ -120,11 +120,15 @@ export const returnsMethods = {
   chargeLine(c) {
     const id = randomUUID(),
       now = iso(this.planNow());
+    let customer = null;
+    try {
+      customer = this.repo.get(c.site, 'site').customer ?? null; // the site's customer (ADR 0011); older lines resolve through the site
+    } catch {}
     cached(this.db, INSERT_CHARGE).run(
       id,
       this.repo.company,
       c.site,
-      null,
+      customer,
       c.product,
       c.quantity,
       c.unitValue,
@@ -146,6 +150,7 @@ export const returnsMethods = {
       site: r.site_id,
       siteName: this.planSiteName(r.site_id),
       customer: r.customer_id ?? null,
+      customerName: r.customer_id ? this.customerName?.(r.customer_id) : null,
       product: r.product_id,
       name: this.planName(r.product_id, 'Material'),
       quantity: r.quantity,
@@ -633,7 +638,16 @@ export const returnsMethods = {
     this.repo.save(b);
     return b;
   },
-  // ---------- the site's account: sent, back, on site, charged, written off, missing ----------
+  /** The pieces a trip's confirmed step recorded ([] when the step is not confirmed). @param {any} t @param {string} step @returns {{product:string,quantity:number}[]} */
+  tripStepLines(t, step) {
+    const id = t.steps?.[step]?.id;
+    if (!id) return [];
+    return JSON.parse(
+      cached(this.db, 'SELECT lines FROM trip_confirmation WHERE company_id=? AND id=?').get(this.repo.company, id)
+        ?.lines ?? '[]',
+    );
+  },
+  // ---------- the site's account: sent, back, on site, moved on, charged, written off, missing ----------
   /** @param {string} siteId */
   siteAccount(siteId) {
     const sum = (/** @type {any[]} */ rows) =>
@@ -648,12 +662,33 @@ export const returnsMethods = {
         step,
       );
     let sent = sum(conf('DELIVERED'));
+    // collected from here: a bring-back's pieces, and a move's (its Collected row is at the first site, ADR 0012)
     const collected = sum(conf('COLLECTED'));
-    const trips = this.tripRows(
+    // a move from this site (ADR 0012): what landed at the other site has moved on; what came back to the yard instead is back
+    const moves = this.tripRows(
       'trip',
-      "json_extract(data,'$.site')=? AND json_extract(data,'$.direction')='BACK' AND json_extract(data,'$.state')='RETURNED'",
+      "json_extract(data,'$.fromSite')=? AND json_extract(data,'$.direction')='MOVE'",
       siteId,
     );
+    let moved = 0;
+    const movedTo = new Map();
+    for (const t of moves) {
+      let n = 0;
+      for (const l of this.tripStepLines(t, 'DELIVERED')) n += l.quantity;
+      if (n) {
+        moved += n;
+        const name = this.planSiteName(t.site);
+        movedTo.set(name, (movedTo.get(name) ?? 0) + n);
+      }
+    }
+    const trips = [
+      ...this.tripRows(
+        'trip',
+        "json_extract(data,'$.site')=? AND json_extract(data,'$.direction')='BACK' AND json_extract(data,'$.state')='RETURNED'",
+        siteId,
+      ),
+      ...moves.filter((t) => t.state === 'RETURNED'),
+    ];
     let back = 0,
       unresolved = 0,
       writtenOff = 0,
@@ -672,15 +707,7 @@ export const returnsMethods = {
         if (r.outcome === 'OUR_LOSS') writtenOff += r.quantity;
       }
     for (const t of trips) {
-      for (const l of t.steps?.RETURNED
-        ? JSON.parse(
-            cached(this.db, 'SELECT lines FROM trip_confirmation WHERE company_id=? AND id=?').get(
-              this.repo.company,
-              t.steps.RETURNED.id,
-            )?.lines ?? '[]',
-          )
-        : [])
-        back += l.quantity;
+      for (const l of this.tripStepLines(t, 'RETURNED')) back += l.quantity;
       for (const l of t.count?.lines ?? []) back += l.quantity;
       for (const r of t.resolutions ?? []) {
         if (r.outcome === 'DAMAGED') damaged += r.quantity;
@@ -695,6 +722,11 @@ export const returnsMethods = {
     }
     let onSite = 0;
     for (const c of this.tripContainersAt(siteId)) for (const l of this.repo.lines(c.id)) onSite += l.quantity;
+    // gear already on hire when the yard went live (opening lots, ADR 0011): on the record, never sent by a truck
+    const opening = cached(
+      this.db,
+      "SELECT COALESCE(SUM(quantity),0) n FROM ledger WHERE company_id=? AND event='OPENING_BALANCE' AND destination=? AND actor_kind='IMPORT'",
+    ).get(this.repo.company, siteId).n;
     const charged = cached(
       this.db,
       "SELECT COALESCE(SUM(quantity),0) n FROM charge_lines WHERE company_id=? AND site_id=? AND reason IN ('LOST','SITE_FINISH')",
@@ -707,15 +739,19 @@ export const returnsMethods = {
     // K in the question: what the site never brought back and nobody has settled (on its record, or missing from a trip). The integrity
     // number: sent - back - on site - charged - written off, 0 at every closed site.
     const missing = onSite + unresolved,
-      unaccounted = sent - (back + damaged) - onSite - charged - writtenOff,
+      unaccounted = sent + opening - (back + damaged) - moved - onSite - charged - writtenOff,
       active = site?.status === 'ACTIVE';
     const tail =
-      (charged ? ' · ' + charged + ' charged' : '') + (writtenOff ? ' · ' + writtenOff + ' written off' : '');
+      (moved ? ' · ' + moved + ' moved to ' + [...movedTo.keys()].join(', ') : '') +
+      (charged ? ' · ' + charged + ' charged' : '') +
+      (writtenOff ? ' · ' + writtenOff + ' written off' : '');
     return {
       site: siteId,
       siteName: site?.name ?? 'The site',
       sent,
+      opening,
       collected,
+      moved,
       back: back + damaged,
       counted: back,
       damaged,
@@ -726,10 +762,19 @@ export const returnsMethods = {
       unresolvedTrips,
       missing,
       unaccounted,
-      words: 'sent ' + sent + ' · back ' + (back + damaged) + ' · ' + missing + ' missing',
+      words:
+        (opening ? 'on hire at go-live ' + opening + ' · ' : '') +
+        'sent ' +
+        sent +
+        ' · back ' +
+        (back + damaged) +
+        ' · ' +
+        missing +
+        ' missing',
       // the same numbers as an active site's card says them: gear on site is on hire, not missing, until the site finishes
       summary: active
-        ? 'sent ' +
+        ? (opening ? 'on hire at go-live ' + opening + ' · ' : '') +
+          'sent ' +
           sent +
           ' · back ' +
           (back + damaged) +

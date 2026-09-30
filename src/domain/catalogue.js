@@ -51,11 +51,20 @@ export function computeEffectiveProducts(repo) {
 }
 export const catalogueMethods = {
   product(input) {
-    const system = cached(
-      this.db,
-      'SELECT s.id FROM scaffold_systems s JOIN company_systems c ON c.system_id=s.id WHERE c.company_id=? AND s.id=? AND c.enabled=1',
-    ).get(this.user.company_id, input.system);
-    requireRule(system, 'Enable this scaffold system before selecting new materials.');
+    // a real yard names its own systems and categories (the go-live import, ADR 0011); the Practice yard keeps the three ticked ones
+    if (this.live()) {
+      requireRule(
+        typeof input.system === 'string' && input.system.trim() && input.system.trim().length <= 60,
+        'Give the scaffold system a name (up to 60 characters).',
+      );
+      input = { ...input, system: input.system.trim() };
+    } else {
+      const system = cached(
+        this.db,
+        'SELECT s.id FROM scaffold_systems s JOIN company_systems c ON c.system_id=s.id WHERE c.company_id=? AND s.id=? AND c.enabled=1',
+      ).get(this.user.company_id, input.system);
+      requireRule(system, 'Enable this scaffold system before selecting new materials.');
+    }
     const reference = label(input.reference, 'Manufacturer or demo reference'),
       manufacturer = label(input.manufacturer ?? 'Synthetic demonstration', 'Manufacturer'),
       region = label(input.region ?? 'DEMO', 'Region');

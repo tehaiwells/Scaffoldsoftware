@@ -133,7 +133,7 @@ test("the Today page: a planner. The date, a 42-day calendar with today marked, 
   __test.setState(s, acct(f));
   __test.setView('TODAY');
   const html = tdTest.view();
-  assert.ok(html.includes('<h1>Daily activities</h1>')); // renamed for the owner (ADR 0011)
+  assert.ok(html.includes('<h1>Daily activities</h1>')); // renamed for the owner (ADR 0012)
   assert.ok(html.includes('Wednesday 23 September 2026'), 'the long date');
   for (const gone of [
     'td-hero',

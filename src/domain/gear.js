@@ -1,5 +1,5 @@
 // @ts-check
-// Gear lists (ADR 0011, the owner's brief of 2026-09-30): "the list that will be prepared and loaded when the truck arrives". One model for
+// Gear lists (ADR 0012, the owner's brief of 2026-09-30): "the list that will be prepared and loaded when the truck arrives". One model for
 // both yards, built on Today's MATERIALS item, the orders and trips of ADR 0009 and the truck booking of Today:
 //   a named list ('Bondi gear') with exact lines, FROM and TO among {this yard, a site} (yard -> site OUT, site -> site MOVE, site -> yard
 //   BACK), a day and a time, and the truck + driver booked in the same tap (the truck goes to where the gear is and delivers to where it
@@ -119,7 +119,7 @@ export const gearMethods = {
       short: [],
       left: [],
       trips: [],
-      // the gear list's own fields (ADR 0011 §2.1)
+      // the gear list's own fields (ADR 0012 §2.1)
       name,
       direction,
       fromSite: direction === 'MOVE' ? from.id : null,
@@ -154,7 +154,7 @@ export const gearMethods = {
       if (tp) this.tripBook({ orders: [made.order.id], truckPlan: tp.id });
       held = ' ' + made.order.label + ': ' + made.heldWords;
     }
-    // the workers on it: a task, when the tasks module is there (CREW's part; ADR 0011 §11.4)
+    // the workers on it: a task, when the tasks module is there (CREW's part; ADR 0012 §11.4)
     let task = null,
       rostered = [];
     if (Array.isArray(input.workers) && input.workers.length && typeof this.taskCreate === 'function') {
@@ -367,7 +367,7 @@ export const gearMethods = {
       return null;
     }
   },
-  // The clock's duty (both yards, ADR 0011 §5.3): at 3 pm the day before, READY to the driver of every gear list with a truck and a driver
+  // The clock's duty (both yards, ADR 0012 §5.3): at 3 pm the day before, READY to the driver of every gear list with a truck and a driver
   // (at once when the list was made later, never after 6 am on its day: "Not asked in time"); at 6 am on the day, the DAY notice; a driver
   // who changed is asked instead; a driver who said no flags the list and the truck booking (Needs you shows it). Never a state change.
   /** @param {number} now */

@@ -654,6 +654,25 @@ export const rosterMethods = {
           .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
       };
     }
+    // someone who has left the team (the Workers page may still have their grid open): an answer that says so, never a refusal
+    const gone = typeof person === 'string' && person ? this.teamPerson(person) === null : false;
+    if (gone) {
+      let name = 'Someone';
+      try {
+        name = this.repo.get(person).name ?? name;
+      } catch {}
+      return {
+        person: { id: person, name, gone: true, where: null, whereName: null },
+        from: cal.today,
+        to: cal.today,
+        today: cal.today,
+        ahead: ROSTER_AHEAD,
+        days: [],
+        pattern: null,
+        places: [],
+        sendBefore: SEND_BEFORE,
+      };
+    }
     const w = this.rosterWorker(person);
     const f = from ? this.rosterDayOf(from) : cal.today,
       t = to ? this.rosterDayOf(to) : addDays(f, ROSTER_AHEAD);
