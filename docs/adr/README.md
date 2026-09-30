@@ -16,3 +16,4 @@ writing a new record that supersedes it, never by editing an accepted one.
 | [0008](0008-live-foundation.md) | The LIVE foundation as built: the allow-list wall, the business clock on company time, ledger provenance, "Start your real yard" | Accepted |
 | [0009](0009-record-reality.md) | Record what really happened: orders with exact pieces, trips confirmed by people (the driver's phone or the office for them), stock moving only on a confirmation | Accepted |
 | [0010](0010-dispatch-and-returns.md) | Today as LIVE dispatch (bookings wait for people; drafts; move a day; the lanes view), returns counted and resolved with charge lines and one "available", "Needs you" v1 | Accepted |
+| [0011](0011-billing-and-go-live.md) | Billing you can send: customers, off-hire with a company hire-stop rule, issued locked statements, adjustments, the Xero/MYOB monthly file, Accounts role; opening lots and the go-live import; retention in a real yard | Accepted |

@@ -368,6 +368,32 @@ export function createHandler(db, { backups = null, lan = false } = {}) {
         simulation.assertSite(simulation.repo.get(site, 'site').id);
         send(200, { ...simulation.siteAccount(site), charges: simulation.chargeLines(site) });
       }
+      // Part 4 (ADR 0011): customers, hire settings, statements (preview, list, one, the byte-identical reprint), unbilled, off-hire,
+      // the monthly accounting file, the go-live check and the parallel run
+      else if (req.method === 'GET' && path === '/api/customers') send(200, simulation.customersView());
+      else if (req.method === 'GET' && path === '/api/hire-settings')
+        send(200, { settings: simulation.hireSettingsView() });
+      else if (req.method === 'GET' && path === '/api/statements')
+        send(200, simulation.statementsView(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams)));
+      else if (req.method === 'GET' && path === '/api/statement')
+        send(200, simulation.statementGet(new URL(req.url, 'http://localhost').searchParams.get('id')));
+      else if (req.method === 'GET' && path === '/api/statement.txt') {
+        const out = simulation.statementReprint(new URL(req.url, 'http://localhost').searchParams.get('id'));
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${out.name}"`,
+        });
+        res.end(out.text);
+      } else if (req.method === 'GET' && path === '/api/statement-preview')
+        send(200, simulation.statementPreview(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams)));
+      else if (req.method === 'GET' && path === '/api/unbilled') send(200, simulation.unbilledView());
+      else if (req.method === 'GET' && path === '/api/off-hire') send(200, simulation.offHiresView());
+      else if (req.method === 'GET' && path === '/api/accounting.csv') {
+        const out = simulation.accountingFile(Object.fromEntries(new URL(req.url, 'http://localhost').searchParams));
+        res.writeHead(200, { 'Content-Type': out.type, 'Content-Disposition': `attachment; filename="${out.name}"` });
+        res.end(out.body);
+      } else if (req.method === 'POST' && path === '/api/golive-preview') send(200, simulation.goLivePreview(body));
+      else if (req.method === 'POST' && path === '/api/parallel-run') send(200, simulation.parallelRun(body));
       // A driver's phone link (the office; a real yard): Copy link, Text it (sms:), and whether phones can reach this server at all.
       else if (req.method === 'POST' && path === '/api/crew-links') {
         const made = crewLink(service, user, body),

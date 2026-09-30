@@ -59,14 +59,16 @@ const companies = (path) => {
     db.close();
   }
 };
-// A database one migration behind: made now, then the newest migration (8, trips and a driver's phone) undone by dropping what it added, so it
-// runs again cleanly (the roles and permissions it adds are kept: it adds them only if missing).
+// A database three migrations behind: made now, then migrations 10, 9 and 8 undone by dropping what they added, so they run again
+// cleanly (the roles and permissions they add are kept: they add them only if missing).
 function olderDatabase(dir) {
   const path = join(dir, 'live', 'scaffold.sqlite');
   const db = openDatabase(path, { backupDirectory: null });
   new Service(db).register(owner);
   db.exec(
-    'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
+    'DROP TRIGGER objects_statement_no_update;DROP TRIGGER objects_statement_no_delete;DROP INDEX objects_statement_number;DROP INDEX objects_statement_customer;DROP INDEX objects_site_customer;DROP TABLE statement_items;DROP TABLE statement_exports;' +
+      "DELETE FROM role_permissions WHERE role='ACCOUNTS' OR permission IN ('statements.manage','customers.manage');DELETE FROM permissions WHERE code IN ('statements.manage','customers.manage');DELETE FROM roles WHERE code='ACCOUNTS';DELETE FROM schema_migrations WHERE version=10;" +
+      'DROP TRIGGER charge_lines_no_update;DROP TRIGGER charge_lines_no_delete;DROP TRIGGER charge_lines_live_only;DROP TABLE charge_lines;' +
       "DELETE FROM role_permissions WHERE permission IN ('packs.confirm','asks.answer');DELETE FROM permissions WHERE code IN ('packs.confirm','asks.answer');DELETE FROM roles WHERE code='YARD';DELETE FROM schema_migrations WHERE version=9;" +
       'DROP TRIGGER trip_confirmation_no_update;DROP TRIGGER trip_confirmation_no_delete;DROP TRIGGER trip_confirmation_live_only;DROP TABLE crew_devices;DROP TABLE crew_links;DROP TABLE trip_confirmation;' +
       'DROP INDEX objects_container_place;DROP INDEX objects_container_support;DROP INDEX objects_trip_state;DROP INDEX objects_trip_plan;DROP INDEX objects_trip_truck;DROP INDEX objects_order_status;DROP INDEX objects_hold_order;' +
@@ -83,10 +85,10 @@ test('before a start-up migration changes an existing database, a checked copy o
   assert.equal(version(path), 7);
   const db = openDatabase(path, { backupDirectory: backups, backupName: 'scaffold' });
   db.close();
-  assert.equal(version(path), 9, 'the migration ran');
+  assert.equal(version(path), 10, 'the migration ran');
   const saved = readdirSync(backups);
   assert.equal(saved.length, 1, 'one copy');
-  assert.match(saved[0], /^scaffold-before-update-v7-to-v9-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/);
+  assert.match(saved[0], /^scaffold-before-update-v7-to-v10-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/);
   assert.equal(version(join(backups, saved[0])), 7, 'the copy is the database before the update');
   assert.equal(companies(join(backups, saved[0])), 1, 'with the data in it');
 });

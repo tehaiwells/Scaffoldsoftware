@@ -215,6 +215,25 @@ export const siteFinishMethods = {
     // Sends still waiting for a truck no longer go there (inside the command: a refusal below puts them back)
     for (const o of this.repo.all('gameOrder'))
       if (o.site === site.id && o.type === 'SEND') this.repo.remove(o.id, 'gameOrder');
+    if (!this.sfUsed(site) && this.live()) {
+      // a real yard keeps every site's record (retention, ADR 0011): a never-used site is archived with a reason; Undo opens it again
+      const reason =
+        input?.reason === undefined || input.reason === null ? null : String(input.reason).trim().slice(0, 200);
+      Object.assign(site, {
+        status: 'ARCHIVED',
+        neverUsed: true,
+        removedAt: new Date().toISOString(),
+        removedBy: this.user.id,
+        removedReason: reason || null,
+      });
+      this.repo.save(site);
+      this.repo.event(this.user.id, 'SITE_REMOVED', {
+        destination: site.id,
+        reason: 'Removed before it was used: ' + site.name + (reason ? ' · ' + reason : ''),
+        key: this.key,
+      });
+      return { removed: true, site: brief(site), undo: site.id, message: site.name + ' removed' };
+    }
     if (!this.sfUsed(site)) {
       // where it was, so Undo can put it back just the same
       let lot = null;
@@ -333,6 +352,27 @@ export const siteFinishMethods = {
   },
   // Undo for a never-used site: the very same record (id, client, contact, shape ...) and its crane and crew, in its own block when still free.
   gameRestoreSite(input) {
+    // a real yard: the archived site itself is the undo record (never deleted, ADR 0011)
+    if (this.live()) {
+      const s = this.repo.get(input?.undo, 'site');
+      requireRule(s.status === 'ARCHIVED' && s.neverUsed, 'That site can no longer be put back.');
+      requireRule(Date.parse(s.removedAt) > Date.now() - UNDO_KEEP_MS, 'That site can no longer be put back.');
+      Object.assign(s, {
+        status: 'ACTIVE',
+        neverUsed: null,
+        removedAt: null,
+        removedBy: null,
+        removedReason: null,
+        finishing: null,
+      });
+      this.repo.save(s);
+      this.repo.event(this.user.id, 'SITE_RESTORED', {
+        destination: s.id,
+        reason: s.name + ' put back (Undo)',
+        key: this.key,
+      });
+      return { ok: true, site: { ...s }, message: s.name + ' is back on the map.' };
+    }
     let u = null;
     try {
       u = this.repo.get(input?.undo, 'siteUndo');

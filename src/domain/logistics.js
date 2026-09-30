@@ -83,6 +83,7 @@ export const logisticsMethods = {
           ? null
           : integer(input.plannedMinutes, 'Usual trip time (minutes)', 1, 600);
     Object.assign(site, {
+      ...this.siteCustomerFields?.(input, site), // a real yard: the customer it bills to and its PO (ADR 0011)
       name: label(input.name ?? site.name),
       // a real yard's site may have no address yet (never the demo placeholder): it stays empty until someone types one
       address:
@@ -148,6 +149,7 @@ export const logisticsMethods = {
       supervisor,
       status: 'ACTIVE',
       ...this.siteDetailFields(input),
+      ...this.siteCustomerFields?.(input),
       points: [
         { x: 0, y: 0 },
         { x: 20000, y: 0 },
@@ -184,6 +186,14 @@ export const logisticsMethods = {
     );
     this.planSiteGone?.(site.id, 'removed');
     site.status = 'ARCHIVED';
+    // a real yard keeps why (retention, ADR 0011); the history stays with the site
+    if (this.live()) {
+      const reason =
+        input.reason === undefined || input.reason === null ? null : String(input.reason).trim().slice(0, 200);
+      site.removedAt = new Date().toISOString();
+      site.removedBy = this.user.id;
+      site.removedReason = reason || null;
+    }
     this.repo.save(site);
     this.repo.event(this.user.id, 'SITE_ARCHIVED', { destination: site.id, key: this.key });
     return site;

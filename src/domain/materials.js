@@ -61,10 +61,11 @@ export const materialsMethods = {
     this.assertFree(c);
     const p = this.effective(input.product);
     requireRule(
-      cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
-        this.user.company_id,
-        p.system,
-      )?.enabled,
+      this.live() ||
+        cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
+          this.user.company_id,
+          p.system,
+        )?.enabled,
       'Enable this system before adding new stock.',
     );
     const quantity = integer(input.quantity, 'Quantity', 1, 1000000),
@@ -93,10 +94,11 @@ export const materialsMethods = {
     const yard = this.repo.get(input.location, 'yard');
     const p = this.effective(input.product);
     requireRule(
-      cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
-        this.user.company_id,
-        p.system,
-      )?.enabled,
+      this.live() ||
+        cached(this.db, 'SELECT enabled FROM company_systems WHERE company_id=? AND system_id=?').get(
+          this.user.company_id,
+          p.system,
+        )?.enabled,
       'Enable this system before adding new stock.',
     );
     requireRule(!p.retired, 'This product has been removed from the catalogue.');

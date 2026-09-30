@@ -120,11 +120,15 @@ export const returnsMethods = {
   chargeLine(c) {
     const id = randomUUID(),
       now = iso(this.planNow());
+    let customer = null;
+    try {
+      customer = this.repo.get(c.site, 'site').customer ?? null; // the site's customer (ADR 0011); older lines resolve through the site
+    } catch {}
     cached(this.db, INSERT_CHARGE).run(
       id,
       this.repo.company,
       c.site,
-      null,
+      customer,
       c.product,
       c.quantity,
       c.unitValue,
@@ -146,6 +150,7 @@ export const returnsMethods = {
       site: r.site_id,
       siteName: this.planSiteName(r.site_id),
       customer: r.customer_id ?? null,
+      customerName: r.customer_id ? this.customerName?.(r.customer_id) : null,
       product: r.product_id,
       name: this.planName(r.product_id, 'Material'),
       quantity: r.quantity,

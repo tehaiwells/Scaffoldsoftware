@@ -20,7 +20,7 @@ const emailOf = (v) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) fail(400, 'Enter a valid email.');
   return e;
 };
-const ROLE_IDS = ['OWNER', 'GENERAL_MANAGER', 'SUPERVISOR'],
+const ROLE_IDS = ['OWNER', 'GENERAL_MANAGER', 'SUPERVISOR', 'ACCOUNTS'], // ACCOUNTS: money and statements, never operations (ADR 0011)
   INVITE_MS = 7 * 86400000;
 const hashToken = (t) => createHash('sha256').update(t).digest('hex');
 // SCAFFOLD_ADMIN_EMAIL (optional): the email of the account that runs this server, in place of whoever created the first company.
@@ -545,7 +545,7 @@ export class Service {
       !Array.isArray(input.roles) ||
       !input.roles.length ||
       new Set(input.roles).size !== input.roles.length ||
-      input.roles.some((r) => !['OWNER', 'GENERAL_MANAGER', 'SUPERVISOR'].includes(r))
+      input.roles.some((r) => !ROLE_IDS.includes(r))
     )
       fail(400, 'Choose valid roles.');
     return atomic(this.db, () => {

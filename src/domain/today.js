@@ -1362,8 +1362,10 @@ export const todayMethods = {
         const h = this.hire({}),
           noRates = !h.rates.length && !h.siteRates.length,
           missing = h.unpriced.length;
-        // nothing is invoiced in the app yet, so everything built up since hire began is still to invoice
-        const built = (h.sites ?? []).reduce((n, r) => n + (r.accrued ?? 0), 0);
+        // the Practice yard: everything built up since hire began is still to invoice; a real yard: what is unbilled past each
+        // site's billedUpTo, and since when (ADR 0011)
+        const u = this.live() ? this.unbilledView() : null;
+        const built = u ? u.amount : (h.sites ?? []).reduce((n, r) => n + (r.accrued ?? 0), 0);
         business.moneyShown = true;
         business.money = noRates
           ? { noRates: true, words: "Set your prices to see what you're earning", setPrices: { view: 'HIRE' } }
@@ -1373,7 +1375,12 @@ export const todayMethods = {
               thisMonth: h.totals.thisMonth,
               builtUp: built,
               toInvoice: built + hireGst(built),
-              toInvoiceWords: 'Built up since hire began, to invoice (incl. GST)',
+              toInvoiceWords: u
+                ? u.since
+                  ? 'Unbilled since ' + dayLabel(u.since) + ' (incl. GST)'
+                  : 'Nothing unbilled'
+                : 'Built up since hire began, to invoice (incl. GST)',
+              unbilled: u ? { amount: u.amount, incGst: u.incGst, since: u.since, days: u.days, words: u.words } : null,
               gstPercent: h.gstPercent,
               unpricedParts: missing,
               weekMissing: h.totals.weekMissing,
@@ -1383,8 +1390,9 @@ export const todayMethods = {
                   ? 'Some gear on hire has no price yet' + (missing ? ' (' + plural(missing, 'part') + ')' : '')
                   : null,
               setPrices: { view: 'HIRE' },
-              footnote:
-                "Ex GST unless marked. The app doesn't record payments yet or send invoices, so this is what's built up, not what's been paid.",
+              footnote: u
+                ? 'Ex GST unless marked. Statements are issued on the Hire page; your accounting package issues the invoice and records the payment.'
+                : "Ex GST unless marked. The app doesn't record payments yet or send invoices, so this is what's built up, not what's been paid.",
             };
       }
     }

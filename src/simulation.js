@@ -35,6 +35,8 @@ import { tripMethods, ORDER_OPS, TRIP_OFFICE_OPS, TRIP_CONFIRM_OPS, PACK_OPS } f
 import { dispatchMethods, DISPATCH_OPS, PHONE_TAP_OPS, CREW_PHONE_OPS } from './domain/dispatch.js';
 import { returnsMethods, RETURN_OPS } from './domain/returns.js';
 import { needsMethods } from './domain/needs.js';
+import { billingMethods, CUSTOMER_OPS, STATEMENT_OPS, OWNER_BILLING_OPS, OFF_HIRE_OPS } from './domain/billing.js';
+import { goLiveMethods } from './domain/golive.js';
 // Commands that can leave a stillage with fewer pieces than an order holds there (a real yard's exact holds are fitted after them)
 const HOLDS_FIT = new Set(['approveCount', 'stockRemoval', 'removeStock', 'quickAdjust', 'retire', 'scrapContainer']);
 const operational = [
@@ -160,6 +162,14 @@ export class Simulation {
     else if (DISPATCH_OPS.includes(action) || RETURN_OPS.includes(action) || action === 'needsYouDismiss')
       this.auth.require(this.user, 'operations.manage');
     else if (action === 'productValue') this.auth.require(this.user, 'company.manage');
+    // Part 4 (ADR 0011): customers by the office or accounts; a statement by accounts or the owner; the rule, a reversal, an adjustment
+    // and the go-live import by the owner; an off-hire by the office; an opening lot by whoever may adjust stock.
+    else if (CUSTOMER_OPS.includes(action)) this.auth.require(this.user, 'customers.manage');
+    else if (STATEMENT_OPS.includes(action)) this.auth.require(this.user, 'statements.manage');
+    else if (OWNER_BILLING_OPS.includes(action) || action === 'goLiveImport')
+      this.auth.require(this.user, 'company.manage');
+    else if (OFF_HIRE_OPS.includes(action)) this.auth.require(this.user, 'operations.manage');
+    else if (action === 'openingLot') this.auth.require(this.user, 'stock.adjust');
     else throw new AppError(404, 'Unknown command.');
     // The hard wall (ADR 0001): a real yard takes only the commands that record what people did (mode.js LIVE_OPS).
     if (this.live() && !LIVE_OPS.has(action)) throw new AppError(409, COMING_NEXT);
@@ -710,6 +720,8 @@ Object.assign(
   dispatchMethods,
   returnsMethods,
   needsMethods,
+  billingMethods,
+  goLiveMethods,
 );
 installWorld(Simulation.prototype); // Home world map: wraps dispatch (route + travel time) and buildSnapshot (result.world)
 installGame(Simulation.prototype); // the game board: one-tap commands, the truck autopilot after every tick, result.game

@@ -19,15 +19,18 @@ export const NEEDS_CAP = 5,
 export const NEEDS_RANK = {
   UNCONFIRMED_TRIP: 0,
   RETURN_SHORT: 1,
-  NO_DRIVER_YES: 2,
-  CLASH: 3,
-  NOT_CONFIRMED: 4,
-  NOT_ASKED: 4,
-  NO_ANSWER: 4,
-  CANT_MAKE_IT: 4,
-  PAPERWORK: 5,
-  UNPRICED_ON_HIRE: 6,
+  OFF_HIRE_OVERDUE: 2, // a pickup past its day and not collected (ADR 0011)
+  NO_DRIVER_YES: 3,
+  CLASH: 4,
+  NOT_CONFIRMED: 5,
+  NOT_ASKED: 5,
+  NO_ANSWER: 5,
+  CANT_MAKE_IT: 5,
+  PAPERWORK: 6,
+  UNBILLED: 7, // hire accrued more than 31 days past billedUpTo, or gear on hire at a site with no customer (ADR 0011)
+  UNPRICED_ON_HIRE: 8,
 };
+export const NEEDS_UNBILLED_DAYS = 31;
 /** @type {(n:number,one:string,many?:string)=>string} */
 const plural = (n, one, many = one + 's') => n + ' ' + (n === 1 ? one : many);
 const RANGE =
@@ -96,6 +99,30 @@ export const needsMethods = {
           since: s.looking.since,
           site: s.id,
         });
+    // a pickup past its day with the gear still there (off-hire, ADR 0011)
+    for (const o of this.repo.all('offHire')) {
+      const v = this.offHireView(o);
+      if (!v.overdue) continue;
+      push({
+        id: 'OFF_HIRE_OVERDUE:' + o.id + ':' + o.pickupDay,
+        kind: 'OFF_HIRE_OVERDUE',
+        words:
+          v.siteName +
+          ': off-hire called ' +
+          dayLabel(o.when) +
+          ' by ' +
+          o.whoCalled +
+          ', pickup ' +
+          o.label +
+          ' (' +
+          o.orderLabel +
+          ') not collected, due ' +
+          dayLabel(o.pickupDay),
+        action: { label: 'Book the pickup', view: 'TODAY', day: today, order: o.order },
+        since: o.pickupDay,
+        site: o.site,
+      });
+    }
     // tomorrow's trucks without the driver's yes by 5 pm today
     const ahead = cached(this.db, RANGE)
       .all(this.repo.company, today, addDays(today, NEEDS_DAYS))
@@ -245,6 +272,39 @@ export const needsMethods = {
         since: today,
       });
     }
+    // unbilled: a customer's hire accrued more than 31 days past billedUpTo, or a site on hire with no customer. Money words only for
+    // finance.view (an operations manager sees the days, never the amount).
+    try {
+      const finance = this.auth.permissions(this.user).includes('finance.view'),
+        u = this.unbilledCore();
+      for (const c of u.customers)
+        if (c.days > NEEDS_UNBILLED_DAYS && c.amount > 0)
+          push({
+            id: 'UNBILLED:' + c.customer + ':' + c.since,
+            kind: 'UNBILLED',
+            words:
+              c.name +
+              ': ' +
+              (finance ? '$' + (c.amount / 100).toFixed(2) + ' ' : '') +
+              'unbilled since ' +
+              dayLabel(c.since) +
+              ' (' +
+              plural(c.days, 'day') +
+              ')',
+            action: { label: 'Issue statement', view: 'HIRE', customer: c.customer },
+            since: c.since,
+          });
+      for (const s of u.noCustomer)
+        if (s.days > NEEDS_UNBILLED_DAYS && (s.pieces > 0 || s.amount > 0))
+          push({
+            id: 'UNBILLED:site:' + s.site,
+            kind: 'UNBILLED',
+            words: s.name + ' has gear on hire and no customer to bill',
+            action: { label: 'Pick a customer', view: 'SITES', site: s.site },
+            since: s.since ?? today,
+            site: s.site,
+          });
+    } catch {}
     // a product on hire with no rate
     try {
       for (const u of this.hire({}).unpriced ?? [])

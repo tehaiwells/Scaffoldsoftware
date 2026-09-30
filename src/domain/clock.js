@@ -114,6 +114,7 @@ export const clockMethods = {
       this.clockPaperwork(now, today);
       this.clockTrips(now); // trips that should have been confirmed by now are flagged "Not confirmed" (trips.js), never moved on
       this.clockReturns(now); // returns not counted or not resolved by the end of their day are flagged RETURN_SHORT (returns.js)
+      this.clockRetention?.(now); // once a day: closed messages and notifications past retentionYears go, nothing else (ADR 0011)
     });
     return true;
   },
