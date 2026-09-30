@@ -22351,10 +22351,24 @@ const tdhWhen = (iso) => {
   try {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    const day =
-      d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    // the moment in the company's day, not the browser's (a phone abroad, CI on UTC)
+    let zone = tdhP()?.timeZone || undefined,
+      day;
+    try {
+      day = new Intl.DateTimeFormat('en-CA', {
+        timeZone: zone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(d);
+    } catch {
+      zone = undefined;
+      day =
+        d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
     return (
-      (day === tdhToday() ? '' : tdhShort(day) + ' ') + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      (day === tdhToday() ? '' : tdhShort(day) + ' ') +
+      d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: zone })
     );
   } catch {
     return '';
@@ -22476,12 +22490,37 @@ const tdhNowMs = () => {
   const b = Date.parse(tdhP()?.now ?? '');
   return Number.isFinite(b) ? b + (Date.now() - tdFetchedAt) : Date.now();
 };
+const tdhMinutes = (hm) => {
+  const [h, m] = String(hm ?? '')
+    .split(':')
+    .map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
+// The company's clock as minutes since midnight: the plan's `now` read in the company's time zone, plus the time since the fetch. Never
+// the browser's own clock, which may sit in another zone (CI runs on UTC; a phone abroad).
+function tdhClockMinutes() {
+  const d = new Date(tdhNowMs()),
+    zone = tdhP()?.timeZone;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone || undefined,
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(d);
+    const h = Number(parts.find((x) => x.type === 'hour')?.value) % 24,
+      m = Number(parts.find((x) => x.type === 'minute')?.value);
+    if (Number.isFinite(h) && Number.isFinite(m)) return h * 60 + m;
+  } catch {
+    // an unknown zone name: the browser's clock is the best there is
+  }
+  return d.getHours() * 60 + d.getMinutes();
+}
 function tdhSlotOk(day, hm, strict) {
   if (!day || day !== tdhToday()) return true;
-  const d = new Date(tdhNowMs()),
-    [h, m] = String(hm).split(':').map(Number),
-    at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m).getTime();
-  return strict ? at > d.getTime() : at + 1800000 > d.getTime();
+  const now = tdhClockMinutes(),
+    at = tdhMinutes(hm);
+  return strict ? at > now : at + 30 > now;
 }
 const tdhFirstTime = (day, strict, want = '07:00') =>
   tdhSlotOk(day, want, strict) ? want : (PLAN_TIMES.find((t) => tdhSlotOk(day, t, strict)) ?? null);
@@ -22992,8 +23031,7 @@ function tdhForm(p, day) {
     go = 'Book ' + tdhPlural(f.count, 'worker') + ' for ' + siteName + ' on ' + dl;
     ok = !!f.site;
     const today = tdhToday(),
-      now = Date.parse(p?.now ?? '') || Date.now(),
-      late = day === today || (day === tdhAdd(today, 1) && new Date(now).getHours() >= 15);
+      late = day === today || (day === tdhAdd(today, 1) && tdhClockMinutes() >= 15 * 60);
     const n = free.pool.length;
     note =
       (late ? 'They get a message now' : 'They get a message the day before at 3 pm') +
@@ -24463,7 +24501,9 @@ export const tdTest = {
   date: (d) => tdDateWords(d),
   setData(plan, today) {
     tdData = { plan: plan ?? null, today: today ?? null };
+    tdFetchedAt = Date.now(); // as after a fetch: the plan's `now` is now
   },
+  clockMinutes: () => tdhClockMinutes(),
   reset() {
     tdData = { plan: null, today: null };
     tdSel = null;
