@@ -133,7 +133,7 @@ function settingsHome(){
   if(state.memberships.length>1)bind('switch-company',async data=>{await api('switch-company',data);await refresh();});
   if(owner)bind('membership',async data=>{await api('memberships',data);await refresh();notify('Company membership added.');},['roles']);
   document.querySelector('#back-yard').onclick=()=>refresh();
-  const mat=document.querySelector('#acct-materials');if(mat)mat.onclick=async()=>{try{await refresh();const b=document.querySelector('.nav-button[data-view="MATERIALS"]');if(b){b.click();requestAnimationFrame(()=>document.getElementById('mi-import')?.scrollIntoView({block:'start'}));}}catch(error){notify(error.message);}};
+  const mat=document.querySelector('#acct-materials');if(mat)mat.onclick=async()=>{try{await refresh();const b=document.querySelector('.nav-button[data-view="MATERIALS"]')??document.querySelector('[data-view="MATERIALS"]');/* the board has no nav bar: its Office drawer holds the page buttons */if(b){b.click();requestAnimationFrame(()=>document.getElementById('mi-import')?.scrollIntoView({block:'start'}));}}catch(error){notify(error.message);}};
   document.querySelector('#logout').onclick=async()=>{try{stopOperations();await api('logout',{});bdClear();state=null;auth(false);notify('Signed out.');}catch(error){notify(error.message);}};
   if(owner)bind('company',async data=>{await api('company',data);await refresh();notify('Company settings saved.');},['systems']);
   if(team)bind('member',async data=>{await api('users',data);await refresh();notify('Team member added.');},['roles']);
