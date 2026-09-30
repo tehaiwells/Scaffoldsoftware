@@ -58,7 +58,7 @@ const sortKey=(a,b)=>GA_ROW_ORDER.indexOf(gaKind(a.p))-GA_ROW_ORDER.indexOf(gaKi
 // ---------------------------------------------------------------- the skeleton
 // Honest labels: this company is the Practice yard. The crew, trucks and deliveries on the board are simulated, so the top bar always says so,
 // quietly (no banner). A real-records mode is a later piece of work; until then every company is a Practice yard.
-const PRACTICE_CHIP='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice yard &middot; simulated</span>';
+const PRACTICE_CHIP='<span class="gm-practice" title="The crew, trucks and deliveries on this board are simulated. They are not a record of real deliveries.">Practice yard<span class="gm-practice-more"> &middot; simulated</span></span>';
 export function gmShell(ctx){resetFor(ctx);G.ctx=ctx;const s=ctx.state,company=esc(ctx.account?.company?.name??'Your company');
  const top='<header class="gm-top"><div class="gm-brand"><span class="gm-mark" aria-hidden="true">'+gaImg(GA_BUTTONS.stock(),'gm-mark-img')+'</span><b>'+company+'</b>'+PRACTICE_CHIP+'</div>'
   +'<div class="gm-top-right"><button type="button" class="gm-office-btn" data-gm-office aria-haspopup="dialog" aria-expanded="false">'+gaImg(GA_BUTTONS.office(),'gm-office-img')+'<span>Office</span></button></div></header>';

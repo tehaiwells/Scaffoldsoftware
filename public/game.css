@@ -273,7 +273,8 @@ body.in-game #app{padding:0;margin:0;max-width:none}
  :root{--gm-cell:40px}
  .gm-top{height:48px;padding:0 10px 0 12px}
  .gm-brand b{font-size:15px}
- .gm-practice{font-size:11px;padding:2px 7px}
+ .gm-practice{font-size:11px;padding:2px 7px}.gm-practice-more{display:none}
+ .gm-pops:has(.gm-pop-act){position:fixed;top:56px;z-index:50}
  .gm-office-btn{height:38px;padding:0 10px 0 4px}
  .gm-office-img{width:34px;height:26px}
  .gm-body{grid-template-columns:1fr;padding-bottom:calc(80px + env(safe-area-inset-bottom))}
