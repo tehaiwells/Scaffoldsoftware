@@ -23,7 +23,7 @@ The existing Node 24 / SQLite / browser JavaScript stack was retained, as permit
 
 ## Commands, tenancy and security
 
-A hashed session selects a validated company membership. Roles are additive within that membership; an owner is not a global administrator. Supervisors see assigned sites, including scoped exports. Simulated workers are resources, never login accounts.
+A hashed session selects a validated company membership. Roles are additive within that membership; an owner is not a global administrator. The server administrator (whoever created the first company, or SCAFFOLD_ADMIN_EMAIL) is a separate server-level role: file paths, whole-server backups and the This computer settings (Wi-Fi sharing, open registration). Memberships are made only by accepting an invitation; a removed membership keeps its row (removed_at) so the audit history stays intact. Supervisors see assigned sites, including scoped exports. Simulated workers are resources, never login accounts.
 
 Each command requires an idempotency key and fingerprints actor/action/input. BEGIN IMMEDIATE serializes SQLite writers. Versioned updates detect stale writes. Command result, balances, reservations and events commit together. Step savepoints preserve equipment custody after failed placement. The browser cannot set balances or complete a movement.
 
@@ -39,7 +39,7 @@ In-app notifications are created in the same committed transaction as their busi
 
 ## Deployment preparation
 
-Loopback binding, relative API paths, environment configuration, /health, structured scheduler errors and backup tooling exist. Before exposure: reviewed HTTPS proxy, secure cookies, explicit trusted-proxy scheme/host handling, registration/invite policy, recovery, durable rate limits, security review and operational monitoring. Do not trust arbitrary forwarded headers. No deployment or PostgreSQL environment was tested.
+Loopback binding, relative API paths, environment configuration, /health, structured scheduler errors and backup tooling exist. Before exposure: reviewed HTTPS proxy, secure cookies, explicit trusted-proxy scheme/host handling, recovery, durable rate limits, security review and operational monitoring. Do not trust arbitrary forwarded headers. No deployment or PostgreSQL environment was tested.
 
 SQLite-specific SQL is isolated behind database/repository boundaries, but PostgreSQL needs explicit adapters and migrations. A connection-string change alone is insufficient. The hybrid relational/JSON schema is documented in DATABASE_SCHEMA.md.
 

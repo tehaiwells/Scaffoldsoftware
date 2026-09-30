@@ -115,6 +115,13 @@ main:has(>.acct){max-width:1280px;margin:30px auto 56px}
 .team-id{display:grid;min-width:0}.team-id strong{font-size:13.5px;color:#1f3d2c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.team-id small{font-size:12px;color:#75816c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .team-roles{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}
 .you-tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:8px;background:#244a33;color:#e6f8b8;font-size:10px;font-weight:700;vertical-align:1px}
+/* Account: invitations waiting for a yes, the one-time link, removing someone, and the This computer switches */
+.team-remove{min-height:30px;padding:4px 11px;font-size:12px}
+.acct-sub{margin:16px 0 8px;font-size:12.5px;font-weight:700;color:#53684a}
+.invite-row{grid-template-columns:minmax(0,1fr) auto;padding-left:14px;background:#fbfcf8;border-style:dashed}
+.invite-link{margin-top:12px;padding:12px 14px;border-radius:12px;background:#f1f9e2;border:1px solid #cfe3a8;font-size:12.5px;color:#2c4a36}.invite-link p{margin:0 0 8px}
+.invite-copy{display:flex;gap:8px}.invite-copy input{flex:1;min-width:0;font-size:12px}
+.server-switch{display:flex;gap:12px;align-items:flex-start;margin:12px 0 0;padding:12px 14px;border:1px solid #e3e9da;border-radius:12px;background:#fafcf6;cursor:pointer;font-weight:600;color:#2c4a36}.server-switch input{flex:none;width:18px;min-height:18px;margin-top:2px;accent-color:#2f6b47}.server-switch span{display:grid;gap:3px}.server-switch small{font-size:12px;font-weight:400;color:#7b8575;line-height:1.45}
 /* Fold-out form cards inside a card */
 .acct-fold{margin-top:14px;border:1px solid #e3e9da;border-radius:14px;background:#fafcf6;padding:4px 16px}
 .acct-fold>summary{min-height:48px;cursor:pointer;flex-wrap:wrap;row-gap:0}
@@ -164,6 +171,7 @@ main:has(>.acct){max-width:1280px;margin:30px auto 56px}
  .acct .acct-card{padding:16px 14px;border-radius:16px}
  .acct-head{gap:11px}.acct-badge{width:48px;height:42px;border-radius:12px}.acct-head h2{font-size:17px}.acct-head p{font-size:12px}
  .team-row{grid-template-columns:auto minmax(0,1fr);gap:4px 10px}.team-roles{grid-column:2;justify-content:flex-start}.team-av{width:42px;height:42px;padding:4px 10px 2px;grid-row:span 2}
+ .invite-row{grid-template-columns:minmax(0,1fr)}.invite-row .team-roles{grid-column:1}
  .acct-fold{padding:2px 12px}.acct-fold[open]{padding-bottom:12px}
  #backups .backup-facts{grid-template-columns:minmax(0,1fr)}
  .acct-pointer{grid-template-columns:minmax(0,1fr)}.acct-pointer-art{display:none}.acct-pointer button{grid-column:1;width:100%}

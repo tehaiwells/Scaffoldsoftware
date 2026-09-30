@@ -1,11 +1,13 @@
 # Implemented schema and migrations
 
-SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migrations. Version 1 is the preserved baseline in database.js. Ordered 002_simulation.sql and 003_memberships.sql migrate existing data; schema_migrations records completion.
+SQLite uses foreign keys, WAL, a five-second busy timeout and transactional migrations. Version 1 is the preserved baseline in database.js. Ordered migrations 002-006 migrate existing data (006_invitations.sql is additive: memberships.removed_at, invitations, server_settings, server_admins); schema_migrations records completion.
 
 | Table | Purpose |
 |---|---|
 | companies / users | Company identity and global normalized login identity; salted password hash |
-| memberships | Composite company/user key; one identity may join several companies |
+| memberships | Composite company/user key; one identity may join several companies; removed_at marks someone removed (the row stays for the audit history) |
+| invitations | One-time invitation: company, email, roles, inviter, SHA-256 of the link token, expiry (7 days), accepted/cancelled |
+| server_settings / server_admins | Server-wide switches (open_registration, lan_sharing) and the server administrator(s) |
 | roles / permissions / role_permissions | Shared policy definitions |
 | user_roles | Roles scoped through a membership foreign key |
 | sessions | Token digest, user, active company and expiry |

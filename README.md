@@ -14,7 +14,11 @@ Open http://127.0.0.1:3000. Runtime needs no third-party packages; npm ci instal
 
 ## Desktop app setup
 
-`scripts/launch.cmd` starts the server in a minimised "Scaffold Yard server" window if it is not already running (shared on the local network with HOST=0.0.0.0) and opens the app in its own Edge app window. It works from wherever the repo is cloned, so each collaborator points their own desktop shortcut at their clone's `scripts\launch.cmd` (run minimised) for a one-click icon. Close the server window to stop it, for example after changing code in `src/`; static files under `public/` reload on refresh without a restart.
+`scripts/launch.cmd` starts the server in a minimised "Scaffold Yard server" window if it is not already running and opens the app in its own Edge app window. It works from wherever the repo is cloned, so each collaborator points their own desktop shortcut at their clone's `scripts\launch.cmd` (run minimised) for a one-click icon. Close the server window to stop it, for example after changing code in `src/`; static files under `public/` reload on refresh without a restart.
+
+The server listens on this PC only (127.0.0.1). To let phones on the same Wi-Fi open it, the person who runs the server switches on "Let phones on this Wi-Fi open Scaffold Yard" in Account > This computer; it takes effect at the next start. That traffic is plain HTTP (not encrypted), so leave it off unless you need it. Requests addressed to any other host name get 421, and a second start on the same port says "Scaffold Yard is already running" and exits.
+
+People join a company by invitation: an owner (or a manager, for managers and supervisors) makes a one-time link in Account, and the invitee opens it to set their own password (or confirm the one they already use) and say yes. Owners can remove someone from the company. New companies can sign up only on a new server, or when "Let new companies sign up here" is switched on in Account > This computer.
 
 ## Fast demonstration
 
@@ -65,7 +69,7 @@ GitHub runs the same checks automatically on every push and pull request to main
 
 ## Configuration and maintenance
 
-PORT, HOST, DATABASE_PATH, BACKUP_DIR and COOKIE_SECURE are shell environment variables. .env.example documents them; .env is not loaded automatically.
+PORT, HOST, DATABASE_PATH, BACKUP_DIR, COOKIE_SECURE, SCAFFOLD_HOSTS, SCAFFOLD_ADMIN_EMAIL and SCAFFOLD_OPEN_REGISTRATION are shell environment variables. .env.example documents them; .env is not loaded automatically.
 
 ### Where your data lives
 
