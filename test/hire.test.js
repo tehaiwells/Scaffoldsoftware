@@ -143,3 +143,9 @@ test('GET /api/hire and /api/hire.csv: the owner gets JSON and a CSV download, o
  const csv=await call('/api/hire.csv?site='+f.site.id+'&from=2026-08-01&to=2026-08-17',owner);assert.equal(csv.status,200);assert.match(csv.headers['Content-Type'],/text\/csv/);assert.match(csv.headers['Content-Disposition'],/attachment; filename="hire-statement-site-a-2026-08-01-to-2026-08-17\.csv"/);assert.ok(csv.body.startsWith('﻿"HIRE STATEMENT'));
  assert.equal((await call('/api/hire',sup)).status,403);assert.equal((await call('/api/hire.csv?site='+f.site.id,sup)).status,403);
 });
+
+test('the statement says the day the rates were recorded in local time, not the UTC day (Phase 0, D11)',t=>{const f=story(t);const P=f.products[0].id;
+ f.cmd('hireRate',{product:P,week:7000});const r=f.sim.repo.all('hireRate').find(x=>x.product===P);r.updatedAt='2026-08-09T22:30:00.000Z';f.sim.repo.save(r);// 8:30 am on Mon 10 Aug in Sydney
+ const s=f.sim.hire({site:f.site.id,from:'2026-08-01',to:'2026-08-17'}).statement;assert.equal(s.ratesAsOfDay,'2026-08-10');
+ const csv=f.sim.hireCSV({site:f.site.id,from:'2026-08-01',to:'2026-08-17'}).csv;assert.ok(csv.includes('(rates as recorded on 2026-08-10)'),'the Sydney day');assert.ok(!csv.includes('2026-08-09)'));
+});

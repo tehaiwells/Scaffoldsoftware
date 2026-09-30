@@ -234,7 +234,7 @@ export const hireMethods={
   return {site:{id:s.id,name:s.name,address:s.address??null,client:s.client??null,contact:s.contact??null,phone:s.phone??null,email:s.email??null,status:s.status},from,to,days:core.days,clamped,today,
    lines,daily:core.daily,pieceDays,subtotal,gst,total:subtotal+gst,missing,complete:missing===0,demo,startPieces:core.daily[0]??0,endPieces:core.daily.at(-1)??0,
    overrides:new Set(lines.filter(l=>l.rate.source==='site').map(l=>l.pid)).size,siteMinimums:new Set(lines.filter(l=>l.rate.minSource==='site'&&l.rate.source!=='site').map(l=>l.pid)).size,
-   rateChanges:new Set(lines.filter(l=>l.split).map(l=>l.pid)).size,ratesAsOf:asOf,onHireNow:to===today?core.daily.at(-1)??0:0};},
+   rateChanges:new Set(lines.filter(l=>l.split).map(l=>l.pid)).size,ratesAsOf:asOf,ratesAsOfDay:asOf?localDay(new Date(asOf)):null,onHireNow:to===today?core.daily.at(-1)??0:0};},
  // GET /api/hire.csv?site=&from=&to= : the statement as a spreadsheet (lines, totals, then pieces on hire per day).
  hireCSV(query={}){requireRule(query.site,'Choose a site for the statement.');const r=this.hire(query),s=r.statement,company=cached(this.db,'SELECT name FROM companies WHERE id=?').get(this.user.company_id)?.name??'';
   const cash=c=>c==null?'':hireMoney(c),basis=rate=>!rate.priced?'NO RATE SET':rate.rule==='both'?'whole weeks at the week rate, extra days at the day rate (at most a week)':rate.rule==='day'?'per day':'per week / 7';
@@ -242,7 +242,7 @@ export const hireMethods={
   const src=rate=>[rate.source??'',rate.minSource==='site'&&rate.source!=='site'?'site minimum':''].filter(Boolean).join(', ');
   const name=l=>l.product.name+(l.split?' ('+l.rateFrom+' to '+l.rateTo+')':'');
   const rows=[['HIRE STATEMENT'+(s.demo?' (DEMO ONLY - demonstration products, not a real statement)':'')],['Company',company],['Client',s.site.client??''],['Site',s.site.name],['Period',s.from+' to '+s.to+(s.clamped?' (to today)':''),s.days+' days'],['Amounts','AUD, ex GST unless marked'],
-   ['Rates','Each day is priced at the rate in force that day'+(s.ratesAsOf?' (rates as recorded on '+s.ratesAsOf.slice(0,10)+')':'')],...(s.missing?[['WARNING',s.missing+' material(s) have no hire rate and are NOT included in the totals']]:[]),[],
+   ['Rates','Each day is priced at the rate in force that day'+(s.ratesAsOfDay?' (rates as recorded on '+s.ratesAsOfDay+')':'')],...(s.missing?[['WARNING',s.missing+' material(s) have no hire rate and are NOT included in the totals']]:[]),[],
    ['Material','Reference','System','Pieces at start','Pieces at end','Piece-days','Rate basis','Rate (AUD ex GST)','Rate source','Amount (AUD ex GST)']];
   for(const l of s.lines){rows.push([name(l),l.product.reference??'',l.product.system??'',l.start,l.end,l.pieceDays,basis(l.rate),rateText(l.rate),src(l.rate),cash(l.amount)]);if(l.topUp)rows.push([l.product.name+' - minimum hire top-up ('+l.topUp.minDays+' days)',l.product.reference??'',l.product.system??'','','',l.topUp.pieceDays,basis(l.rate),rateText(l.rate),src(l.rate),cash(l.topUp.amount)]);}
   rows.push([],['Subtotal (ex GST)','','','','','','','','',cash(s.subtotal)],['GST '+GST_PERCENT+'%','','','','','','','','',cash(s.gst)],['Total (inc GST)','','','','','','','','',cash(s.total)],[],['Pieces on hire per day'],['Date',...s.lines.map(name),'All materials']);
