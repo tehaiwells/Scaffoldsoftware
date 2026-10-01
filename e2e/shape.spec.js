@@ -58,7 +58,7 @@ async function yardWithStock(p) {
   });
   await office(p, 'Yard (layout plan)').click();
   await expect(p.getByRole('heading', { level: 1, name: 'Yard layout', exact: true })).toBeVisible();
-  await expect(p.locator('.scene [data-select="' + stillage.id + '"]')).toBeVisible();
+  await expect(p.locator('.scene [data-select="' + stillage.id + '"]')).toBeVisible({ timeout: 20000 }); // it arrives with the next poll
   return { yard, stillage };
 }
 async function openEditor(p) {
