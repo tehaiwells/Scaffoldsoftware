@@ -5,7 +5,7 @@ process.env.TZ = 'Australia/Sydney';
 // drives, writing the chain's marks (kind ENGINE) on the item. An old-style Materials list is untouched by all of it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planFixture, D0 } from './helpers/plan-fixture.js';
+import { planFixture, D0, L } from './helpers/plan-fixture.js';
 import { addDays } from '../src/domain/schedule.js';
 import { chipOf } from '../public/plan-cal.js';
 import { chainOf, nextArrival, chainWords } from '../src/domain/gear-chain.js';
@@ -359,4 +359,17 @@ test('an old-style Materials list is untouched: no name, no chain, no READY ask;
   f.cmd('planCancel', { id: r.item.id });
   assert.deepEqual(calls, ['CANCELLED']);
   assert.equal(f.sim.repo.get(f.item(r.item.id).driverAsk, 'message').status, 'CALLED_OFF');
+});
+
+test('a list for today made before 6 am: the driver is asked at once, and every word says today, not tomorrow', (t) => {
+  const f = ready(t, { now: L(D0, '05:00') });
+  const r = list(f, { day: D0 });
+  f.pass();
+  const ask = f.sim.repo.get(f.item(r.item.id).driverAsk, 'message');
+  assert.equal(ask?.subject, 'READY', 'asked at once: the day before at 3 pm has passed and the day has not begun');
+  assert.match(
+    ask.text,
+    /^Hi Dave, T-01 for Bondi gear today at 7:00 am \(the yard → Bondi\)\. Confirm you'll be ready\? – /,
+  );
+  assert.equal(f.sim.planMsgView(ask).words, 'Ready for today?');
 });

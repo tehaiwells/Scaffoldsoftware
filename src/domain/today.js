@@ -129,7 +129,7 @@ export const todayMethods = {
                     ? 'Got it'
                     : "Today's run"
                   : m.subject === 'READY'
-                    ? 'Ready for tomorrow?'
+                    ? 'Ready for ' + (m.day === this.planToday(now) ? 'today' : 'tomorrow') + '?'
                     : 'Can you make it?';
     return {
       id: m.id,

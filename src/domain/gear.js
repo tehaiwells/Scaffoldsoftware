@@ -335,7 +335,7 @@ export const gearMethods = {
         truck +
         ' for ' +
         (it.name ?? 'the gear') +
-        ' tomorrow at ' +
+        (it.day === this.planToday() ? ' today at ' : ' tomorrow at ') + // a list for today, made before 6 am
         at +
         ' (' +
         ends.from.name +

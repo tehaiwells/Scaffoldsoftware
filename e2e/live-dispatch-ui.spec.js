@@ -107,9 +107,10 @@ test('Today as a dispatch tool: the phones answer and pack, the lanes follow, a 
   // ---- the phones: Dave says yes, Jo can't make it (Crook), Lee can, Kev packs with the counts
   const dPhone = await phoneOf(dave);
   await expect(dPhone.getByRole('heading', { name: 'My trips, Dave' })).toBeVisible({ timeout: 30000 });
-  // the truck's own ask first (past 3 pm the gear list's "ready for tomorrow?" ask is there too, ADR 0012)
-  await dPhone.getByRole('button', { name: 'I’ll be there', exact: true }).first().click();
-  await expect(dPhone.locator('.cr-askcard').first()).toContainText('You said yes, see you there', { timeout: 20000 });
+  // the truck's own ask (the gear list's "ready?" ask is there too, ADR 0012; an answered card sorts below the open ones)
+  const driveAsk = dPhone.locator('.cr-askcard', { hasText: 'can you drive' });
+  await driveAsk.getByRole('button', { name: 'I’ll be there', exact: true }).click();
+  await expect(driveAsk).toContainText('You said yes, see you there', { timeout: 20000 });
   const jPhone = await phoneOf(jo);
   await expect(jPhone.getByRole('heading', { name: 'My day, Jo' })).toBeVisible({ timeout: 30000 });
   await jPhone.getByRole('button', { name: 'Can’t make it', exact: true }).click();

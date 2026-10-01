@@ -479,7 +479,7 @@ export function askCard(a, v) {
       : a.subject === 'PACK'
         ? 'Pack a list for ' + (where || 'a site')
         : a.subject === 'READY'
-          ? 'Ready for tomorrow?' + (where ? ' ' + where : '')
+          ? 'Ready for ' + (a.day === v.me?.today ? 'today' : 'tomorrow') + '?' + (where ? ' ' + where : '')
           : a.subject === 'DAY'
             ? 'Today’s run' + (where ? ' · ' + where : '')
             : a.subject === 'ROSTER'
